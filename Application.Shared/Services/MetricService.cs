@@ -21,6 +21,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Owners)
                 .Include(m => m.Recipients)
                 .Include(m => m.Verifiers)
+                .Include(m => m.Dimensions)
                 .Where(m => m.CompanyId == companyId && m.IsActive)
                 .OrderBy(m => m.KPI)
                 .ToListAsync();
@@ -33,6 +34,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Owners)
                 .Include(m => m.Recipients)
                 .Include(m => m.Verifiers)
+                .Include(m => m.Dimensions)
                 .FirstOrDefaultAsync(m => m.Id == id && m.CompanyId == companyId && m.IsActive);
         }
 
@@ -55,6 +57,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Owners)
                 .Include(m => m.Recipients)
                 .Include(m => m.Verifiers)
+                .Include(m => m.Dimensions)
                 .FirstOrDefaultAsync(m => m.Id == id && m.CompanyId == companyId && m.IsActive);
 
             if (existingMetric == null)
@@ -130,6 +133,19 @@ namespace Application.Shared.Services
                 CreatedOn = DateTime.UtcNow
             }).ToList();
 
+            // Update Dimensions collection
+            _context.MetricDimensions.RemoveRange(existingMetric.Dimensions);
+            existingMetric.Dimensions = metric.Dimensions.Select(d => new MetricDimension
+            {
+                Name = d.Name,
+                Description = d.Description,
+                SourceTable = d.SourceTable,
+                SourceColumn = d.SourceColumn,
+                CompanyId = companyId,
+                CreatedBy = userId,
+                CreatedOn = DateTime.UtcNow
+            }).ToList();
+
             await _context.SaveChangesAsync();
 
             return existingMetric;
@@ -160,6 +176,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Owners)
                 .Include(m => m.Recipients)
                 .Include(m => m.Verifiers)
+                .Include(m => m.Dimensions)
                 .Where(m => m.CompanyId == companyId && m.Functions.Any(f => f.Function == function) && m.IsActive)
                 .OrderBy(m => m.KPI)
                 .ToListAsync();
@@ -174,6 +191,7 @@ namespace Application.Shared.Services
                     .Include(m => m.Owners)
                     .Include(m => m.Recipients)
                     .Include(m => m.Verifiers)
+                    .Include(m => m.Dimensions)
                     .Where(m => m.CompanyId == companyId && m.Perspective == perspectiveEnum && m.IsActive)
                     .OrderBy(m => m.KPI)
                     .ToListAsync();

@@ -169,37 +169,81 @@
         }
         else if (currentStep == 3)
         {
-            <!-- Step 4: Measurement & Data -->
+            <!-- Step 4: Dimensions -->
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
+                <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                    📐 Dimensions
+                </FluentLabel>
+                <FluentDivider Style="width: 100%;" />
+
+                <FluentLabel Color="Color.Neutral">
+                    Define the dimensions by which this metric can be broken down (e.g., by Store, by Item, by Region).
+                </FluentLabel>
+
+                @foreach (var dimension in Content.Dimensions.ToList())
+                {
+                    var currentDimension = dimension;
+                    <FluentCard Style="background: #f8fafc; padding: 12px;">
+                        <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.SpaceBetween">
+                                <FluentLabel>Dimension Entry</FluentLabel>
+                                <FluentButton IconEnd="@(new Icons.Regular.Size16.Delete())"
+                                              Appearance="Appearance.Lightweight"
+                                              OnClick="@(() => Content.Dimensions.Remove(currentDimension))" />
+                            </FluentStack>
+                            <FluentTextField @bind-Value="currentDimension.Name" Label="Dimension Name *" Required Style="width: 100%;"
+                                Placeholder="e.g., Store, Item, Region, Product Category" />
+                            <FluentTextArea @bind-Value="currentDimension.Description" Label="Description" Rows="2" Style="width: 100%;"
+                                Placeholder="Describe what this dimension represents" />
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                                <FluentTextField @bind-Value="currentDimension.SourceTable" Label="Source Table" Style="flex: 1;"
+                                    Placeholder="Table containing dimension data" />
+                                <FluentTextField @bind-Value="currentDimension.SourceColumn" Label="Source Column" Style="flex: 1;"
+                                    Placeholder="Column name for dimension values" />
+                            </FluentStack>
+                        </FluentStack>
+                    </FluentCard>
+                }
+                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())"
+                              Appearance="Appearance.Outline"
+                              OnClick="@AddDimension">
+                    Add Dimension
+                </FluentButton>
+            </FluentStack>
+        }
+        else if (currentStep == 4)
+        {
+            <!-- Step 5: Measurement & Data -->
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
                 <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
                     📊 Measurement & Data Management
                 </FluentLabel>
                 <FluentDivider Style="width: 100%;" />
-                
+
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
-                    <FluentTextField @bind-Value="Content.UnitOfMeasure" Label="Unit of Measure" Style="flex: 1;" 
+                    <FluentTextField @bind-Value="Content.UnitOfMeasure" Label="Unit of Measure" Style="flex: 1;"
                         Placeholder="%, $, units, etc." />
-                    <FluentSelect TOption="MetricPolarity" Items="@metricPolarities" @bind-SelectedOption="Content.Polarity" 
+                    <FluentSelect TOption="MetricPolarity" Items="@metricPolarities" @bind-SelectedOption="Content.Polarity"
                         Label="Polarity" Style="flex: 1;" />
                 </FluentStack>
-                
+
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
-                    <FluentSelect TOption="ReportingFrequency?" Items="@reportingFrequenciesNullable" @bind-SelectedOption="Content.DataCapture" 
+                    <FluentSelect TOption="ReportingFrequency?" Items="@reportingFrequenciesNullable" @bind-SelectedOption="Content.DataCapture"
                         Label="Data Capture Frequency" Style="flex: 1;" />
-                    <FluentSelect TOption="ReportingFrequency?" Items="@reportingFrequenciesNullable" @bind-SelectedOption="Content.DataReporting" 
+                    <FluentSelect TOption="ReportingFrequency?" Items="@reportingFrequenciesNullable" @bind-SelectedOption="Content.DataReporting"
                         Label="Data Reporting Frequency" Style="flex: 1;" />
                 </FluentStack>
-                
+
                 <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
-                    <FluentTextField @bind-Value="Content.DataSource" Label="Data Source" Style="flex: 1;" 
+                    <FluentTextField @bind-Value="Content.DataSource" Label="Data Source" Style="flex: 1;"
                         Placeholder="Where does the data come from?" />
-                    <FluentSelect TOption="DataIntegrityLevel?" Items="@dataIntegrityLevelsNullable" @bind-SelectedOption="Content.DataIntegrity" 
+                    <FluentSelect TOption="DataIntegrityLevel?" Items="@dataIntegrityLevelsNullable" @bind-SelectedOption="Content.DataIntegrity"
                         Label="Data Integrity" Style="flex: 1;" />
                 </FluentStack>
-                
+
                 <FluentCheckbox @bind-Value="Content.DataReady" Label="Data Ready" />
-                
-                <FluentTextField @bind-Value="Content.Report" Label="Report" Style="width: 100%;" 
+
+                <FluentTextField @bind-Value="Content.Report" Label="Report" Style="width: 100%;"
                     Placeholder="Report name or location" />
             </FluentStack>
         }
@@ -242,7 +286,7 @@
     public FluentDialog Dialog { get; set; } = default!;
 
     private int currentStep = 0;
-    private int totalSteps = 4;
+    private int totalSteps = 5;
 
     // Enum arrays for dropdowns
     private MetricType[] metricTypes = Enum.GetValues<MetricType>();
@@ -298,5 +342,10 @@
     private void AddVerifier()
     {
         Content.Verifiers.Add(new MetricVerifier { VerifierName = string.Empty });
+    }
+
+    private void AddDimension()
+    {
+        Content.Dimensions.Add(new MetricDimension { Name = string.Empty });
     }
 }

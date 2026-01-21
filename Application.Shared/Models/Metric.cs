@@ -12,6 +12,7 @@ public class Metric : BaseModel
     public ICollection<MetricOwner> Owners { get; set; } = new List<MetricOwner>();
     public ICollection<MetricRecipient> Recipients { get; set; } = new List<MetricRecipient>();
     public ICollection<MetricVerifier> Verifiers { get; set; } = new List<MetricVerifier>();
+    public ICollection<MetricDimension> Dimensions { get; set; } = new List<MetricDimension>();
 
     [MaxLength(200)]
     public string? ContactEmail { get; set; }

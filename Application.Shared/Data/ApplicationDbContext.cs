@@ -100,6 +100,8 @@ namespace Application.Shared.Data
 
         public DbSet<MetricVerifier> MetricVerifiers { get; set; }
 
+        public DbSet<MetricDimension> MetricDimensions { get; set; }
+
 
 
         /// <summary>

@@ -110,7 +110,7 @@
                     ✅ KPI Verifiers
                 </FluentLabel>
                 <FluentDivider Style="width: 100%;" />
-                
+
                 @if (Content.Verifiers.Any())
                 {
                     <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
@@ -126,6 +126,56 @@
                 else
                 {
                     <FluentLabel Color="Color.Neutral">No verifiers defined</FluentLabel>
+                }
+            </FluentStack>
+        </FluentCard>
+
+        <!-- Dimensions Section -->
+        <FluentCard Style="box-shadow: none;">
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                    📐 Dimensions
+                </FluentLabel>
+                <FluentDivider Style="width: 100%;" />
+
+                @if (Content.Dimensions.Any())
+                {
+                    @foreach (var dimension in Content.Dimensions)
+                    {
+                        <FluentCard Style="background: #f8fafc; padding: 12px; box-shadow: none;">
+                            <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Name:</FluentLabel>
+                                    <FluentLabel>@dimension.Name</FluentLabel>
+                                </FluentStack>
+                                @if (!string.IsNullOrEmpty(dimension.Description))
+                                {
+                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Description:</FluentLabel>
+                                        <FluentLabel>@dimension.Description</FluentLabel>
+                                    </FluentStack>
+                                }
+                                @if (!string.IsNullOrEmpty(dimension.SourceTable))
+                                {
+                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Source Table:</FluentLabel>
+                                        <FluentLabel>@dimension.SourceTable</FluentLabel>
+                                    </FluentStack>
+                                }
+                                @if (!string.IsNullOrEmpty(dimension.SourceColumn))
+                                {
+                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Source Column:</FluentLabel>
+                                        <FluentLabel>@dimension.SourceColumn</FluentLabel>
+                                    </FluentStack>
+                                }
+                            </FluentStack>
+                        </FluentCard>
+                    }
+                }
+                else
+                {
+                    <FluentLabel Color="Color.Neutral">No dimensions defined</FluentLabel>
                 }
             </FluentStack>
         </FluentCard>
