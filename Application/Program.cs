@@ -165,6 +165,11 @@ builder.Services.AddScoped<ICommentService, CommentService>();
 builder.Services.AddScoped<IUserPreferencesService, UserPreferencesService>();
 builder.Services.AddScoped<IUserSearchService, UserSearchService>();
 
+// Metrics Services
+builder.Services.AddScoped<IMetricService, MetricService>();
+builder.Services.AddScoped<IMetricTargetService, MetricTargetService>();
+builder.Services.AddScoped<IMetricValueService, MetricValueService>();
+
 // Add Data Warehouse Service
 builder.Services.AddScoped<DataWarehouseService>();
 

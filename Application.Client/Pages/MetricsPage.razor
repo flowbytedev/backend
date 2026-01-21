@@ -1,0 +1,440 @@
+@page "/metrics"
+@using Application.Shared.Models
+@using Application.Shared.Enums
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Authorization
+@inject HttpClient HttpClient
+@inject NavigationManager NavigationManager
+@inject IToastService ToastService
+@inject IDialogService DialogService
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize]
+
+<PageTitle>Metrics Management</PageTitle>
+
+<div class="metrics-container" style="height: 88vh; display: flex; flex-direction: column; background: #f8fafc;">
+    
+    <!-- Header -->
+    <div class="header" style="background: white; border-bottom: 1px solid #e5e7eb; padding: 16px 24px; flex-shrink: 0;">
+        <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.SpaceBetween" VerticalAlignment="VerticalAlignment.Center">
+            <div>
+                <h1 style="margin: 0; font-size: 1.5rem; font-weight: 600; color: #1f2937;">
+                    Metrics Management
+                </h1>
+                <p style="margin: 4px 0 0 0; color: #6b7280; font-size: 0.875rem;">
+                    Manage your key performance indicators and metrics
+                </p>
+            </div>
+
+            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="10">
+                <FluentButton IconStart="@(new Icons.Regular.Size16.ArrowClockwise())"
+                              OnClick="@RefreshData"
+                              Disabled="@IsLoading"
+                              Appearance="Appearance.Outline">
+                    Refresh
+                </FluentButton>
+                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())"
+                              OnClick="@OpenCreateDialog"
+                              Disabled="@IsLoading"
+                              Appearance="Appearance.Accent">
+                    Add Metric
+                </FluentButton>
+            </FluentStack>
+        </FluentStack>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content" style="flex: 1; padding: 24px; overflow: hidden;">
+        @if (IsLoading && !Metrics.Any())
+        {
+            <div style="display: flex; justify-content: center; align-items: center; height: 100%; background: white; border-radius: 8px;">
+                <div style="text-align: center;">
+                    <FluentProgressRing style="margin-bottom: 16px;" />
+                    <p style="color: #6b7280; margin: 0;">Loading metrics...</p>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div style="background: white; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; height: 100%;">
+                <FluentDataGrid @ref="DataGrid"
+                                Items="@FilteredMetrics"
+                                ResizableColumns="true"
+                                ShowHover="true"
+                                Pagination="@Pagination"
+                                RowSize="DataGridRowSize.Medium"
+                                TGridItem="Metric"
+                                GridTemplateColumns="0.8fr 1.2fr 0.8fr 0.6fr 0.6fr 0.6fr 0.5fr 0.3fr"
+                                Style="height: 100%; overflow: auto;">
+                    
+                    <PropertyColumn Property="@(m => m.KPI)" Title="KPI" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(FilterKPI)">
+                        <ColumnOptions>
+                            <div class="search-box">
+                                <FluentSearch type="search" @bind-Value="@FilterKPI" @bind-Value:after="@ApplyFilters" Placeholder="Filter by KPI..." />
+                            </div>
+                        </ColumnOptions>
+                    </PropertyColumn>
+
+                    <PropertyColumn Property="@(m => m.KeyPerformanceArea)" Title="KPA" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(FilterKPA)">
+                        <ColumnOptions>
+                            <div class="search-box">
+                                <FluentSearch type="search" @bind-Value="@FilterKPA" @bind-Value:after="@ApplyFilters" Placeholder="Filter by KPA..." />
+                            </div>
+                        </ColumnOptions>
+                    </PropertyColumn>
+
+                    <PropertyColumn Property="@(m => m.Type)" Title="Type" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(FilterType)">
+                        <ColumnOptions>
+                            <div class="search-box">
+                                <FluentSearch type="search" @bind-Value="@FilterType" @bind-Value:after="@ApplyFilters" Placeholder="Filter by Type..." />
+                            </div>
+                        </ColumnOptions>
+                    </PropertyColumn>
+
+                    <PropertyColumn Property="@(m => m.Perspective)" Title="Perspective" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(FilterPerspective)">
+                        <ColumnOptions>
+                            <div class="search-box">
+                                <FluentSearch type="search" @bind-Value="@FilterPerspective" @bind-Value:after="@ApplyFilters" Placeholder="Filter by Perspective..." />
+                            </div>
+                        </ColumnOptions>
+                    </PropertyColumn>
+
+                    <PropertyColumn Property="@(m => m.KPILevel)" Title="Level" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(FilterLevel)">
+                        <ColumnOptions>
+                            <div class="search-box">
+                                <FluentSearch type="search" @bind-Value="@FilterLevel" @bind-Value:after="@ApplyFilters" Placeholder="Filter by Level..." />
+                            </div>
+                        </ColumnOptions>
+                    </PropertyColumn>
+
+                    <TemplateColumn Title="Data Ready" Sortable="true" Filtered="!string.IsNullOrEmpty(FilterDataReady)">
+                        <ColumnOptions>
+                            <div class="search-box">
+                                <FluentSelect TOption="string"
+                                            @bind-Value="@FilterDataReady"
+                                            @bind-Value:after="@ApplyFilters"
+                                            Style="width: 100%;">
+                                    <FluentOption Value="">All</FluentOption>
+                                    <FluentOption Value="true">Ready</FluentOption>
+                                    <FluentOption Value="false">Not Ready</FluentOption>
+                                </FluentSelect>
+                            </div>
+                        </ColumnOptions>
+                        <ChildContent>
+                            @if (context.DataReady)
+                            {
+                                <FluentBadge Appearance="Appearance.Accent">Ready</FluentBadge>
+                            }
+                            else
+                            {
+                                <FluentBadge Appearance="Appearance.Neutral">Not Ready</FluentBadge>
+                            }
+                        </ChildContent>
+                    </TemplateColumn>
+
+                    <TemplateColumn Title="Actions" Align="@Align.End">
+                        <ChildContent>
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                <FluentButton IconStart="@(new Icons.Regular.Size16.Info())"
+                                              OnClick="@(() => OpenViewDetailsDialog(context))"
+                                              Appearance="Appearance.Stealth"
+                                              Title="View Details">
+                                </FluentButton>
+                                <FluentButton IconStart="@(new Icons.Regular.Size16.Edit())"
+                                              OnClick="@(() => OpenEditDialog(context))"
+                                              Appearance="Appearance.Stealth"
+                                              Title="Edit">
+                                </FluentButton>
+                                <FluentButton IconStart="@(new Icons.Regular.Size16.Delete())"
+                                              OnClick="@(() => DeleteMetric(context))"
+                                              Appearance="Appearance.Stealth"
+                                              Title="Delete"
+                                              style="color: #ef4444;">
+                                </FluentButton>
+                            </FluentStack>
+                        </ChildContent>
+                    </TemplateColumn>
+                </FluentDataGrid>
+
+                <div style="padding: 16px; border-top: 1px solid #e5e7eb;">
+                    <FluentPaginator State="@Pagination">
+                        <SummaryTemplate>
+                            Showing <strong>@((Pagination.CurrentPageIndex * Pagination.ItemsPerPage) + 1)</strong> to 
+                            <strong>@(Math.Min((Pagination.CurrentPageIndex + 1) * Pagination.ItemsPerPage, Pagination.TotalItemCount ?? 0))</strong> of 
+                            <strong>@(Pagination.TotalItemCount ?? 0)</strong> metrics
+                        </SummaryTemplate>
+                    </FluentPaginator>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private FluentDataGrid<Metric>? DataGrid;
+    private List<Metric> Metrics = new();
+    private IQueryable<Metric>? FilteredMetrics { get; set; } //=> Metrics.AsQueryable();
+    private PaginationState Pagination = new PaginationState { ItemsPerPage = 20 };
+    
+    private bool IsLoading = false;
+    private string? CompanyId;
+    
+    // Filters
+    private string FilterFunction = string.Empty;
+    private string FilterKPI = string.Empty;
+    private string FilterKPA = string.Empty;
+    private string FilterType = string.Empty;
+    private string FilterPerspective = string.Empty;
+    private string FilterLevel = string.Empty;
+    private string FilterDataReady = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCompanyId();
+        await LoadMetrics();
+    }
+
+    private async Task LoadCompanyId()
+    {
+        try
+        {
+            var response = await HttpClient.GetFromJsonAsync<List<Company>>("api/companies");
+            if (response?.Any() == true)
+            {
+                CompanyId = response.First().Id;
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error loading company: {ex.Message}");
+        }
+    }
+
+    private async Task LoadMetrics()
+    {
+        if (string.IsNullOrEmpty(CompanyId))
+        {
+            return;
+        }
+
+        IsLoading = true;
+        try
+        {
+            HttpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+            HttpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId);
+
+            var response = await HttpClient.GetFromJsonAsync<List<Metric>>("api/metrics");
+            if (response != null)
+            {
+                Metrics = response;
+                FilteredMetrics = Metrics.AsQueryable();
+                ApplyFilters();
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error loading metrics: {ex.Message}");
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private void ApplyFilters()
+    {
+        var filtered = Metrics.AsQueryable();
+
+        if (!string.IsNullOrWhiteSpace(FilterKPI))
+        {
+            filtered = filtered.Where(m => m.KPI.Contains(FilterKPI, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(FilterKPA))
+        {
+            filtered = filtered.Where(m => m.KeyPerformanceArea.Contains(FilterKPA, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(FilterType))
+        {
+            filtered = filtered.Where(m => m.Type.ToString().Contains(FilterType, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(FilterPerspective))
+        {
+            filtered = filtered.Where(m => m.Perspective.ToString().Contains(FilterPerspective, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(FilterLevel))
+        {
+            filtered = filtered.Where(m => m.KPILevel.ToString().Contains(FilterLevel, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrEmpty(FilterDataReady))
+        {
+            if (bool.TryParse(FilterDataReady, out bool dataReadyValue))
+            {
+                filtered = filtered.Where(m => m.DataReady == dataReadyValue);
+            }
+        }
+
+        FilteredMetrics = filtered;
+        StateHasChanged();
+    }
+
+    private async Task RefreshData()
+    {
+        await LoadMetrics();
+    }
+
+    private async Task OpenCreateDialog()
+    {
+        var dialog = await DialogService.ShowDialogAsync<MetricFormWizard>(new Metric { CompanyId = CompanyId }, new DialogParameters
+        {
+            Title = "Create New Metric",
+            PrimaryAction = "Create",
+            SecondaryAction = "Cancel",
+            Width = "900px",
+            Height = "auto",
+            TrapFocus = true,
+            Modal = true
+        });
+
+        var result = await dialog.Result;
+        if (!result.Cancelled && result.Data is Metric metric)
+        {
+            await CreateMetric(metric);
+        }
+    }
+
+    private async Task OpenViewDetailsDialog(Metric metric)
+    {
+        await DialogService.ShowPanelAsync<MetricDetailsPanel>(metric, new DialogParameters
+        {
+            Title = $"Metric Details: {metric.KPI}",
+            PrimaryAction = null,
+            SecondaryAction = "Close",
+            Width = "700px",
+            Height = "auto",
+            Modal = true,
+            ShowDismiss = true
+        });
+    }
+
+    private async Task OpenEditDialog(Metric metric)
+    {
+        var dialog = await DialogService.ShowDialogAsync<MetricFormWizard>(metric, new DialogParameters
+        {
+            Title = $"Edit Metric: {metric.KPI}",
+            PrimaryAction = "Update",
+            SecondaryAction = "Cancel",
+            Width = "900px",
+            Height = "auto",
+            TrapFocus = true,
+            Modal = true
+        });
+
+        var result = await dialog.Result;
+        if (!result.Cancelled && result.Data is Metric updatedMetric)
+        {
+            await UpdateMetric(updatedMetric);
+        }
+    }
+
+    private async Task CreateMetric(Metric metric)
+    {
+        IsLoading = true;
+        try
+        {
+            HttpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+            HttpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId!);
+
+            var response = await HttpClient.PostAsJsonAsync("api/metrics", metric);
+            if (response.IsSuccessStatusCode)
+            {
+                ToastService.ShowSuccess("Metric created successfully");
+                await LoadMetrics();
+            }
+            else
+            {
+                ToastService.ShowError("Failed to create metric");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error creating metric: {ex.Message}");
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task UpdateMetric(Metric metric)
+    {
+        IsLoading = true;
+        try
+        {
+            HttpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+            HttpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId!);
+
+            var response = await HttpClient.PutAsJsonAsync($"api/metrics/{metric.Id}", metric);
+            if (response.IsSuccessStatusCode)
+            {
+                ToastService.ShowSuccess("Metric updated successfully");
+                await LoadMetrics();
+            }
+            else
+            {
+                ToastService.ShowError("Failed to update metric");
+            }
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Error updating metric: {ex.Message}");
+        }
+        finally
+        {
+            IsLoading = false;
+        }
+    }
+
+    private async Task DeleteMetric(Metric metric)
+    {
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Are you sure you want to delete the metric '{metric.KPI}'?",
+            "Delete Metric",
+            "Delete",
+            "Cancel");
+
+        var result = await dialog.Result;
+        if (!result.Cancelled)
+        {
+            IsLoading = true;
+            try
+            {
+                HttpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+                HttpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId!);
+
+                var response = await HttpClient.DeleteAsync($"api/metrics/{metric.Id}");
+                if (response.IsSuccessStatusCode)
+                {
+                    ToastService.ShowSuccess("Metric deleted successfully");
+                    await LoadMetrics();
+                }
+                else
+                {
+                    ToastService.ShowError("Failed to delete metric");
+                }
+            }
+            catch (Exception ex)
+            {
+                ToastService.ShowError($"Error deleting metric: {ex.Message}");
+            }
+            finally
+            {
+                IsLoading = false;
+            }
+        }
+    }
+}

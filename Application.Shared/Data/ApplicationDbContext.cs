@@ -85,6 +85,21 @@ namespace Application.Shared.Data
         
         public DbSet<SalesData> SalesData { get; set; }
 
+        // METRICS
+        public DbSet<Metric> Metrics { get; set; }
+
+        public DbSet<MetricValue> MetricValues { get; set; }
+
+        public DbSet<MetricTarget> MetricTargets { get; set; }
+
+        public DbSet<MetricFunction> MetricFunctions { get; set; }
+
+        public DbSet<MetricOwner> MetricOwners { get; set; }
+
+        public DbSet<MetricRecipient> MetricRecipients { get; set; }
+
+        public DbSet<MetricVerifier> MetricVerifiers { get; set; }
+
 
 
         /// <summary>

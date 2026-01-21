@@ -22,13 +22,6 @@ public class EmailNotificationService : Application.Shared.Services.Data.IEmailN
             var subject = $"Dataset '{datasetName}' has been shared with you";
             var body = GenerateDatasetSharedEmailBody(datasetName, sharedByUserName, userType);
             
-            // Mock email sending - log to console
-            Console.WriteLine($"[MOCK EMAIL] Sending dataset shared notification:");
-            Console.WriteLine($"To: {recipientEmail}");
-            Console.WriteLine($"Subject: {subject}");
-            Console.WriteLine($"Body: {body}");
-            Console.WriteLine("--------------------------------------------------");
-            
             // Uncomment the line below to actually send emails when EmailHelper is configured
             // _emailHelper.SendEmail(recipientEmail, subject, body);
             

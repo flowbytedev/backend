@@ -43,6 +43,12 @@
                 </Authorized>
             </AuthorizeView>
 
+            <AuthorizeView Roles="@($"{companyId}_ADMIN, {companyId}_DATA")">
+                <Authorized>
+                    <FluentNavLink Href="@($"metrics{queryParameter}")" Icon="@(new Icons.Regular.Size20.ChartMultiple())" IconColor="Color.Accent">Metrics</FluentNavLink>
+                </Authorized>
+            </AuthorizeView>
+
             <AuthorizeView Roles="@($"{companyId}_ADMIN")">
                 <Authorized>
                     <FluentNavGroup Title="Admin" Tooltip="Admin" Icon="@(new Icons.Regular.Size24.PersonAccounts())">

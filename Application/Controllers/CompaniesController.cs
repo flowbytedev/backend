@@ -35,8 +35,6 @@ namespace Application.Controllers
             // get userId from claim
             var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-            Console.WriteLine($"----------------------------------- {userId}");
-
             if (string.IsNullOrEmpty(userId))
             {
                 return BadRequest("User ID is required in headers");

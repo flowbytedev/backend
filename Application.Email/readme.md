@@ -16,6 +16,7 @@ Then, run the development server:
 
 ```sh
 npm run dev
+npm run dev -- --port 5200 --hostname 0.0.0.0
 # or
 yarn dev
 ```

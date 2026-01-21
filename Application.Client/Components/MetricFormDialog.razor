@@ -1,0 +1,210 @@
+@using Application.Shared.Models
+@using Application.Shared.Enums
+@using Microsoft.FluentUI.AspNetCore.Components
+@implements IDialogContentComponent<Metric>
+
+<FluentDialogBody>
+    <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
+        
+        <!-- Function Information -->
+        <FluentCard>
+            <h3 style="margin: 0 0 12px 0; font-size: 1rem; font-weight: 600;">Function Information</h3>
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                @foreach (var func in Content.Functions.ToList())
+                {
+                    var currentFunc = func;
+                    <FluentCard Style="background: #f8fafc; padding: 12px;">
+                        <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.SpaceBetween">
+                                <FluentLabel Weight="FontWeight.Bold">Function Entry</FluentLabel>
+                                <FluentButton IconEnd="@(new Icons.Regular.Size16.Delete())" 
+                                              Appearance="Appearance.Lightweight"
+                                              OnClick="@(() => Content.Functions.Remove(currentFunc))" />
+                            </FluentStack>
+                            <FluentTextField @bind-Value="currentFunc.Function" Label="Function" Required Style="width: 100%;" />
+                            <FluentTextField @bind-Value="currentFunc.SubFunction" Label="Sub-Function" Style="width: 100%;" />
+                            <FluentTextField @bind-Value="currentFunc.FunctionHead" Label="Function Head" Style="width: 100%;" />
+                        </FluentStack>
+                    </FluentCard>
+                }
+                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())" 
+                              Appearance="Appearance.Outline"
+                              OnClick="@AddFunction">
+                    Add Function
+                </FluentButton>
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                    <FluentTextField @bind-Value="Content.ContactEmail" Label="Contact Email" Style="flex: 1;" />
+                    <FluentTextField @bind-Value="Content.ContactNumber" Label="Contact Number" Style="flex: 1;" />
+                </FluentStack>
+            </FluentStack>
+        </FluentCard>
+
+        <!-- KPI Details -->
+        <FluentCard>
+            <h3 style="margin: 0 0 12px 0; font-size: 1rem; font-weight: 600;">KPI Details</h3>
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentTextField @bind-Value="Content.KeyPerformanceArea" Label="Key Performance Area" Required Style="width: 100%;" />
+                <FluentTextField @bind-Value="Content.KPI" Label="KPI Name" Required Style="width: 100%;" />
+                <FluentTextArea @bind-Value="Content.Formula" Label="Formula" Rows="3" Style="width: 100%;" />
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                    <FluentSelect TOption="MetricType" Items="@metricTypes" @bind-SelectedOption="Content.Type" Label="Type" Style="flex: 1;" />
+                    <FluentSelect TOption="MetricPerspective" Items="@metricPerspectives" @bind-SelectedOption="Content.Perspective" Label="Perspective" Style="flex: 1;" />
+                    <FluentSelect TOption="MetricLevel" Items="@metricLevels" @bind-SelectedOption="Content.KPILevel" Label="KPI Level" Style="flex: 1;" />
+                </FluentStack>
+            </FluentStack>
+        </FluentCard>
+
+        <!-- Target & Ownership -->
+        <FluentCard>
+            <h3 style="margin: 0 0 12px 0; font-size: 1rem; font-weight: 600;">Target & Ownership</h3>
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentTextField @bind-Value="Content.Target" Label="Target" Style="width: 100%;" />
+                
+                <!-- Recipients -->
+                <FluentLabel Weight="FontWeight.Bold">Intended Recipients</FluentLabel>
+                @foreach (var recipient in Content.Recipients.ToList())
+                {
+                    var currentRecipient = recipient;
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                        <FluentTextField @bind-Value="currentRecipient.RecipientName" Style="flex: 1;" />
+                        <FluentButton IconEnd="@(new Icons.Regular.Size16.Delete())" 
+                                      Appearance="Appearance.Lightweight"
+                                      OnClick="@(() => Content.Recipients.Remove(currentRecipient))" />
+                    </FluentStack>
+                }
+                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())" 
+                              Appearance="Appearance.Outline"
+                              OnClick="@AddRecipient">
+                    Add Recipient
+                </FluentButton>
+
+                <!-- Owners -->
+                <FluentLabel Weight="FontWeight.Bold">KPI Owners</FluentLabel>
+                @foreach (var owner in Content.Owners.ToList())
+                {
+                    var currentOwner = owner;
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                        <FluentTextField @bind-Value="currentOwner.OwnerName" Style="flex: 1;" />
+                        <FluentButton IconEnd="@(new Icons.Regular.Size16.Delete())" 
+                                      Appearance="Appearance.Lightweight"
+                                      OnClick="@(() => Content.Owners.Remove(currentOwner))" />
+                    </FluentStack>
+                }
+                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())" 
+                              Appearance="Appearance.Outline"
+                              OnClick="@AddOwner">
+                    Add Owner
+                </FluentButton>
+
+                <!-- Verifiers -->
+                <FluentLabel Weight="FontWeight.Bold">KPI Verifiers</FluentLabel>
+                @foreach (var verifier in Content.Verifiers.ToList())
+                {
+                    var currentVerifier = verifier;
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                        <FluentTextField @bind-Value="currentVerifier.VerifierName" Style="flex: 1;" />
+                        <FluentButton IconEnd="@(new Icons.Regular.Size16.Delete())" 
+                                      Appearance="Appearance.Lightweight"
+                                      OnClick="@(() => Content.Verifiers.Remove(currentVerifier))" />
+                    </FluentStack>
+                }
+                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())" 
+                              Appearance="Appearance.Outline"
+                              OnClick="@AddVerifier">
+                    Add Verifier
+                </FluentButton>
+            </FluentStack>
+        </FluentCard>
+
+        <!-- Data Management -->
+        <FluentCard>
+            <h3 style="margin: 0 0 12px 0; font-size: 1rem; font-weight: 600;">Data Management</h3>
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                    <FluentTextField @bind-Value="Content.UnitOfMeasure" Label="Unit of Measure" Style="flex: 1;" />
+                    <FluentSelect TOption="MetricPolarity" Items="@metricPolarities" @bind-SelectedOption="Content.Polarity" Label="Polarity" Style="flex: 1;" />
+                </FluentStack>
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                    <FluentSelect TOption="ReportingFrequency?" Items="@reportingFrequenciesNullable" @bind-SelectedOption="Content.DataCapture" Label="Data Capture Frequency" Style="flex: 1;" />
+                    <FluentSelect TOption="ReportingFrequency?" Items="@reportingFrequenciesNullable" @bind-SelectedOption="Content.DataReporting" Label="Data Reporting Frequency" Style="flex: 1;" />
+                </FluentStack>
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                    <FluentTextField @bind-Value="Content.DataSource" Label="Data Source" Style="flex: 1;" />
+                    <FluentSelect TOption="DataIntegrityLevel?" Items="@dataIntegrityLevelsNullable" @bind-SelectedOption="Content.DataIntegrity" Label="Data Integrity" Style="flex: 1;" />
+                </FluentStack>
+                <FluentTextField @bind-Value="Content.Report" Label="Report" Style="width: 100%;" />
+                <FluentCheckbox @bind-Value="Content.DataReady" Label="Data Ready" />
+            </FluentStack>
+        </FluentCard>
+
+        <!-- Additional Information -->
+        <FluentCard>
+            <h3 style="margin: 0 0 12px 0; font-size: 1rem; font-weight: 600;">Additional Information</h3>
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentTextArea @bind-Value="Content.KPIControls" Label="KPI Controls" Rows="3" Style="width: 100%;" />
+                <FluentTextArea @bind-Value="Content.UnintendedConsequences" Label="Unintended Consequences" Rows="2" Style="width: 100%;" />
+                <FluentTextArea @bind-Value="Content.MitigatingFactors" Label="Mitigating Factors" Rows="2" Style="width: 100%;" />
+                <FluentTextArea @bind-Value="Content.Comment" Label="Comments" Rows="3" Style="width: 100%;" />
+            </FluentStack>
+        </FluentCard>
+
+    </FluentStack>
+</FluentDialogBody>
+
+<FluentDialogFooter>
+    <FluentButton Appearance="Appearance.Accent" OnClick="@SaveAsync">
+        @Dialog.Instance.Parameters.PrimaryAction
+    </FluentButton>
+    <FluentButton Appearance="Appearance.Neutral" OnClick="@CancelAsync">
+        @Dialog.Instance.Parameters.SecondaryAction
+    </FluentButton>
+</FluentDialogFooter>
+
+@code {
+    [Parameter]
+    public Metric Content { get; set; } = new();
+
+    [CascadingParameter]
+    public FluentDialog Dialog { get; set; } = default!;
+
+    private MetricType[] metricTypes = Enum.GetValues<MetricType>();
+    private MetricPerspective[] metricPerspectives = Enum.GetValues<MetricPerspective>();
+    private MetricLevel[] metricLevels = Enum.GetValues<MetricLevel>();
+    private MetricPolarity[] metricPolarities = Enum.GetValues<MetricPolarity>();
+    private ReportingFrequency[] reportingFrequencies = Enum.GetValues<ReportingFrequency>();
+    private DataIntegrityLevel[] dataIntegrityLevels = Enum.GetValues<DataIntegrityLevel>();
+
+    // Nullable arrays - include null as first option
+    private ReportingFrequency?[] reportingFrequenciesNullable = new ReportingFrequency?[] { null }.Concat(Enum.GetValues<ReportingFrequency>().Cast<ReportingFrequency?>()).ToArray();
+    private DataIntegrityLevel?[] dataIntegrityLevelsNullable = new DataIntegrityLevel?[] { null }.Concat(Enum.GetValues<DataIntegrityLevel>().Cast<DataIntegrityLevel?>()).ToArray();
+
+    private async Task SaveAsync()
+    {
+        await Dialog.CloseAsync(Content);
+    }
+
+    private async Task CancelAsync()
+    {
+        await Dialog.CancelAsync();
+    }
+
+    private void AddFunction()
+    {
+        Content.Functions.Add(new MetricFunction { Function = string.Empty });
+    }
+
+    private void AddOwner()
+    {
+        Content.Owners.Add(new MetricOwner { OwnerName = string.Empty });
+    }
+
+    private void AddRecipient()
+    {
+        Content.Recipients.Add(new MetricRecipient { RecipientName = string.Empty });
+    }
+
+    private void AddVerifier()
+    {
+        Content.Verifiers.Add(new MetricVerifier { VerifierName = string.Empty });
+    }
+}

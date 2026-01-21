@@ -1,0 +1,224 @@
+@using Application.Shared.Models
+@using Application.Shared.Enums
+@using Microsoft.FluentUI.AspNetCore.Components
+@implements IDialogContentComponent<Metric>
+
+<FluentDialogBody>
+    <FluentStack Orientation="Orientation.Vertical" VerticalGap="20">
+        
+        <!-- Functions Section -->
+        <FluentCard Style="box-shadow: none;">
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                    📋 Functions
+                </FluentLabel>
+                <FluentDivider Style="width: 100%;" />
+                
+                @if (Content.Functions.Any())
+                {
+                    @foreach (var func in Content.Functions)
+                    {
+                        <FluentCard Style="background: #f8fafc; padding: 12px; box-shadow: none;">
+                            <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Function:</FluentLabel>
+                                    <FluentLabel>@func.Function</FluentLabel>
+                                </FluentStack>
+                                @if (!string.IsNullOrEmpty(func.SubFunction))
+                                {
+                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Sub-Function:</FluentLabel>
+                                        <FluentLabel>@func.SubFunction</FluentLabel>
+                                    </FluentStack>
+                                }
+                                @if (!string.IsNullOrEmpty(func.FunctionHead))
+                                {
+                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Function Head:</FluentLabel>
+                                        <FluentLabel>@func.FunctionHead</FluentLabel>
+                                    </FluentStack>
+                                }
+                            </FluentStack>
+                        </FluentCard>
+                    }
+                }
+                else
+                {
+                    <FluentLabel Color="Color.Neutral">No functions defined</FluentLabel>
+                }
+            </FluentStack>
+        </FluentCard>
+
+        <!-- Owners Section -->
+        <FluentCard Style="box-shadow: none;">
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                    👤 KPI Owners
+                </FluentLabel>
+                <FluentDivider Style="width: 100%;" />
+                
+                @if (Content.Owners.Any())
+                {
+                    <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                        @foreach (var owner in Content.Owners)
+                        {
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                <FluentIcon Value="@(new Icons.Regular.Size16.Person())" Color="Color.Accent" />
+                                <FluentLabel>@owner.OwnerName</FluentLabel>
+                            </FluentStack>
+                        }
+                    </FluentStack>
+                }
+                else
+                {
+                    <FluentLabel Color="Color.Neutral">No owners defined</FluentLabel>
+                }
+            </FluentStack>
+        </FluentCard>
+
+        <!-- Recipients Section -->
+        <FluentCard Style="box-shadow: none;">
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                    📧 Intended Recipients
+                </FluentLabel>
+                <FluentDivider Style="width: 100%;" />
+                
+                @if (Content.Recipients.Any())
+                {
+                    <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                        @foreach (var recipient in Content.Recipients)
+                        {
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                <FluentIcon Value="@(new Icons.Regular.Size16.Mail())" Color="Color.Accent" />
+                                <FluentLabel>@recipient.RecipientName</FluentLabel>
+                            </FluentStack>
+                        }
+                    </FluentStack>
+                }
+                else
+                {
+                    <FluentLabel Color="Color.Neutral">No recipients defined</FluentLabel>
+                }
+            </FluentStack>
+        </FluentCard>
+
+        <!-- Verifiers Section -->
+        <FluentCard Style="box-shadow: none;">
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                    ✅ KPI Verifiers
+                </FluentLabel>
+                <FluentDivider Style="width: 100%;" />
+                
+                @if (Content.Verifiers.Any())
+                {
+                    <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                        @foreach (var verifier in Content.Verifiers)
+                        {
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                <FluentIcon Value="@(new Icons.Regular.Size16.CheckmarkCircle())" Color="Color.Success" />
+                                <FluentLabel>@verifier.VerifierName</FluentLabel>
+                            </FluentStack>
+                        }
+                    </FluentStack>
+                }
+                else
+                {
+                    <FluentLabel Color="Color.Neutral">No verifiers defined</FluentLabel>
+                }
+            </FluentStack>
+        </FluentCard>
+
+        <!-- Formula Section -->
+        @if (!string.IsNullOrEmpty(Content.Formula))
+        {
+            <FluentCard Style="box-shadow: none;">
+                <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                    <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                        🔢 Formula
+                    </FluentLabel>
+                    <FluentDivider Style="width: 100%;" />
+                    
+                    <FluentCard Style="background: #f8fafc; padding: 12px; box-shadow: none;">
+                        <FluentLabel Style="font-family: monospace; white-space: pre-wrap; word-break: break-word;">@Content.Formula</FluentLabel>
+                    </FluentCard>
+                </FluentStack>
+            </FluentCard>
+        }
+
+        <!-- Additional Information -->
+        <FluentCard Style="box-shadow: none;">
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                    ℹ️ Additional Information
+                </FluentLabel>
+                <FluentDivider Style="width: 100%;" />
+                
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">KPA:</FluentLabel>
+                    <FluentLabel>@Content.KeyPerformanceArea</FluentLabel>
+                </FluentStack>
+
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Type:</FluentLabel>
+                    <FluentLabel>@Content.Type</FluentLabel>
+                </FluentStack>
+
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Perspective:</FluentLabel>
+                    <FluentLabel>@Content.Perspective</FluentLabel>
+                </FluentStack>
+
+                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Level:</FluentLabel>
+                    <FluentLabel>@Content.KPILevel</FluentLabel>
+                </FluentStack>
+
+                @if (!string.IsNullOrEmpty(Content.Target))
+                {
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Target:</FluentLabel>
+                        <FluentLabel>@Content.Target</FluentLabel>
+                    </FluentStack>
+                }
+
+                @if (!string.IsNullOrEmpty(Content.ContactEmail))
+                {
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Contact Email:</FluentLabel>
+                        <FluentLabel>@Content.ContactEmail</FluentLabel>
+                    </FluentStack>
+                }
+
+                @if (!string.IsNullOrEmpty(Content.ContactNumber))
+                {
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Contact Number:</FluentLabel>
+                        <FluentLabel>@Content.ContactNumber</FluentLabel>
+                    </FluentStack>
+                }
+            </FluentStack>
+        </FluentCard>
+
+    </FluentStack>
+</FluentDialogBody>
+
+<FluentDialogFooter>
+    <FluentButton Appearance="Appearance.Neutral" OnClick="@CloseAsync">
+        Close
+    </FluentButton>
+</FluentDialogFooter>
+
+@code {
+    [Parameter]
+    public Metric Content { get; set; } = new();
+
+    [CascadingParameter]
+    public FluentDialog Dialog { get; set; } = default!;
+
+    private async Task CloseAsync()
+    {
+        await Dialog.CloseAsync();
+    }
+}
