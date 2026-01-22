@@ -1,0 +1,263 @@
+.data-results-table {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: #ffffff;
+    border: 1px solid #e6e9ef;
+    border-radius: 4px;
+    overflow: hidden;
+    font-family: 'Source Sans Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    height: 200px;
+    gap: 8px;
+    color: #808495;
+}
+
+.table-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #fafbfc;
+    border-bottom: 1px solid #e6e9ef;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.toolbar-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #808495;
+}
+
+.toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.table-container {
+    flex: 1;
+    overflow: auto;
+    min-height: 150px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.modern-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    font-family: 'Source Code Pro', 'Monaco', 'Consolas', monospace;
+}
+
+.header-row {
+    background: #fafbfc;
+}
+
+.header-cell {
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.75rem;
+    color: #31333f;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    border-bottom: 1px solid #e6e9ef;
+    border-right: 1px solid #e6e9ef;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.1s ease;
+    position: sticky;
+    top: 0;
+    background: #fafbfc;
+    z-index: 10;
+}
+
+.header-cell:last-child {
+    border-right: none;
+}
+
+.header-cell:hover {
+    background: #f0f2f6;
+}
+
+.header-cell.sorted {
+    background: #e8f0fe;
+    color: #1a73e8;
+}
+
+.header-content {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.header-text {
+    flex: 1;
+}
+
+.filter-row {
+    background: #fafbfc;
+}
+
+.filter-cell {
+    padding: 4px 8px;
+    border-bottom: 1px solid #e6e9ef;
+    border-right: 1px solid #e6e9ef;
+}
+
+.filter-cell:last-child {
+    border-right: none;
+}
+
+.data-row {
+    transition: background-color 0.1s ease;
+}
+
+.data-row:hover {
+    background: #f8f9fb;
+}
+
+.data-row:hover .data-cell {
+    background: #f8f9fb;
+}
+
+.data-cell {
+    padding: 6px 12px;
+    color: #31333f;
+    border-bottom: 1px solid #e6e9ef;
+    border-right: 1px solid #e6e9ef;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    background: #ffffff;
+}
+
+.data-cell:last-child {
+    border-right: none;
+}
+
+.data-cell.align-right {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.data-cell.align-center {
+    text-align: center;
+}
+
+.null-value {
+    color: #bfc5d3;
+    font-style: italic;
+    font-size: 0.75rem;
+}
+
+.number-value {
+    color: #31333f;
+}
+
+.currency-value {
+    color: #31333f;
+}
+
+.negative-value {
+    color: #ff4b4b;
+}
+
+.date-value {
+    color: #31333f;
+}
+
+.boolean-true {
+    color: #21c354;
+}
+
+.boolean-false {
+    color: #ff4b4b;
+}
+
+.table-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: #fafbfc;
+    border-top: 1px solid #e6e9ef;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.pagination-info {
+    color: #808495;
+    font-size: 0.75rem;
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.page-indicator {
+    padding: 0 10px;
+    color: #31333f;
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+/* Mobile responsive styles */
+@media (max-width: 600px) {
+    .table-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .toolbar-left {
+        justify-content: center;
+    }
+
+    .toolbar-right {
+        justify-content: center;
+        width: 100%;
+    }
+
+    .toolbar-right ::deep fluent-search,
+    .toolbar-right ::deep .fluent-search {
+        width: 100% !important;
+        max-width: none !important;
+    }
+
+    .table-footer {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .pagination-info {
+        text-align: center;
+    }
+
+    .pagination-controls {
+        flex-wrap: wrap;
+        justify-content: center;
+    }
+
+    .data-cell {
+        padding: 6px 8px;
+        max-width: 200px;
+    }
+
+    .header-cell {
+        padding: 8px;
+    }
+}

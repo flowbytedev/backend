@@ -1,0 +1,34 @@
+.detail-row {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.detail-label {
+    min-width: 120px;
+    flex-shrink: 0;
+}
+
+.detail-label-wide {
+    min-width: 140px;
+    flex-shrink: 0;
+}
+
+.detail-value {
+    flex: 1;
+    min-width: 0;
+    word-break: break-word;
+}
+
+@media (max-width: 600px) {
+    .detail-row {
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .detail-label,
+    .detail-label-wide {
+        min-width: unset;
+    }
+}

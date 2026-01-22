@@ -20,23 +20,23 @@
                     {
                         <FluentCard Style="background: #f8fafc; padding: 12px; box-shadow: none;">
                             <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Function:</FluentLabel>
-                                    <FluentLabel>@func.Function</FluentLabel>
-                                </FluentStack>
+                                <div class="detail-row">
+                                    <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Function:</FluentLabel>
+                                    <FluentLabel Class="detail-value">@func.Function</FluentLabel>
+                                </div>
                                 @if (!string.IsNullOrEmpty(func.SubFunction))
                                 {
-                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Sub-Function:</FluentLabel>
-                                        <FluentLabel>@func.SubFunction</FluentLabel>
-                                    </FluentStack>
+                                    <div class="detail-row">
+                                        <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Sub-Function:</FluentLabel>
+                                        <FluentLabel Class="detail-value">@func.SubFunction</FluentLabel>
+                                    </div>
                                 }
                                 @if (!string.IsNullOrEmpty(func.FunctionHead))
                                 {
-                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Function Head:</FluentLabel>
-                                        <FluentLabel>@func.FunctionHead</FluentLabel>
-                                    </FluentStack>
+                                    <div class="detail-row">
+                                        <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Function Head:</FluentLabel>
+                                        <FluentLabel Class="detail-value">@func.FunctionHead</FluentLabel>
+                                    </div>
                                 }
                             </FluentStack>
                         </FluentCard>
@@ -144,30 +144,30 @@
                     {
                         <FluentCard Style="background: #f8fafc; padding: 12px; box-shadow: none;">
                             <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
-                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Name:</FluentLabel>
-                                    <FluentLabel>@dimension.Name</FluentLabel>
-                                </FluentStack>
+                                <div class="detail-row">
+                                    <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Name:</FluentLabel>
+                                    <FluentLabel Class="detail-value">@dimension.Name</FluentLabel>
+                                </div>
                                 @if (!string.IsNullOrEmpty(dimension.Description))
                                 {
-                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Description:</FluentLabel>
-                                        <FluentLabel>@dimension.Description</FluentLabel>
-                                    </FluentStack>
+                                    <div class="detail-row">
+                                        <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Description:</FluentLabel>
+                                        <FluentLabel Class="detail-value">@dimension.Description</FluentLabel>
+                                    </div>
                                 }
                                 @if (!string.IsNullOrEmpty(dimension.SourceTable))
                                 {
-                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Source Table:</FluentLabel>
-                                        <FluentLabel>@dimension.SourceTable</FluentLabel>
-                                    </FluentStack>
+                                    <div class="detail-row">
+                                        <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Source Table:</FluentLabel>
+                                        <FluentLabel Class="detail-value">@dimension.SourceTable</FluentLabel>
+                                    </div>
                                 }
                                 @if (!string.IsNullOrEmpty(dimension.SourceColumn))
                                 {
-                                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Source Column:</FluentLabel>
-                                        <FluentLabel>@dimension.SourceColumn</FluentLabel>
-                                    </FluentStack>
+                                    <div class="detail-row">
+                                        <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Source Column:</FluentLabel>
+                                        <FluentLabel Class="detail-value">@dimension.SourceColumn</FluentLabel>
+                                    </div>
                                 }
                             </FluentStack>
                         </FluentCard>
@@ -194,31 +194,31 @@
                         <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
                             @if (!string.IsNullOrEmpty(Content.MetricDataSource.ConnectionName))
                             {
-                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Connection:</FluentLabel>
-                                    <FluentLabel>@Content.MetricDataSource.ConnectionName</FluentLabel>
-                                </FluentStack>
+                                <div class="detail-row">
+                                    <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Connection:</FluentLabel>
+                                    <FluentLabel Class="detail-value">@Content.MetricDataSource.ConnectionName</FluentLabel>
+                                </div>
                             }
-                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Type:</FluentLabel>
+                            <div class="detail-row">
+                                <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Type:</FluentLabel>
                                 <FluentBadge Appearance="Appearance.Accent">@Content.MetricDataSource.Type</FluentBadge>
-                            </FluentStack>
-                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Host:</FluentLabel>
-                                <FluentLabel>@Content.MetricDataSource.Host:@Content.MetricDataSource.Port</FluentLabel>
-                            </FluentStack>
-                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Database:</FluentLabel>
-                                <FluentLabel>@Content.MetricDataSource.Database</FluentLabel>
-                            </FluentStack>
-                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Username:</FluentLabel>
-                                <FluentLabel>@Content.MetricDataSource.Username</FluentLabel>
-                            </FluentStack>
-                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">SSL/TLS:</FluentLabel>
-                                <FluentLabel>@(Content.MetricDataSource.UseSSL ? "Enabled" : "Disabled")</FluentLabel>
-                            </FluentStack>
+                            </div>
+                            <div class="detail-row">
+                                <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Host:</FluentLabel>
+                                <FluentLabel Class="detail-value">@Content.MetricDataSource.Host:@Content.MetricDataSource.Port</FluentLabel>
+                            </div>
+                            <div class="detail-row">
+                                <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Database:</FluentLabel>
+                                <FluentLabel Class="detail-value">@Content.MetricDataSource.Database</FluentLabel>
+                            </div>
+                            <div class="detail-row">
+                                <FluentLabel Weight="FontWeight.Bold" Class="detail-label">Username:</FluentLabel>
+                                <FluentLabel Class="detail-value">@Content.MetricDataSource.Username</FluentLabel>
+                            </div>
+                            <div class="detail-row">
+                                <FluentLabel Weight="FontWeight.Bold" Class="detail-label">SSL/TLS:</FluentLabel>
+                                <FluentLabel Class="detail-value">@(Content.MetricDataSource.UseSSL ? "Enabled" : "Disabled")</FluentLabel>
+                            </div>
                         </FluentStack>
                     </FluentCard>
 
@@ -262,48 +262,48 @@
                 </FluentLabel>
                 <FluentDivider Style="width: 100%;" />
                 
-                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">KPA:</FluentLabel>
-                    <FluentLabel>@Content.KeyPerformanceArea</FluentLabel>
-                </FluentStack>
+                <div class="detail-row">
+                    <FluentLabel Weight="FontWeight.Bold" Class="detail-label-wide">KPA:</FluentLabel>
+                    <FluentLabel Class="detail-value">@Content.KeyPerformanceArea</FluentLabel>
+                </div>
 
-                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Type:</FluentLabel>
-                    <FluentLabel>@Content.Type</FluentLabel>
-                </FluentStack>
+                <div class="detail-row">
+                    <FluentLabel Weight="FontWeight.Bold" Class="detail-label-wide">Type:</FluentLabel>
+                    <FluentLabel Class="detail-value">@Content.Type</FluentLabel>
+                </div>
 
-                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Perspective:</FluentLabel>
-                    <FluentLabel>@Content.Perspective</FluentLabel>
-                </FluentStack>
+                <div class="detail-row">
+                    <FluentLabel Weight="FontWeight.Bold" Class="detail-label-wide">Perspective:</FluentLabel>
+                    <FluentLabel Class="detail-value">@Content.Perspective</FluentLabel>
+                </div>
 
-                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Level:</FluentLabel>
-                    <FluentLabel>@Content.KPILevel</FluentLabel>
-                </FluentStack>
+                <div class="detail-row">
+                    <FluentLabel Weight="FontWeight.Bold" Class="detail-label-wide">Level:</FluentLabel>
+                    <FluentLabel Class="detail-value">@Content.KPILevel</FluentLabel>
+                </div>
 
                 @if (!string.IsNullOrEmpty(Content.Target))
                 {
-                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Target:</FluentLabel>
-                        <FluentLabel>@Content.Target</FluentLabel>
-                    </FluentStack>
+                    <div class="detail-row">
+                        <FluentLabel Weight="FontWeight.Bold" Class="detail-label-wide">Target:</FluentLabel>
+                        <FluentLabel Class="detail-value">@Content.Target</FluentLabel>
+                    </div>
                 }
 
                 @if (!string.IsNullOrEmpty(Content.ContactEmail))
                 {
-                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Contact Email:</FluentLabel>
-                        <FluentLabel>@Content.ContactEmail</FluentLabel>
-                    </FluentStack>
+                    <div class="detail-row">
+                        <FluentLabel Weight="FontWeight.Bold" Class="detail-label-wide">Contact Email:</FluentLabel>
+                        <FluentLabel Class="detail-value">@Content.ContactEmail</FluentLabel>
+                    </div>
                 }
 
                 @if (!string.IsNullOrEmpty(Content.ContactNumber))
                 {
-                    <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                        <FluentLabel Weight="FontWeight.Bold" Style="min-width: 140px;">Contact Number:</FluentLabel>
-                        <FluentLabel>@Content.ContactNumber</FluentLabel>
-                    </FluentStack>
+                    <div class="detail-row">
+                        <FluentLabel Weight="FontWeight.Bold" Class="detail-label-wide">Contact Number:</FluentLabel>
+                        <FluentLabel Class="detail-value">@Content.ContactNumber</FluentLabel>
+                    </div>
                 }
             </FluentStack>
         </FluentCard>

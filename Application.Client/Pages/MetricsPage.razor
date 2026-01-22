@@ -16,7 +16,7 @@
     
     <!-- Header -->
     <div class="header" style="background: white; border-bottom: 1px solid #e5e7eb; padding: 16px 24px; flex-shrink: 0;">
-        <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.SpaceBetween" VerticalAlignment="VerticalAlignment.Center">
+        <div class="page-header">
             <div>
                 <h1 style="margin: 0; font-size: 1.5rem; font-weight: 600; color: #1f2937;">
                     Metrics Management
@@ -26,7 +26,7 @@
                 </p>
             </div>
 
-            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="10">
+            <div class="header-actions">
                 <FluentButton IconStart="@(new Icons.Regular.Size16.ArrowClockwise())"
                               OnClick="@RefreshData"
                               Disabled="@IsLoading"
@@ -39,8 +39,8 @@
                               Appearance="Appearance.Accent">
                     Add Metric
                 </FluentButton>
-            </FluentStack>
-        </FluentStack>
+            </div>
+        </div>
     </div>
 
     <!-- Main Content -->
@@ -326,7 +326,7 @@
             Title = $"Metric Details: {metric.KPI}",
             PrimaryAction = null,
             SecondaryAction = "Close",
-            Width = "700px",
+            Width = "min(700px, 100vw)",
             Height = "auto",
             Modal = true,
             ShowDismiss = true
