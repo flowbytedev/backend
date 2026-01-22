@@ -102,6 +102,8 @@ namespace Application.Shared.Data
 
         public DbSet<MetricDimension> MetricDimensions { get; set; }
 
+        public DbSet<MetricDataSource> MetricDataSources { get; set; }
+
 
 
         /// <summary>

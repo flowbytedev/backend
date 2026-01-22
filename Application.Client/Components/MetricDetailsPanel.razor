@@ -180,6 +180,63 @@
             </FluentStack>
         </FluentCard>
 
+        <!-- Data Source Section -->
+        <FluentCard Style="box-shadow: none;">
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
+                <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                    🔌 Data Source Connection
+                </FluentLabel>
+                <FluentDivider Style="width: 100%;" />
+
+                @if (Content.MetricDataSource != null)
+                {
+                    <FluentCard Style="background: #f8fafc; padding: 12px; box-shadow: none;">
+                        <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                            @if (!string.IsNullOrEmpty(Content.MetricDataSource.ConnectionName))
+                            {
+                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                    <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Connection:</FluentLabel>
+                                    <FluentLabel>@Content.MetricDataSource.ConnectionName</FluentLabel>
+                                </FluentStack>
+                            }
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Type:</FluentLabel>
+                                <FluentBadge Appearance="Appearance.Accent">@Content.MetricDataSource.Type</FluentBadge>
+                            </FluentStack>
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Host:</FluentLabel>
+                                <FluentLabel>@Content.MetricDataSource.Host:@Content.MetricDataSource.Port</FluentLabel>
+                            </FluentStack>
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Database:</FluentLabel>
+                                <FluentLabel>@Content.MetricDataSource.Database</FluentLabel>
+                            </FluentStack>
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">Username:</FluentLabel>
+                                <FluentLabel>@Content.MetricDataSource.Username</FluentLabel>
+                            </FluentStack>
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                <FluentLabel Weight="FontWeight.Bold" Style="min-width: 120px;">SSL/TLS:</FluentLabel>
+                                <FluentLabel>@(Content.MetricDataSource.UseSSL ? "Enabled" : "Disabled")</FluentLabel>
+                            </FluentStack>
+                        </FluentStack>
+                    </FluentCard>
+
+                    @if (!string.IsNullOrEmpty(Content.Query))
+                    {
+                        <FluentLabel Weight="FontWeight.Bold">SQL Query</FluentLabel>
+                        <FluentCard Style="background: #1e293b; padding: 12px; box-shadow: none;">
+                            <FluentLabel Style="font-family: monospace; white-space: pre-wrap; word-break: break-word; color: #e2e8f0;">@Content.Query</FluentLabel>
+                        </FluentCard>
+                    }
+                }
+                else
+                {
+                    <FluentLabel Color="Color.Neutral">No data source configured</FluentLabel>
+                }
+            </FluentStack>
+        </FluentCard>
+
         <!-- Formula Section -->
         @if (!string.IsNullOrEmpty(Content.Formula))
         {

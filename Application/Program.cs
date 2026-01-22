@@ -200,6 +200,7 @@ builder.Services.AddScoped<IUserSearchService, UserSearchService>();
 builder.Services.AddScoped<IMetricService, MetricService>();
 builder.Services.AddScoped<IMetricTargetService, MetricTargetService>();
 builder.Services.AddScoped<IMetricValueService, MetricValueService>();
+builder.Services.AddScoped<IClickHouseService, ClickHouseService>();
 
 // Add Data Warehouse Service
 builder.Services.AddScoped<DataWarehouseService>();

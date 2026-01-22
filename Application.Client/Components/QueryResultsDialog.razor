@@ -1,0 +1,198 @@
+@using Application.Shared.Models
+@using Application.Client.Models
+@using Microsoft.FluentUI.AspNetCore.Components
+@implements IDialogContentComponent<Metric>
+@inject HttpClient HttpClient
+@inject IToastService ToastService
+
+<FluentDialogBody>
+    <div style="min-height: 400px; max-height: 70vh; display: flex; flex-direction: column;">
+        @if (IsLoading)
+        {
+            <div style="display: flex; justify-content: center; align-items: center; height: 300px;">
+                <div style="text-align: center;">
+                    <FluentProgressRing style="margin-bottom: 16px;" />
+                    <p style="color: #6b7280; margin: 0;">Executing query...</p>
+                </div>
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(ErrorMessage))
+        {
+            <FluentMessageBar Title="Error" Intent="@MessageIntent.Error" Style="margin-bottom: 16px;">
+                @ErrorMessage
+            </FluentMessageBar>
+            <FluentButton IconStart="@(new Icons.Regular.Size16.ArrowClockwise())"
+                          OnClick="@ExecuteQuery"
+                          Appearance="Appearance.Outline">
+                Retry
+            </FluentButton>
+        }
+        else
+        {
+            <DataResultsTable Data="@QueryResults"
+                              ColumnFormats="@ColumnFormats"
+                              EmptyMessage="No results returned from query"
+                              ShowGlobalFilter="true"
+                              ShowColumnFilters="true"
+                              ShowPagination="true"
+                              ShowExport="true"
+                              PageSize="50">
+                <AdditionalToolbarContent>
+                    <FluentButton IconStart="@(new Icons.Regular.Size16.ArrowClockwise())"
+                                  OnClick="@ExecuteQuery"
+                                  Appearance="Appearance.Outline"
+                                  Size="ButtonSize.Small">
+                        Re-run
+                    </FluentButton>
+                </AdditionalToolbarContent>
+            </DataResultsTable>
+        }
+    </div>
+</FluentDialogBody>
+
+<FluentDialogFooter>
+    <FluentButton Appearance="Appearance.Neutral" OnClick="@CloseAsync">
+        Close
+    </FluentButton>
+</FluentDialogFooter>
+
+@code {
+    [Parameter]
+    public Metric Content { get; set; } = new();
+
+    [CascadingParameter]
+    public FluentDialog Dialog { get; set; } = default!;
+
+    private List<Dictionary<string, object?>> QueryResults = new();
+    private Dictionary<string, ColumnFormat>? ColumnFormats;
+    private bool IsLoading = false;
+    private string? ErrorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ExecuteQuery();
+    }
+
+    private async Task ExecuteQuery()
+    {
+        IsLoading = true;
+        ErrorMessage = null;
+        QueryResults.Clear();
+        StateHasChanged();
+
+        try
+        {
+            var response = await HttpClient.PostAsync($"api/metrics/{Content.Id}/execute", null);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var results = await response.Content.ReadFromJsonAsync<List<Dictionary<string, object?>>>();
+                if (results != null)
+                {
+                    QueryResults = results;
+                    DetectColumnFormats();
+                }
+            }
+            else
+            {
+                var errorContent = await response.Content.ReadAsStringAsync();
+                ErrorMessage = string.IsNullOrEmpty(errorContent)
+                    ? $"Failed to execute query (Status: {response.StatusCode})"
+                    : errorContent;
+            }
+        }
+        catch (Exception ex)
+        {
+            ErrorMessage = $"Error executing query: {ex.Message}";
+        }
+        finally
+        {
+            IsLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void DetectColumnFormats()
+    {
+        if (!QueryResults.Any()) return;
+
+        ColumnFormats = new Dictionary<string, ColumnFormat>();
+        var firstRow = QueryResults.First();
+
+        foreach (var (column, value) in firstRow)
+        {
+            var format = DetectFormatForValue(column, value);
+            if (format != null)
+            {
+                ColumnFormats[column] = format;
+            }
+        }
+    }
+
+    private ColumnFormat? DetectFormatForValue(string columnName, object? value)
+    {
+        var lowerColumn = columnName.ToLowerInvariant();
+
+        // Detect currency columns by name
+        if (lowerColumn.Contains("amount") || lowerColumn.Contains("price") ||
+            lowerColumn.Contains("cost") || lowerColumn.Contains("revenue") ||
+            lowerColumn.Contains("salary") || lowerColumn.Contains("total") ||
+            lowerColumn.Contains("balance") || lowerColumn.Contains("fee"))
+        {
+            return new ColumnFormat
+            {
+                Type = FormatType.Currency,
+                DecimalPlaces = 2,
+                CurrencySymbol = "$"
+            };
+        }
+
+        // Detect percentage columns by name
+        if (lowerColumn.Contains("percent") || lowerColumn.Contains("rate") ||
+            lowerColumn.Contains("ratio") || lowerColumn.EndsWith("pct"))
+        {
+            return new ColumnFormat
+            {
+                Type = FormatType.Percentage,
+                DecimalPlaces = 1
+            };
+        }
+
+        // Detect date columns by name or value
+        if (lowerColumn.Contains("date") || lowerColumn.Contains("created") ||
+            lowerColumn.Contains("updated") || lowerColumn.Contains("time"))
+        {
+            if (lowerColumn.Contains("time") || lowerColumn.Contains("created") || lowerColumn.Contains("updated"))
+            {
+                return new ColumnFormat
+                {
+                    Type = FormatType.DateTime,
+                    DateFormat = "yyyy-MM-dd HH:mm:ss"
+                };
+            }
+            return new ColumnFormat
+            {
+                Type = FormatType.Date,
+                DateFormat = "yyyy-MM-dd"
+            };
+        }
+
+        // Detect count/quantity columns
+        if (lowerColumn.Contains("count") || lowerColumn.Contains("quantity") ||
+            lowerColumn.Contains("qty") || lowerColumn.Contains("num"))
+        {
+            return new ColumnFormat
+            {
+                Type = FormatType.Number,
+                DecimalPlaces = 0
+            };
+        }
+
+        return null;
+    }
+
+    private async Task CloseAsync()
+    {
+        await Dialog.CloseAsync();
+    }
+}

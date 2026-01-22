@@ -154,5 +154,146 @@ namespace Application.Controllers
 
             return NoContent();
         }
+
+        // POST: api/Metrics/{id}/execute
+        [HttpPost("{id}/execute")]
+        public async Task<ActionResult<List<Dictionary<string, object?>>>> ExecuteMetricQuery(int id, [FromHeader(Name = "X-Company-Id")] string companyId)
+        {
+            if (string.IsNullOrEmpty(companyId))
+            {
+                return BadRequest("Company ID is required in headers");
+            }
+
+            try
+            {
+                var results = await _metricService.ExecuteMetricQuery(id, companyId);
+                return Ok(results);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(ex.Message);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, $"Error executing query: {ex.Message}");
+            }
+        }
+
+        #region Data Sources
+
+        // GET: api/Metrics/datasources
+        [HttpGet("datasources")]
+        public async Task<ActionResult<IEnumerable<MetricDataSource>>> GetDataSources([FromHeader(Name = "X-Company-Id")] string companyId)
+        {
+            if (string.IsNullOrEmpty(companyId))
+            {
+                return BadRequest("Company ID is required in headers");
+            }
+
+            var dataSources = await _metricService.GetDataSources(companyId);
+            return Ok(dataSources);
+        }
+
+        // GET: api/Metrics/datasources/5
+        [HttpGet("datasources/{id}")]
+        public async Task<ActionResult<MetricDataSource>> GetDataSource(int id, [FromHeader(Name = "X-Company-Id")] string companyId)
+        {
+            if (string.IsNullOrEmpty(companyId))
+            {
+                return BadRequest("Company ID is required in headers");
+            }
+
+            var dataSource = await _metricService.GetDataSource(id, companyId);
+
+            if (dataSource == null)
+            {
+                return NotFound();
+            }
+
+            return Ok(dataSource);
+        }
+
+        // POST: api/Metrics/datasources
+        [HttpPost("datasources")]
+        public async Task<ActionResult<MetricDataSource>> CreateDataSource(MetricDataSource dataSource, [FromHeader(Name = "X-Company-Id")] string companyId)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return BadRequest("User ID is required");
+                }
+
+                if (string.IsNullOrEmpty(companyId))
+                {
+                    return BadRequest("Company ID is required in headers");
+                }
+
+                dataSource.CompanyId = companyId;
+                var createdDataSource = await _metricService.CreateDataSource(dataSource, userId);
+
+                return CreatedAtAction(nameof(GetDataSource), new { id = createdDataSource.Id, companyId }, createdDataSource);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Error creating data source: {ex.Message}");
+            }
+        }
+
+        // PUT: api/Metrics/datasources/5
+        [HttpPut("datasources/{id}")]
+        public async Task<IActionResult> UpdateDataSource(int id, MetricDataSource dataSource, [FromHeader(Name = "X-Company-Id")] string companyId)
+        {
+            try
+            {
+                var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+                if (string.IsNullOrEmpty(userId))
+                {
+                    return BadRequest("User ID is required");
+                }
+
+                if (string.IsNullOrEmpty(companyId))
+                {
+                    return BadRequest("Company ID is required in headers");
+                }
+
+                var updatedDataSource = await _metricService.UpdateDataSource(id, dataSource, companyId, userId);
+
+                if (updatedDataSource == null)
+                {
+                    return NotFound();
+                }
+
+                return Ok(updatedDataSource);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Error updating data source: {ex.Message}");
+            }
+        }
+
+        // DELETE: api/Metrics/datasources/5
+        [HttpDelete("datasources/{id}")]
+        public async Task<IActionResult> DeleteDataSource(int id, [FromHeader(Name = "X-Company-Id")] string companyId)
+        {
+            if (string.IsNullOrEmpty(companyId))
+            {
+                return BadRequest("Company ID is required in headers");
+            }
+
+            var result = await _metricService.DeleteDataSource(id, companyId);
+
+            if (!result)
+            {
+                return BadRequest("Data source not found or is currently in use by metrics");
+            }
+
+            return NoContent();
+        }
+
+        #endregion
     }
 }

@@ -1,0 +1,685 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using System.Globalization
+@using Application.Client.Models
+
+
+<div class="data-results-table">
+    @if (Data == null || !Data.Any())
+    {
+        <div class="empty-state">
+            <FluentIcon Value="@(new Icons.Regular.Size24.DatabaseSearch())" Color="Color.Neutral" />
+            <FluentLabel Color="Color.Neutral">@EmptyMessage</FluentLabel>
+        </div>
+    }
+    else
+    {
+        <div class="table-toolbar">
+            <div class="toolbar-left">
+                <FluentLabel Typo="Typography.Body" Color="Color.Neutral">
+                    @GetRecordCountText()
+                </FluentLabel>
+            </div>
+            <div class="toolbar-right">
+                @if (ShowGlobalFilter)
+                {
+                    <FluentSearch @bind-Value="GlobalFilter"
+                                  @bind-Value:after="ApplyFilters"
+                                  Placeholder="Search all columns..."
+                                  Style="width: 250px;" />
+                }
+                @if (ShowExport)
+                {
+                    <FluentButton IconStart="@(new Icons.Regular.Size16.ArrowDownload())"
+                                  OnClick="@ExportToCsv"
+                                  Appearance="Appearance.Outline"
+                                  Size="ButtonSize.Small">
+                        Export
+                    </FluentButton>
+                }
+                @if (AdditionalToolbarContent != null)
+                {
+                    @AdditionalToolbarContent
+                }
+            </div>
+        </div>
+
+        <div class="table-container">
+            <table class="modern-table">
+                <thead>
+                    <tr class="header-row">
+                        @foreach (var column in Columns)
+                        {
+                            var sorted = column == SortColumn ? "sorted" : "";
+                            <th class='@($"header-cell {sorted}")'
+                                @onclick="@(() => ToggleSort(column))">
+                                <div class="header-content">
+                                    <span class="header-text">@FormatColumnHeader(column)</span>
+                                    @if (column == SortColumn)
+                                    {
+                                        <FluentIcon Value="@(SortAscending ? (Icon)new Icons.Regular.Size12.ArrowUp() : new Icons.Regular.Size12.ArrowDown())"
+                                                    Color="@Color.Accent" />
+                                    }
+                                </div>
+                            </th>
+                        }
+                    </tr>
+                    @if (ShowColumnFilters)
+                    {
+                        <tr class="filter-row">
+                            @foreach (var column in Columns)
+                            {
+                                <th class="filter-cell">
+                                    <FluentTextField @bind-Value="ColumnFilters[column]"
+                                                     @bind-Value:after="ApplyFilters"
+                                                     Placeholder="Filter..."
+                                                     Style="width: 100%; font-size: 0.75rem;" />
+                                </th>
+                            }
+                        </tr>
+                    }
+                </thead>
+                <tbody>
+                    @foreach (var row in PagedData)
+                    {
+                        <tr class="data-row" @onclick="@(() => OnRowClick.InvokeAsync(row))">
+                            @foreach (var column in Columns)
+                            {
+                                <td class="data-cell @GetCellAlignmentClass(column, row)">
+                                    @((MarkupString)FormatCellValue(column, row.TryGetValue(column, out var value) ? value : null))
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (ShowPagination && TotalPages > 1)
+        {
+            <div class="table-footer">
+                <div class="pagination-info">
+                    Showing @(((CurrentPage - 1) * PageSize) + 1) to @Math.Min(CurrentPage * PageSize, FilteredData.Count) of @FilteredData.Count
+                </div>
+                <div class="pagination-controls">
+                    <FluentButton IconStart="@(new Icons.Regular.Size16.ChevronDoubleLeft())"
+                                  OnClick="@(() => GoToPage(1))"
+                                  Disabled="@(CurrentPage == 1)"
+                                  Appearance="Appearance.Stealth"
+                                  Size="ButtonSize.Small" />
+                    <FluentButton IconStart="@(new Icons.Regular.Size16.ChevronLeft())"
+                                  OnClick="@(() => GoToPage(CurrentPage - 1))"
+                                  Disabled="@(CurrentPage == 1)"
+                                  Appearance="Appearance.Stealth"
+                                  Size="ButtonSize.Small" />
+                    <span class="page-indicator">Page @CurrentPage of @TotalPages</span>
+                    <FluentButton IconStart="@(new Icons.Regular.Size16.ChevronRight())"
+                                  OnClick="@(() => GoToPage(CurrentPage + 1))"
+                                  Disabled="@(CurrentPage == TotalPages)"
+                                  Appearance="Appearance.Stealth"
+                                  Size="ButtonSize.Small" />
+                    <FluentButton IconStart="@(new Icons.Regular.Size16.ChevronDoubleRight())"
+                                  OnClick="@(() => GoToPage(TotalPages))"
+                                  Disabled="@(CurrentPage == TotalPages)"
+                                  Appearance="Appearance.Stealth"
+                                  Size="ButtonSize.Small" />
+                </div>
+            </div>
+        }
+    }
+</div>
+
+<style>
+    .data-results-table {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        background: #ffffff;
+        border: 1px solid #e6e9ef;
+        border-radius: 4px;
+        overflow: hidden;
+        font-family: 'Source Sans Pro', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    .empty-state {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        height: 200px;
+        gap: 8px;
+        color: #808495;
+    }
+
+    .table-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        background: #fafbfc;
+        border-bottom: 1px solid #e6e9ef;
+        gap: 12px;
+        flex-wrap: wrap;
+    }
+
+    .toolbar-left {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.8rem;
+        color: #808495;
+    }
+
+    .toolbar-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .table-container {
+        flex: 1;
+        overflow: auto;
+        min-height: 150px;
+    }
+
+    .modern-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+        font-family: 'Source Code Pro', 'Monaco', 'Consolas', monospace;
+    }
+
+    .header-row {
+        background: #fafbfc;
+    }
+
+    .header-cell {
+        padding: 8px 12px;
+        text-align: left;
+        font-weight: 600;
+        font-size: 0.75rem;
+        color: #31333f;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        border-bottom: 1px solid #e6e9ef;
+        border-right: 1px solid #e6e9ef;
+        white-space: nowrap;
+        cursor: pointer;
+        user-select: none;
+        transition: background-color 0.1s ease;
+        position: sticky;
+        top: 0;
+        background: #fafbfc;
+        z-index: 10;
+    }
+
+    .header-cell:last-child {
+        border-right: none;
+    }
+
+    .header-cell:hover {
+        background: #f0f2f6;
+    }
+
+    .header-cell.sorted {
+        background: #e8f0fe;
+        color: #1a73e8;
+    }
+
+    .header-content {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .header-text {
+        flex: 1;
+    }
+
+    .filter-row {
+        background: #fafbfc;
+    }
+
+    .filter-cell {
+        padding: 4px 8px;
+        border-bottom: 1px solid #e6e9ef;
+        border-right: 1px solid #e6e9ef;
+    }
+
+    .filter-cell:last-child {
+        border-right: none;
+    }
+
+    .data-row {
+        transition: background-color 0.1s ease;
+    }
+
+    .data-row:hover {
+        background: #f8f9fb;
+    }
+
+    .data-row:hover .data-cell {
+        background: #f8f9fb;
+    }
+
+    .data-cell {
+        padding: 6px 12px;
+        color: #31333f;
+        border-bottom: 1px solid #e6e9ef;
+        border-right: 1px solid #e6e9ef;
+        max-width: 280px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        background: #ffffff;
+    }
+
+    .data-cell:last-child {
+        border-right: none;
+    }
+
+    .data-cell.align-right {
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+    }
+
+    .data-cell.align-center {
+        text-align: center;
+    }
+
+    .null-value {
+        color: #bfc5d3;
+        font-style: italic;
+        font-size: 0.75rem;
+    }
+
+    .number-value {
+        color: #31333f;
+    }
+
+    .currency-value {
+        color: #31333f;
+    }
+
+    .negative-value {
+        color: #ff4b4b;
+    }
+
+    .date-value {
+        color: #31333f;
+    }
+
+    .boolean-true {
+        color: #21c354;
+    }
+
+    .boolean-false {
+        color: #ff4b4b;
+    }
+
+    .table-footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 8px 12px;
+        background: #fafbfc;
+        border-top: 1px solid #e6e9ef;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .pagination-info {
+        color: #808495;
+        font-size: 0.75rem;
+    }
+
+    .pagination-controls {
+        display: flex;
+        align-items: center;
+        gap: 2px;
+    }
+
+    .page-indicator {
+        padding: 0 10px;
+        color: #31333f;
+        font-size: 0.75rem;
+    }
+</style>
+
+@code {
+    [Parameter] public List<Dictionary<string, object?>>? Data { get; set; }
+    [Parameter] public Dictionary<string, ColumnFormat>? ColumnFormats { get; set; }
+    [Parameter] public string EmptyMessage { get; set; } = "No data available";
+    [Parameter] public bool ShowGlobalFilter { get; set; } = true;
+    [Parameter] public bool ShowColumnFilters { get; set; } = true;
+    [Parameter] public bool ShowPagination { get; set; } = true;
+    [Parameter] public bool ShowExport { get; set; } = true;
+    [Parameter] public int PageSize { get; set; } = 50;
+    [Parameter] public RenderFragment? AdditionalToolbarContent { get; set; }
+    [Parameter] public EventCallback<Dictionary<string, object?>> OnRowClick { get; set; }
+
+    private List<string> Columns = new();
+    private List<Dictionary<string, object?>> FilteredData = new();
+    private Dictionary<string, string> ColumnFilters = new();
+    private string GlobalFilter = string.Empty;
+    private string? SortColumn;
+    private bool SortAscending = true;
+    private int CurrentPage = 1;
+    private int TotalPages => (int)Math.Ceiling((double)FilteredData.Count / PageSize);
+    private IEnumerable<Dictionary<string, object?>> PagedData => ShowPagination
+        ? FilteredData.Skip((CurrentPage - 1) * PageSize).Take(PageSize)
+        : FilteredData;
+
+    //private Icons.Regular.Size12 GetSortIcon(bool sortAscending) => sortAscending ? new Icons.Regular.Size12.ArrowUp() : new Icons.Regular.Size12.ArrowDown()
+
+
+    protected override void OnParametersSet()
+    {
+        if (Data != null && Data.Any())
+        {
+            var newColumns = Data.First().Keys.ToList();
+            if (!Columns.SequenceEqual(newColumns))
+            {
+                Columns = newColumns;
+                ColumnFilters = Columns.ToDictionary(c => c, c => string.Empty);
+            }
+            ApplyFilters();
+        }
+        else
+        {
+            Columns.Clear();
+            FilteredData.Clear();
+        }
+    }
+
+    private void ApplyFilters()
+    {
+        if (Data == null) return;
+
+        var filtered = Data.AsEnumerable();
+
+        // Apply global filter
+        if (!string.IsNullOrWhiteSpace(GlobalFilter))
+        {
+            filtered = filtered.Where(row =>
+                row.Values.Any(v => v?.ToString()?.Contains(GlobalFilter, StringComparison.OrdinalIgnoreCase) == true));
+        }
+
+        // Apply column filters
+        foreach (var (column, filter) in ColumnFilters)
+        {
+            if (!string.IsNullOrWhiteSpace(filter))
+            {
+                filtered = filtered.Where(row =>
+                    row.TryGetValue(column, out var value) &&
+                    value?.ToString()?.Contains(filter, StringComparison.OrdinalIgnoreCase) == true);
+            }
+        }
+
+        // Apply sorting
+        if (!string.IsNullOrEmpty(SortColumn))
+        {
+            filtered = SortAscending
+                ? filtered.OrderBy(row => GetSortValue(row, SortColumn))
+                : filtered.OrderByDescending(row => GetSortValue(row, SortColumn));
+        }
+
+        FilteredData = filtered.ToList();
+        CurrentPage = 1;
+    }
+
+    private IComparable? GetSortValue(Dictionary<string, object?> row, string column)
+    {
+        if (!row.TryGetValue(column, out var value) || value == null)
+            return null;
+
+        // Try to parse as number for proper numeric sorting
+        if (value is string strValue)
+        {
+            if (double.TryParse(strValue, out var numValue))
+                return numValue;
+            return strValue;
+        }
+
+        // Return value if it's already comparable
+        if (value is IComparable comparable)
+            return comparable;
+
+        // Fallback to string representation for non-comparable types
+        return value.ToString() ?? "";
+    }
+
+    private void ToggleSort(string column)
+    {
+        if (SortColumn == column)
+        {
+            SortAscending = !SortAscending;
+        }
+        else
+        {
+            SortColumn = column;
+            SortAscending = true;
+        }
+        ApplyFilters();
+    }
+
+    private void GoToPage(int page)
+    {
+        CurrentPage = Math.Max(1, Math.Min(page, TotalPages));
+    }
+
+    private string GetRecordCountText()
+    {
+        var total = Data?.Count ?? 0;
+        var filtered = FilteredData.Count;
+        return total == filtered
+            ? $"{total.ToString("N0")} record(s)"
+            : $"{filtered.ToString("N0")} of {total.ToString("N0")} record(s)";
+    }
+
+    private string FormatColumnHeader(string column)
+    {
+        // Convert snake_case or camelCase to Title Case
+        var result = System.Text.RegularExpressions.Regex.Replace(column, "([a-z])([A-Z])", "$1 $2");
+        result = result.Replace("_", " ");
+        return CultureInfo.CurrentCulture.TextInfo.ToTitleCase(result.ToLower());
+    }
+
+    private string GetCellAlignmentClass(string column, Dictionary<string, object?> row)
+    {
+        if (ColumnFormats?.TryGetValue(column, out var format) == true)
+        {
+            return format.Type switch
+            {
+                FormatType.Currency or FormatType.Number or FormatType.Percentage => "align-right",
+                FormatType.Boolean => "align-center",
+                _ => ""
+            };
+        }
+
+        // Auto-detect alignment based on value type
+        if (row.TryGetValue(column, out var value) && value != null)
+        {
+            if (IsNumeric(value))
+                return "align-right";
+        }
+
+        return "";
+    }
+
+    private string FormatCellValue(string column, object? value)
+    {
+        if (value == null)
+            return "<span class=\"null-value\">NULL</span>";
+
+        var format = ColumnFormats?.GetValueOrDefault(column);
+
+        if (format != null)
+        {
+            return FormatWithDefinition(value, format);
+        }
+
+        // Auto-detect and format
+        return AutoFormat(value);
+    }
+
+    private string FormatWithDefinition(object value, ColumnFormat format)
+    {
+        var strValue = value.ToString() ?? "";
+
+        return format.Type switch
+        {
+            FormatType.Currency => FormatCurrency(value, format),
+            FormatType.Number => FormatNumber(value, format),
+            FormatType.Percentage => FormatPercentage(value, format),
+            FormatType.Date => FormatDate(value, format),
+            FormatType.DateTime => FormatDateTime(value, format),
+            FormatType.Boolean => FormatBoolean(value),
+            FormatType.Text => System.Web.HttpUtility.HtmlEncode(strValue),
+            _ => System.Web.HttpUtility.HtmlEncode(strValue)
+        };
+    }
+
+    private string AutoFormat(object value)
+    {
+        return value switch
+        {
+            bool b => FormatBoolean(b),
+            DateTime dt => $"<span class=\"date-value\">{dt.ToString("yyyy-MM-dd HH:mm:ss")}</span>",
+            DateTimeOffset dto => $"<span class=\"date-value\">{dto.ToString("yyyy-MM-dd HH:mm:ss")}</span>",
+            decimal d => FormatAutoNumber((double)d),
+            double dbl => FormatAutoNumber(dbl),
+            float f => FormatAutoNumber(f),
+            int i => $"<span class=\"number-value\">{i.ToString("N0")}</span>",
+            long l => $"<span class=\"number-value\">{l.ToString("N0")}</span>",
+            _ => System.Web.HttpUtility.HtmlEncode(value.ToString() ?? "")
+        };
+    }
+
+    private string FormatAutoNumber(double value)
+    {
+        var cssClass = value < 0 ? "number-value negative-value" : "number-value";
+        return $"<span class='{cssClass}'>{value.ToString("N2")}</span>";
+    }
+
+    private string FormatCurrency(object value, ColumnFormat format)
+    {
+        if (!TryParseNumber(value, out var numValue))
+            return System.Web.HttpUtility.HtmlEncode(value.ToString() ?? "");
+
+        var symbol = format.CurrencySymbol ?? "$";
+        var decimals = format.DecimalPlaces ?? 2;
+        var cssClass = numValue < 0 ? "number-value currency-value negative-value" : "number-value currency-value";
+        var suffix = numValue < 0 ? " CR" : "";
+        var formattedValue = Math.Abs(numValue).ToString($"N{decimals}");
+
+        return $"<span class='{cssClass}'>{symbol}{formattedValue}{suffix}</span>";
+    }
+
+    private string FormatNumber(object value, ColumnFormat format)
+    {
+        if (!TryParseNumber(value, out var numValue))
+            return System.Web.HttpUtility.HtmlEncode(value.ToString() ?? "");
+
+        var decimals = format.DecimalPlaces ?? 0;
+        var cssClass = numValue < 0 ? "number-value negative-value" : "number-value";
+        var prefix = format.Prefix ?? "";
+        var suffix = format.Suffix ?? "";
+        var formattedValue = numValue.ToString($"N{decimals}");
+
+        return $"<span class='{cssClass}'>{prefix}{formattedValue}{suffix}</span>";
+    }
+
+    private string FormatPercentage(object value, ColumnFormat format)
+    {
+        if (!TryParseNumber(value, out var numValue))
+            return System.Web.HttpUtility.HtmlEncode(value.ToString() ?? "");
+
+        var decimals = format.DecimalPlaces ?? 1;
+        var cssClass = numValue < 0 ? "number-value negative-value" : "number-value";
+
+        // Assume value is already a percentage (not 0-1 range) unless specified
+        var displayValue = format.MultiplyBy100 ? numValue * 100 : numValue;
+        var formattedValue = displayValue.ToString($"N{decimals}");
+
+        return $"<span class='{cssClass}'>{formattedValue}%</span>";
+    }
+
+    private string FormatDate(object value, ColumnFormat format)
+    {
+        if (value is DateTime dt)
+            return $"<span class='date-value'>{dt.ToString(format.DateFormat ?? "yyyy-MM-dd")}</span>";
+        if (value is DateTimeOffset dto)
+            return $"<span class='date-value'>{dto.ToString(format.DateFormat ?? "yyyy-MM-dd")}</span>";
+        if (DateTime.TryParse(value.ToString(), out var parsed))
+            return $"<span class='date-value'>{parsed.ToString(format.DateFormat ?? "yyyy-MM-dd")}</span>";
+        return System.Web.HttpUtility.HtmlEncode(value.ToString() ?? "");
+    }
+
+    private string FormatDateTime(object value, ColumnFormat format)
+    {
+        if (value is DateTime dt)
+            return $"<span class='date-value'>{dt.ToString(format.DateFormat ?? "yyyy-MM-dd HH:mm:ss")}</span>";
+        if (value is DateTimeOffset dto)
+            return $"<span class='date-value'>{dto.ToString(format.DateFormat ?? "yyyy-MM-dd HH:mm:ss")}</span>";
+        if (DateTime.TryParse(value.ToString(), out var parsed))
+            return $"<span class='date-value'>{parsed.ToString(format.DateFormat ?? "yyyy-MM-dd HH:mm:ss")}</span>";
+
+        return System.Web.HttpUtility.HtmlEncode(value.ToString() ?? "");
+    }
+
+    private string FormatBoolean(object value)
+    {
+        var boolValue = value switch
+        {
+            bool b => b,
+            string s => s.Equals("true", StringComparison.OrdinalIgnoreCase) || s == "1",
+            int i => i != 0,
+            _ => false
+        };
+
+        return boolValue
+            ? "<span class='boolean-true'>Yes</span>"
+            : "<span class='boolean-false'>No</span>";
+    }
+
+    private bool TryParseNumber(object value, out double result)
+    {
+        result = 0;
+        if (value is double d) { result = d; return true; }
+        if (value is decimal dec) { result = (double)dec; return true; }
+        if (value is float f) { result = f; return true; }
+        if (value is int i) { result = i; return true; }
+        if (value is long l) { result = l; return true; }
+        return double.TryParse(value.ToString(), out result);
+    }
+
+    private bool IsNumeric(object value)
+    {
+        return value is int or long or float or double or decimal ||
+               (value is string s && double.TryParse(s, out _));
+    }
+
+    private async Task ExportToCsv()
+    {
+        // Build CSV content
+        var csv = new System.Text.StringBuilder();
+
+        // Headers
+        csv.AppendLine(string.Join(",", Columns.Select(c => $"\"{c}\"")));
+
+        // Data
+        foreach (var row in FilteredData)
+        {
+            var values = Columns.Select(c =>
+            {
+                var value = row.TryGetValue(c, out var v) ? v?.ToString() ?? "" : "";
+                return value; //$"\"{value.Replace("\"", "\"\"")}\"";
+            });
+            csv.AppendLine(string.Join(",", values));
+        }
+
+        // Trigger download via JS interop would go here
+        // For now, this is a placeholder
+        await Task.CompletedTask;
+    }
+}

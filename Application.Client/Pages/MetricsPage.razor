@@ -65,7 +65,8 @@
                                 RowSize="DataGridRowSize.Medium"
                                 TGridItem="Metric"
                                 GridTemplateColumns="0.8fr 1.2fr 0.8fr 0.6fr 0.6fr 0.6fr 0.5fr 0.3fr"
-                                Style="height: 100%; overflow: auto;">
+                                Style="height: 100%; overflow: auto;"
+                                OnRowClick="@OnRowClicked">
                     
                     <PropertyColumn Property="@(m => m.KPI)" Title="KPI" Sortable="true" Filtered="!string.IsNullOrWhiteSpace(FilterKPI)">
                         <ColumnOptions>
@@ -134,24 +135,27 @@
 
                     <TemplateColumn Title="Actions" Align="@Align.End">
                         <ChildContent>
-                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
-                                <FluentButton IconStart="@(new Icons.Regular.Size16.Info())"
-                                              OnClick="@(() => OpenViewDetailsDialog(context))"
-                                              Appearance="Appearance.Stealth"
-                                              Title="View Details">
-                                </FluentButton>
-                                <FluentButton IconStart="@(new Icons.Regular.Size16.Edit())"
-                                              OnClick="@(() => OpenEditDialog(context))"
-                                              Appearance="Appearance.Stealth"
-                                              Title="Edit">
-                                </FluentButton>
-                                <FluentButton IconStart="@(new Icons.Regular.Size16.Delete())"
-                                              OnClick="@(() => DeleteMetric(context))"
-                                              Appearance="Appearance.Stealth"
-                                              Title="Delete"
-                                              style="color: #ef4444;">
-                                </FluentButton>
-                            </FluentStack>
+                            <div @onclick:stopPropagation="true">
+                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                    <FluentButton IconStart="@(new Icons.Regular.Size16.Play())"
+                                                  OnClick="@(() => OpenQueryResultsDialog(context))"
+                                                  Appearance="Appearance.Stealth"
+                                                  Title="Run Query"
+                                                  Disabled="@(string.IsNullOrEmpty(context.Query) || context.MetricDataSource == null)">
+                                    </FluentButton>
+                                    <FluentButton IconStart="@(new Icons.Regular.Size16.Edit())"
+                                                  OnClick="@(() => OpenEditDialog(context))"
+                                                  Appearance="Appearance.Stealth"
+                                                  Title="Edit">
+                                    </FluentButton>
+                                    <FluentButton IconStart="@(new Icons.Regular.Size16.Delete())"
+                                                  OnClick="@(() => DeleteMetric(context))"
+                                                  Appearance="Appearance.Stealth"
+                                                  Title="Delete"
+                                                  style="color: #ef4444;">
+                                    </FluentButton>
+                                </FluentStack>
+                            </div>
                         </ChildContent>
                     </TemplateColumn>
                 </FluentDataGrid>
@@ -307,6 +311,14 @@
         }
     }
 
+    private async Task OnRowClicked(FluentDataGridRow<Metric> row)
+    {
+        if (row.Item != null)
+        {
+            await OpenViewDetailsDialog(row.Item);
+        }
+    }
+
     private async Task OpenViewDetailsDialog(Metric metric)
     {
         await DialogService.ShowPanelAsync<MetricDetailsPanel>(metric, new DialogParameters
@@ -315,6 +327,20 @@
             PrimaryAction = null,
             SecondaryAction = "Close",
             Width = "700px",
+            Height = "auto",
+            Modal = true,
+            ShowDismiss = true
+        });
+    }
+
+    private async Task OpenQueryResultsDialog(Metric metric)
+    {
+        await DialogService.ShowDialogAsync<QueryResultsDialog>(metric, new DialogParameters
+        {
+            Title = $"Query Results: {metric.KPI}",
+            PrimaryAction = null,
+            SecondaryAction = "Close",
+            Width = "900px",
             Height = "auto",
             Modal = true,
             ShowDismiss = true
@@ -349,6 +375,32 @@
             HttpClient.DefaultRequestHeaders.Remove("X-Company-Id");
             HttpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId!);
 
+            // Handle data source scenarios
+            if (metric.MetricDataSourceId != null)
+            {
+                // Using existing data source - clear any navigation property to avoid validation errors
+                metric.MetricDataSource = null;
+            }
+            else if (metric.MetricDataSource != null)
+            {
+                // Creating new data source - create it first
+                var dataSourceResponse = await HttpClient.PostAsJsonAsync("api/metrics/datasources", metric.MetricDataSource);
+                if (dataSourceResponse.IsSuccessStatusCode)
+                {
+                    var createdDataSource = await dataSourceResponse.Content.ReadFromJsonAsync<MetricDataSource>();
+                    if (createdDataSource != null)
+                    {
+                        metric.MetricDataSourceId = createdDataSource.Id;
+                        metric.MetricDataSource = null; // Clear to avoid sending nested object
+                    }
+                }
+                else
+                {
+                    ToastService.ShowError("Failed to create data source");
+                    return;
+                }
+            }
+
             var response = await HttpClient.PostAsJsonAsync("api/metrics", metric);
             if (response.IsSuccessStatusCode)
             {
@@ -377,6 +429,32 @@
         {
             HttpClient.DefaultRequestHeaders.Remove("X-Company-Id");
             HttpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId!);
+
+            // Handle data source scenarios
+            if (metric.MetricDataSourceId != null)
+            {
+                // Using existing data source - clear any navigation property to avoid validation errors
+                metric.MetricDataSource = null;
+            }
+            else if (metric.MetricDataSource != null)
+            {
+                // Creating new data source - create it first
+                var dataSourceResponse = await HttpClient.PostAsJsonAsync("api/metrics/datasources", metric.MetricDataSource);
+                if (dataSourceResponse.IsSuccessStatusCode)
+                {
+                    var createdDataSource = await dataSourceResponse.Content.ReadFromJsonAsync<MetricDataSource>();
+                    if (createdDataSource != null)
+                    {
+                        metric.MetricDataSourceId = createdDataSource.Id;
+                        metric.MetricDataSource = null; // Clear to avoid sending nested object
+                    }
+                }
+                else
+                {
+                    ToastService.ShowError("Failed to create data source");
+                    return;
+                }
+            }
 
             var response = await HttpClient.PutAsJsonAsync($"api/metrics/{metric.Id}", metric);
             if (response.IsSuccessStatusCode)

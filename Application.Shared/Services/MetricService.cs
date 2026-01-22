@@ -8,10 +8,12 @@ namespace Application.Shared.Services
     public class MetricService : IMetricService
     {
         private readonly ApplicationDbContext _context;
+        private readonly IClickHouseService _clickHouseService;
 
-        public MetricService(ApplicationDbContext context)
+        public MetricService(ApplicationDbContext context, IClickHouseService clickHouseService)
         {
             _context = context;
+            _clickHouseService = clickHouseService;
         }
 
         public async Task<List<Metric>> GetMetrics(string companyId)
@@ -22,6 +24,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Recipients)
                 .Include(m => m.Verifiers)
                 .Include(m => m.Dimensions)
+                .Include(m => m.MetricDataSource)
                 .Where(m => m.CompanyId == companyId && m.IsActive)
                 .OrderBy(m => m.KPI)
                 .ToListAsync();
@@ -35,6 +38,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Recipients)
                 .Include(m => m.Verifiers)
                 .Include(m => m.Dimensions)
+                .Include(m => m.MetricDataSource)
                 .FirstOrDefaultAsync(m => m.Id == id && m.CompanyId == companyId && m.IsActive);
         }
 
@@ -58,6 +62,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Recipients)
                 .Include(m => m.Verifiers)
                 .Include(m => m.Dimensions)
+                .Include(m => m.MetricDataSource)
                 .FirstOrDefaultAsync(m => m.Id == id && m.CompanyId == companyId && m.IsActive);
 
             if (existingMetric == null)
@@ -71,6 +76,7 @@ namespace Application.Shared.Services
             existingMetric.KeyPerformanceArea = metric.KeyPerformanceArea;
             existingMetric.KPI = metric.KPI;
             existingMetric.Formula = metric.Formula;
+            existingMetric.Query = metric.Query;
             existingMetric.Type = metric.Type;
             existingMetric.Perspective = metric.Perspective;
             existingMetric.KPILevel = metric.KPILevel;
@@ -146,6 +152,9 @@ namespace Application.Shared.Services
                 CreatedOn = DateTime.UtcNow
             }).ToList();
 
+            // Update MetricDataSource reference (many-to-one relationship)
+            existingMetric.MetricDataSourceId = metric.MetricDataSourceId;
+
             await _context.SaveChangesAsync();
 
             return existingMetric;
@@ -177,6 +186,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Recipients)
                 .Include(m => m.Verifiers)
                 .Include(m => m.Dimensions)
+                .Include(m => m.MetricDataSource)
                 .Where(m => m.CompanyId == companyId && m.Functions.Any(f => f.Function == function) && m.IsActive)
                 .OrderBy(m => m.KPI)
                 .ToListAsync();
@@ -192,12 +202,115 @@ namespace Application.Shared.Services
                     .Include(m => m.Recipients)
                     .Include(m => m.Verifiers)
                     .Include(m => m.Dimensions)
+                    .Include(m => m.MetricDataSource)
                     .Where(m => m.CompanyId == companyId && m.Perspective == perspectiveEnum && m.IsActive)
                     .OrderBy(m => m.KPI)
                     .ToListAsync();
             }
 
             return new List<Metric>();
+        }
+
+        // Data Source methods
+        public async Task<List<MetricDataSource>> GetDataSources(string companyId)
+        {
+            return await _context.MetricDataSources
+                .Where(ds => ds.CompanyId == companyId)
+                .OrderBy(ds => ds.ConnectionName)
+                .ToListAsync();
+        }
+
+        public async Task<MetricDataSource?> GetDataSource(int id, string companyId)
+        {
+            return await _context.MetricDataSources
+                .FirstOrDefaultAsync(ds => ds.Id == id && ds.CompanyId == companyId);
+        }
+
+        public async Task<MetricDataSource> CreateDataSource(MetricDataSource dataSource, string userId)
+        {
+            dataSource.CreatedOn = DateTime.UtcNow;
+            dataSource.CreatedBy = userId;
+
+            _context.MetricDataSources.Add(dataSource);
+            await _context.SaveChangesAsync();
+
+            return dataSource;
+        }
+
+        public async Task<MetricDataSource?> UpdateDataSource(int id, MetricDataSource dataSource, string companyId, string userId)
+        {
+            var existingDataSource = await _context.MetricDataSources
+                .FirstOrDefaultAsync(ds => ds.Id == id && ds.CompanyId == companyId);
+
+            if (existingDataSource == null)
+            {
+                return null;
+            }
+
+            existingDataSource.Type = dataSource.Type;
+            existingDataSource.Host = dataSource.Host;
+            existingDataSource.Port = dataSource.Port;
+            existingDataSource.Database = dataSource.Database;
+            existingDataSource.Username = dataSource.Username;
+            existingDataSource.Password = dataSource.Password;
+            existingDataSource.ConnectionName = dataSource.ConnectionName;
+            existingDataSource.UseSSL = dataSource.UseSSL;
+            existingDataSource.ModifiedOn = DateTime.UtcNow;
+            existingDataSource.ModifiedBy = userId;
+
+            await _context.SaveChangesAsync();
+
+            return existingDataSource;
+        }
+
+        public async Task<bool> DeleteDataSource(int id, string companyId)
+        {
+            var dataSource = await _context.MetricDataSources
+                .FirstOrDefaultAsync(ds => ds.Id == id && ds.CompanyId == companyId);
+
+            if (dataSource == null)
+            {
+                return false;
+            }
+
+            // Check if any metrics are using this data source
+            var metricsUsingDataSource = await _context.Metrics
+                .AnyAsync(m => m.MetricDataSourceId == id && m.IsActive);
+
+            if (metricsUsingDataSource)
+            {
+                // Don't delete if in use, could throw exception or return false
+                return false;
+            }
+
+            _context.MetricDataSources.Remove(dataSource);
+            await _context.SaveChangesAsync();
+
+            return true;
+        }
+
+        public async Task<List<Dictionary<string, object?>>> ExecuteMetricQuery(int metricId, string companyId)
+        {
+            var metric = await _context.Metrics
+                .Include(m => m.MetricDataSource)
+                .FirstOrDefaultAsync(m => m.Id == metricId && m.CompanyId == companyId && m.IsActive);
+
+            if (metric == null)
+            {
+                throw new InvalidOperationException("Metric not found");
+            }
+
+            if (string.IsNullOrEmpty(metric.Query))
+            {
+                throw new InvalidOperationException("Metric does not have a query defined");
+            }
+
+            if (metric.MetricDataSource == null)
+            {
+                throw new InvalidOperationException("Metric does not have a data source configured");
+            }
+
+            return await _clickHouseService.ExecuteQueryAsync(metric.MetricDataSource, metric.Query);
         }
     }
 }

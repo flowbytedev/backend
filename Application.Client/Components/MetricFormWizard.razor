@@ -1,6 +1,8 @@
 @using Application.Shared.Models
 @using Application.Shared.Enums
 @using Microsoft.FluentUI.AspNetCore.Components
+@using System.Net.Http.Json
+@inject HttpClient HttpClient
 @implements IDialogContentComponent<Metric>
 
 <FluentDialogHeader ShowDismiss="true">
@@ -213,7 +215,107 @@
         }
         else if (currentStep == 4)
         {
-            <!-- Step 5: Measurement & Data -->
+            <!-- Step 5: Data Source Connection -->
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
+                <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                    🔌 Data Source Connection
+                </FluentLabel>
+                <FluentDivider Style="width: 100%;" />
+
+                <FluentLabel Color="Color.Neutral">
+                    Configure a database connection to fetch metric data. This is optional.
+                </FluentLabel>
+
+                <FluentCheckbox @bind-Value="hasDataSource" Label="Enable Data Source Connection" />
+
+                @if (hasDataSource)
+                {
+                    @if (AvailableDataSources.Any())
+                    {
+                        <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                            <FluentRadioGroup @bind-Value="useExistingDataSource" Orientation="Orientation.Horizontal">
+                                <FluentRadio Value="true">Use Existing Data Source</FluentRadio>
+                                <FluentRadio Value="false">Create New Data Source</FluentRadio>
+                            </FluentRadioGroup>
+                        </FluentStack>
+
+                        @if (useExistingDataSource)
+                        {
+                            <FluentSelect TOption="string"
+                                          Label="Select Data Source *"
+                                          Style="width: 100%;"
+                                          Value="selectedDataSourceIdString"
+                                          ValueChanged="@OnDataSourceSelectionChangedFromString"
+                                          SelectedOption="selectedDataSourceIdString">
+                                <FluentOption TOption="string" Value="">-- Select a data source --</FluentOption>
+                                @foreach (var ds in AvailableDataSources)
+                                {
+                                    <FluentOption TOption="string" Value="@ds.Id.ToString()">
+                                        @(string.IsNullOrEmpty(ds.ConnectionName) ? $"{ds.Type}: {ds.Host}:{ds.Port}/{ds.Database}" : $"{ds.ConnectionName} ({ds.Type})")
+                                    </FluentOption>
+                                }
+                            </FluentSelect>
+
+                            @if (selectedDataSourceId != null)
+                            {
+                                <FluentCard Style="background: #f8fafc; padding: 12px;">
+                                    <FluentStack Orientation="Orientation.Vertical" VerticalGap="4">
+                                        <FluentLabel Weight="FontWeight.Bold">Selected Data Source Details</FluentLabel>
+                                        <FluentLabel>Type: @DataSourceModel.Type</FluentLabel>
+                                        <FluentLabel>Host: @DataSourceModel.Host:@DataSourceModel.Port</FluentLabel>
+                                        <FluentLabel>Database: @DataSourceModel.Database</FluentLabel>
+                                        <FluentLabel>Username: @DataSourceModel.Username</FluentLabel>
+                                        <FluentLabel>SSL/TLS: @(DataSourceModel.UseSSL ? "Enabled" : "Disabled")</FluentLabel>
+                                    </FluentStack>
+                                </FluentCard>
+                            }
+                        }
+                    }
+
+                    @if (!useExistingDataSource || !AvailableDataSources.Any())
+                    {
+                        <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                            <FluentTextField @bind-Value="DataSourceModel.ConnectionName" Label="Connection Name" Style="flex: 1;"
+                                Placeholder="e.g., Sales Database" />
+                            <FluentSelect TOption="DataSourceType" Items="@dataSourceTypes" @bind-SelectedOption="DataSourceModel.Type"
+                                Label="Database Type *" Style="flex: 1;" />
+                        </FluentStack>
+
+                        <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                            <FluentTextField @bind-Value="DataSourceModel.Host" Label="Host *" Required Style="flex: 2;"
+                                Placeholder="e.g., localhost or db.example.com" />
+                            <FluentNumberField @bind-Value="DataSourceModel.Port" Label="Port *" Style="flex: 1;"
+                                Placeholder="8123" />
+                        </FluentStack>
+
+                        <FluentTextField @bind-Value="DataSourceModel.Database" Label="Database *" Required Style="width: 100%;"
+                            Placeholder="Database name" />
+
+                        <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                            <FluentTextField @bind-Value="DataSourceModel.Username" Label="Username *" Required Style="flex: 1;"
+                                Placeholder="Database username" />
+                            <FluentTextField @bind-Value="DataSourceModel.Password" Label="Password" Style="flex: 1;"
+                                Placeholder="Database password" TextFieldType="TextFieldType.Password" />
+                        </FluentStack>
+
+                        <FluentCheckbox @bind-Value="DataSourceModel.UseSSL" Label="Use SSL/TLS" />
+                    }
+
+                    <FluentDivider Style="width: 100%;" />
+
+                    <FluentLabel Weight="FontWeight.Bold">Query</FluentLabel>
+                    <FluentLabel Color="Color.Neutral">
+                        Write the SQL query to fetch the metric data from your data source.
+                    </FluentLabel>
+
+                    <FluentTextArea @bind-Value="Content.Query" Label="SQL Query" Rows="6" Style="width: 100%; font-family: monospace;"
+                        Placeholder="SELECT SUM(sales_amount) as total_sales FROM sales WHERE date >= start_date" />
+                }
+            </FluentStack>
+        }
+        else if (currentStep == 5)
+        {
+            <!-- Step 6: Measurement & Data -->
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
                 <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
                     📊 Measurement & Data Management
@@ -286,7 +388,7 @@
     public FluentDialog Dialog { get; set; } = default!;
 
     private int currentStep = 0;
-    private int totalSteps = 5;
+    private int totalSteps = 6;
 
     // Enum arrays for dropdowns
     private MetricType[] metricTypes = Enum.GetValues<MetricType>();
@@ -297,6 +399,89 @@
     // Nullable arrays - include null as first option
     private ReportingFrequency?[] reportingFrequenciesNullable = new ReportingFrequency?[] { null }.Concat(Enum.GetValues<ReportingFrequency>().Cast<ReportingFrequency?>()).ToArray();
     private DataIntegrityLevel?[] dataIntegrityLevelsNullable = new DataIntegrityLevel?[] { null }.Concat(Enum.GetValues<DataIntegrityLevel>().Cast<DataIntegrityLevel?>()).ToArray();
+
+    // Data source types
+    private DataSourceType[] dataSourceTypes = Enum.GetValues<DataSourceType>();
+
+    // Data source state
+    private bool hasDataSource = false;
+    private bool useExistingDataSource = false;
+    private int? selectedDataSourceId = null;
+    private string selectedDataSourceIdString = "";
+    private MetricDataSource DataSourceModel = new MetricDataSource { Port = 8123, Type = DataSourceType.ClickHouse };
+    private List<MetricDataSource> AvailableDataSources = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Load available data sources
+        await LoadDataSources();
+
+        // Initialize data source from existing metric if editing
+        if (Content.MetricDataSourceId != null && Content.MetricDataSource != null)
+        {
+            hasDataSource = true;
+            useExistingDataSource = true;
+            selectedDataSourceId = Content.MetricDataSourceId;
+            selectedDataSourceIdString = Content.MetricDataSourceId.Value.ToString();
+            DataSourceModel = Content.MetricDataSource;
+        }
+    }
+
+    private async Task LoadDataSources()
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(Content.CompanyId))
+            {
+                HttpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+                HttpClient.DefaultRequestHeaders.Add("X-Company-Id", Content.CompanyId);
+            }
+
+            var response = await HttpClient.GetFromJsonAsync<List<MetricDataSource>>("api/metrics/datasources");
+            if (response != null)
+            {
+                AvailableDataSources = response;
+            }
+        }
+        catch
+        {
+            // Silently fail - data sources loading is not critical
+            AvailableDataSources = new();
+        }
+    }
+
+    private void OnDataSourceSelectionChangedFromString(string value)
+    {
+        selectedDataSourceIdString = value;
+     
+        if (int.TryParse(selectedDataSourceIdString, out var id))
+        {
+            selectedDataSourceId = id;
+            var selected = AvailableDataSources.FirstOrDefault(ds => ds.Id == id);
+            Console.WriteLine("Selected Data Source ID: " + id);
+            if (selected != null)
+            {
+                DataSourceModel = selected;
+            }
+        }
+        else
+        {
+            selectedDataSourceId = null;
+        }
+    }
+
+    private void OnDataSourceSelectionChanged(int? dataSourceId)
+    {
+        selectedDataSourceId = dataSourceId;
+        if (dataSourceId != null)
+        {
+            var selected = AvailableDataSources.FirstOrDefault(ds => ds.Id == dataSourceId);
+            if (selected != null)
+            {
+                DataSourceModel = selected;
+            }
+        }
+    }
 
     private void NextStep()
     {
@@ -316,6 +501,46 @@
 
     private async Task SaveAsync()
     {
+        // Set the data source if enabled
+        if (hasDataSource)
+        {
+            if (useExistingDataSource && selectedDataSourceId != null)
+            {
+                // Use existing data source - only set the ID reference, do NOT include the data source object
+                // This ensures the backend only updates the foreign key without creating a new data source
+                Content.MetricDataSourceId = selectedDataSourceId;
+                Console.WriteLine("Using existing data source ID: " + selectedDataSourceId);
+                Content.MetricDataSource = null;
+            }
+            else if (!useExistingDataSource)
+            {
+                // Create new data source - pass a fresh object without an ID
+                Content.MetricDataSourceId = null;
+                Content.MetricDataSource = new MetricDataSource
+                {
+                    ConnectionName = DataSourceModel.ConnectionName,
+                    Type = DataSourceModel.Type,
+                    Host = DataSourceModel.Host,
+                    Port = DataSourceModel.Port,
+                    Database = DataSourceModel.Database,
+                    Username = DataSourceModel.Username,
+                    Password = DataSourceModel.Password,
+                    UseSSL = DataSourceModel.UseSSL
+                };
+            }
+            else
+            {
+                // useExistingDataSource is true but no selection made - clear data source
+                Content.MetricDataSourceId = null;
+                Content.MetricDataSource = null;
+            }
+        }
+        else
+        {
+            Content.MetricDataSourceId = null;
+            Content.MetricDataSource = null;
+        }
+
         await Dialog.CloseAsync(Content);
     }
 

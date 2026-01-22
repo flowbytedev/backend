@@ -14,6 +14,10 @@ public class Metric : BaseModel
     public ICollection<MetricVerifier> Verifiers { get; set; } = new List<MetricVerifier>();
     public ICollection<MetricDimension> Dimensions { get; set; } = new List<MetricDimension>();
 
+    // Foreign key for data source (many-to-one: many metrics can share one data source)
+    public int? MetricDataSourceId { get; set; }
+    public MetricDataSource? MetricDataSource { get; set; }
+
     [MaxLength(200)]
     public string? ContactEmail { get; set; }
 
@@ -30,6 +34,9 @@ public class Metric : BaseModel
 
     [MaxLength(1000)]
     public string? Formula { get; set; }
+
+    [MaxLength(5000)]
+    public string? Query { get; set; }
 
     [Required]
     public MetricType Type { get; set; }
