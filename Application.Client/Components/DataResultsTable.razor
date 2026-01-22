@@ -1,7 +1,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using System.Globalization
 @using Application.Client.Models
-
+@inject IJSRuntime JSRuntime
 
 <div class="data-results-table">
     @if (Data == null || !Data.Any())
@@ -444,7 +444,6 @@
 
     private async Task ExportToCsv()
     {
-        // Build CSV content
         var csv = new System.Text.StringBuilder();
 
         // Headers
@@ -461,8 +460,16 @@
             csv.AppendLine(string.Join(",", values));
         }
 
-        // Trigger download via JS interop would go here
-        // For now, this is a placeholder
-        await Task.CompletedTask;
+        var fileName = $"export_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+        var bytes = System.Text.Encoding.UTF8.GetBytes(csv.ToString());
+        var base64 = Convert.ToBase64String(bytes);
+
+        await JSRuntime.InvokeVoidAsync("eval",
+            "var a = document.createElement('a');" +
+            $"a.href = 'data:text/csv;base64,{base64}';" +
+            $"a.download = '{fileName}';" +
+            "document.body.appendChild(a);" +
+            "a.click();" +
+            "document.body.removeChild(a);");
     }
 }
