@@ -136,7 +136,7 @@
         // Detect currency columns by name
         if (lowerColumn.Contains("amount") || lowerColumn.Contains("price") ||
             lowerColumn.Contains("cost") || lowerColumn.Contains("revenue") ||
-            lowerColumn.Contains("salary") || lowerColumn.Contains("total") ||
+            lowerColumn.Contains("salary") || (lowerColumn.Contains("total") && !lowerColumn.Contains("transaction")) ||
             lowerColumn.Contains("balance") || lowerColumn.Contains("fee"))
         {
             return new ColumnFormat
