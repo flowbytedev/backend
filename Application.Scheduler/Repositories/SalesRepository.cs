@@ -104,7 +104,10 @@ public class SalesRepository : ISalesRepository
                 d.[Description]     AS [DivisionName],
                 ic.[Description]    AS [CategoryName],
                 MAX(DATEPART(HOUR, sb.[Time])) AS [Hour],
-                SUM(sb.NetAmount / 89700.0) * -1 AS [NetAmountAc],
+                CASE
+                    WHEN sb.StoreCode = 'IRQMAL' THEN SUM(sb.NetAmount / 1320.0) * -1
+                    ELSE SUM(sb.NetAmount / 89700.0) * -1
+                END AS [NetAmountAc],
             
                 (str.TotalTransactions / NULLIF(stc.CategoryCount, 0)) AS TotalStoreTransactions,
             
