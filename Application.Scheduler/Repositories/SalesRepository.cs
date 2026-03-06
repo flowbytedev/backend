@@ -44,7 +44,13 @@ public class SalesRepository : ISalesRepository
 
         var sql = @$"
             DECLARE @Today date = CONVERT(date, GETDATE());
- 
+            DECLARE @BlackMarketRate DECIMAL(18,6);
+
+            SELECT TOP 1 
+                @BlackMarketRate = [Black Market Rate (Actual)]
+            FROM [{database.Name}$Black Market Rate]
+            ORDER BY [Date] DESC;
+            
             /* 1) Materialize today's sales once */
             IF OBJECT_ID('tempdb..#SalesBase') IS NOT NULL DROP TABLE #SalesBase;
             
@@ -82,6 +88,12 @@ public class SalesRepository : ISalesRepository
                 FROM #SalesBase
                 GROUP BY StoreCode
             ),
+            BlackMarketRate AS
+            (
+                SELECT TOP 1 [Black Market Rate (Actual)] as BlackMarketRate
+                FROM [{database.Name}$Black Market Rate] AS bmr 
+                ORDER BY [Date] DESC
+            ),
             StoreTransactions AS
             (
                 SELECT th.[Store No_] AS StoreCode, COUNT(*) * 1.0 AS TotalTransactions
@@ -105,7 +117,7 @@ public class SalesRepository : ISalesRepository
                 ic.[Description]    AS [CategoryName],
                 MAX(DATEPART(HOUR, sb.[Time])) AS [Hour],
                 CASE
-                    WHEN sb.StoreCode = 'IRQMAL' THEN SUM(sb.NetAmount / 1320.0) * -1
+                    WHEN sb.StoreCode = 'IRQMAL' THEN SUM(sb.NetAmount / @BlackMarketRate) * -1
                     ELSE SUM(sb.NetAmount / 89700.0) * -1
                 END AS [NetAmountAc],
             
@@ -139,35 +151,6 @@ public class SalesRepository : ISalesRepository
             OPTION (RECOMPILE);";
 
 
-            
-
-        var sql_old = @$"
-            select s.[Item Store Type] as [Scheme],
-                    tse.[Store No_] as [StoreCode],
-                    d.[Description] as [DivisionName],
-                    ic.[Description] as [CategoryName],
-                    MAX(DATEPART(HOUR, tse.[Time])) as [Hour],
-                    SUM(tse.[Net Amount] / [BM Rate]) * -1 as [NetAmountAc],
-                    COUNT(DISTINCT CONCAT(tse.[Store No_], tse.[POS Terminal No_], tse.[Transaction No_])) as [TotalTransactions]
-            from [{database.Name}$Trans_ Sales Entry] as tse
-            left join [{database.Name}$Transaction Header] as th on th.[Store No_] = tse.[Store No_]
-                                            and th.[POS Terminal No_] = tse.[POS Terminal No_]
-                                            and th.[Transaction No_] = tse.[Transaction No_]
-            left join [{database.Name}$Store] as s on s.[No_] = tse.[Store No_]
-            left join [{database.Name}$Item Category] as ic on ic.Code = tse.[Item Category Code]
-            left join [{database.Name}$Division] as d on d.Code = ic.[Division Code]
-
-            where tse.[Date] = CONVERT(date,  GETDATE())
-            and th.Wastage = 0
-            and th.[Transaction Type] = 2
-
-            group by s.[Item Store Type],
-                    tse.[Store No_],
-                    d.[Description],
-                    ic.[Description]
-
-            order by tse.[Store No_];";
-
         var conntectionString = @$"Server={database.HostIp};
                                     Initial Catalog={database.Name};
                                     Persist Security Info=False;
@@ -194,7 +177,8 @@ public class SalesRepository : ISalesRepository
                     {
                         results.Add(new SalesGroupedByStoreHour
                         {
-                            Scheme = reader["Scheme"].ToString() ?? "",
+                            // if StoreCode = IRQMAL than SPINNEYS IRAQ else reader["Scheme"].ToString()
+                            Scheme = reader["StoreCode"].ToString() == "IRQMAL" ? "SPINNEYS IRAQ" : reader["Scheme"].ToString(),
                             StoreCode = reader["StoreCode"].ToString() ?? "",
                             DivisionName = reader["DivisionName"].ToString() ?? "",
                             CategoryName = reader["CategoryName"].ToString() ?? "",
