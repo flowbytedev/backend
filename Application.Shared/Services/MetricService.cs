@@ -25,6 +25,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Verifiers)
                 .Include(m => m.Dimensions)
                 .Include(m => m.MetricDataSource)
+                .Include(m => m.Filters)
                 .Where(m => m.CompanyId == companyId && m.IsActive)
                 .OrderBy(m => m.KPI)
                 .ToListAsync();
@@ -39,6 +40,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Verifiers)
                 .Include(m => m.Dimensions)
                 .Include(m => m.MetricDataSource)
+                .Include(m => m.Filters)
                 .FirstOrDefaultAsync(m => m.Id == id && m.CompanyId == companyId && m.IsActive);
         }
 
@@ -63,6 +65,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Verifiers)
                 .Include(m => m.Dimensions)
                 .Include(m => m.MetricDataSource)
+                .Include(m => m.Filters)
                 .FirstOrDefaultAsync(m => m.Id == id && m.CompanyId == companyId && m.IsActive);
 
             if (existingMetric == null)
@@ -152,6 +155,25 @@ namespace Application.Shared.Services
                 CreatedOn = DateTime.UtcNow
             }).ToList();
 
+            // Update Filters collection
+            _context.MetricFilters.RemoveRange(existingMetric.Filters);
+            existingMetric.Filters = metric.Filters.Select(f => new MetricFilter
+            {
+                ColumnName = f.ColumnName,
+                FilterLabel = f.FilterLabel,
+                FilterType = f.FilterType,
+                Operator = f.Operator,
+                DefaultValue = f.DefaultValue,
+                SelectOptions = f.SelectOptions,
+                IsRequired = f.IsRequired,
+                SortOrder = f.SortOrder,
+                Placeholder = f.Placeholder,
+                Description = f.Description,
+                CompanyId = companyId,
+                CreatedBy = userId,
+                CreatedOn = DateTime.UtcNow
+            }).ToList();
+
             // Update MetricDataSource reference (many-to-one relationship)
             existingMetric.MetricDataSourceId = metric.MetricDataSourceId;
 
@@ -187,6 +209,7 @@ namespace Application.Shared.Services
                 .Include(m => m.Verifiers)
                 .Include(m => m.Dimensions)
                 .Include(m => m.MetricDataSource)
+                .Include(m => m.Filters)
                 .Where(m => m.CompanyId == companyId && m.Functions.Any(f => f.Function == function) && m.IsActive)
                 .OrderBy(m => m.KPI)
                 .ToListAsync();
@@ -203,6 +226,7 @@ namespace Application.Shared.Services
                     .Include(m => m.Verifiers)
                     .Include(m => m.Dimensions)
                     .Include(m => m.MetricDataSource)
+                    .Include(m => m.Filters)
                     .Where(m => m.CompanyId == companyId && m.Perspective == perspectiveEnum && m.IsActive)
                     .OrderBy(m => m.KPI)
                     .ToListAsync();
@@ -289,10 +313,11 @@ namespace Application.Shared.Services
             return true;
         }
 
-        public async Task<List<Dictionary<string, object?>>> ExecuteMetricQuery(int metricId, string companyId)
+        public async Task<List<Dictionary<string, object?>>> ExecuteMetricQuery(int metricId, string companyId, List<MetricFilterValue>? filterValues = null)
         {
             var metric = await _context.Metrics
                 .Include(m => m.MetricDataSource)
+                .Include(m => m.Filters)
                 .FirstOrDefaultAsync(m => m.Id == metricId && m.CompanyId == companyId && m.IsActive);
 
             if (metric == null)
@@ -310,7 +335,113 @@ namespace Application.Shared.Services
                 throw new InvalidOperationException("Metric does not have a data source configured");
             }
 
-            return await _clickHouseService.ExecuteQueryAsync(metric.MetricDataSource, metric.Query);
+            // Apply filters to the query
+            string finalQuery = ApplyFiltersToQuery(metric.Query, metric.Filters, filterValues);
+
+            return await _clickHouseService.ExecuteQueryAsync(metric.MetricDataSource, finalQuery);
+        }
+
+        private string ApplyFiltersToQuery(string baseQuery, ICollection<MetricFilter> filters, List<MetricFilterValue>? filterValues)
+        {
+            if (filters == null || !filters.Any())
+            {
+                return baseQuery;
+            }
+
+            var whereConditions = new List<string>();
+
+            foreach (var filter in filters.OrderBy(f => f.SortOrder))
+            {
+                var filterValue = filterValues?.FirstOrDefault(fv => fv.ColumnName == filter.ColumnName);
+                var value = filterValue?.Value ?? filter.DefaultValue;
+
+                if (string.IsNullOrWhiteSpace(value))
+                {
+                    continue;
+                }
+
+                var condition = BuildCondition(filter.ColumnName, filter.Operator, value, filter.FilterType);
+                if (!string.IsNullOrEmpty(condition))
+                {
+                    whereConditions.Add(condition);
+                }
+            }
+
+            if (!whereConditions.Any())
+            {
+                return baseQuery;
+            }
+
+            // Check if query already has a WHERE clause
+            var upperQuery = baseQuery.ToUpperInvariant();
+            var whereClause = string.Join(" AND ", whereConditions);
+
+            if (upperQuery.Contains("WHERE"))
+            {
+                // Add conditions to existing WHERE clause
+                return baseQuery + $" AND {whereClause}";
+            }
+            else
+            {
+                // Add new WHERE clause
+                return baseQuery + $" WHERE {whereClause}";
+            }
+        }
+
+        private string BuildCondition(string columnName, string op, string value, string filterType)
+        {
+            var upperOp = op.ToUpperInvariant();
+
+            switch (upperOp)
+            {
+                case "=":
+                case "<>":
+                case "<":
+                case ">":
+                case "<=":
+                case ">=":
+                    return $"{columnName} {op} {FormatValueForSql(value, filterType)}";
+
+                case "IN":
+                case "NOT IN":
+                    var inValues = value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (inValues.Length == 0) return string.Empty;
+                    var formattedInValues = inValues.Select(v => FormatValueForSql(v, filterType));
+                    return $"{columnName} {upperOp} ({string.Join(", ", formattedInValues)})";
+
+                case "LIKE":
+                case "NOT LIKE":
+                    // Value should already contain % wildcards if needed
+                    var likeValue = value.Replace("'", "''");
+                    return $"{columnName} {upperOp} '{likeValue}'";
+
+                case "BETWEEN":
+                    var betweenValues = value.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (betweenValues.Length != 2) return string.Empty;
+                    return $"{columnName} BETWEEN {FormatValueForSql(betweenValues[0], filterType)} AND {FormatValueForSql(betweenValues[1], filterType)}";
+
+                default:
+                    // Fallback to equals
+                    return $"{columnName} = {FormatValueForSql(value, filterType)}";
+            }
+        }
+
+        private string FormatValueForSql(string value, string filterType)
+        {
+            switch (filterType.ToLowerInvariant())
+            {
+                case "number":
+                    // No quotes for numbers
+                    return value;
+                case "date":
+                    // Use date format for ClickHouse
+                    return $"'{value}'";
+                case "text":
+                case "select":
+                default:
+                    // Escape single quotes and wrap in quotes
+                    return $"'{value.Replace("'", "''")}'";
+            }
         }
     }
 }

@@ -1,0 +1,351 @@
+@using Application.Shared.Models
+@using Microsoft.FluentUI.AspNetCore.Components
+@implements IDialogContentComponent<Metric>
+
+<FluentDialogBody>
+    <div style="min-height: 300px; display: flex; flex-direction: column; gap: 16px;">
+        @if (!Content.Filters.Any())
+        {
+            <FluentMessageBar Title="No Filters" Intent="@MessageIntent.Info">
+                This metric does not have any filters configured. The query will run with default settings.
+            </FluentMessageBar>
+        }
+        else
+        {
+            <FluentMessageBar Title="Configure Filters" Intent="@MessageIntent.Info">
+                Adjust the filter values below before executing the metric query.
+            </FluentMessageBar>
+
+            @foreach (var filter in Content.Filters.OrderBy(f => f.SortOrder))
+            {
+                var columnName = filter.ColumnName;
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <FluentLabel>
+                        @filter.FilterLabel
+                        <span style="color: #6b7280; font-weight: normal; font-size: 0.875rem;"> (@GetOperatorLabel(filter.Operator))</span>
+                        @if (filter.IsRequired)
+                        {
+                            <span style="color: #ef4444;"> *</span>
+                        }
+                    </FluentLabel>
+
+                    @if (!string.IsNullOrEmpty(filter.Description))
+                    {
+                        <p style="margin: 0; font-size: 0.875rem; color: #6b7280;">@filter.Description</p>
+                    }
+
+                    @switch (filter.FilterType.ToLowerInvariant())
+                    {
+                        case "date":
+                            @if (filter.Operator == "BETWEEN")
+                            {
+                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                    <FluentTextField Type="TextFieldType.Date"
+                                                   Value="@GetBetweenStartValue(columnName)"
+                                                   ValueChanged="@(val => SetBetweenStartValue(columnName, val))"
+                                                   Placeholder="Start date"
+                                                   Required="@filter.IsRequired"
+                                                   Style="flex: 1;" />
+                                    <span style="align-self: center;">to</span>
+                                    <FluentTextField Type="TextFieldType.Date"
+                                                   Value="@GetBetweenEndValue(columnName)"
+                                                   ValueChanged="@(val => SetBetweenEndValue(columnName, val))"
+                                                   Placeholder="End date"
+                                                   Required="@filter.IsRequired"
+                                                   Style="flex: 1;" />
+                                </FluentStack>
+                            }
+                            else
+                            {
+                                <FluentTextField Type="TextFieldType.Date"
+                                               Value="@GetFilterValue(columnName)"
+                                               ValueChanged="@(val => SetFilterValue(columnName, val))"
+                                               Placeholder="@(filter.Placeholder ?? "YYYY-MM-DD")"
+                                               Required="@filter.IsRequired"
+                                               Style="width: 100%;" />
+                            }
+                            break;
+
+                        case "number":
+                            @if (filter.Operator == "BETWEEN")
+                            {
+                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                    <FluentTextField Type="TextFieldType.Number"
+                                                   Value="@GetBetweenStartValue(columnName)"
+                                                   ValueChanged="@(val => SetBetweenStartValue(columnName, val))"
+                                                   Placeholder="Min value"
+                                                   Required="@filter.IsRequired"
+                                                   Style="flex: 1;" />
+                                    <span style="align-self: center;">to</span>
+                                    <FluentTextField Type="TextFieldType.Number"
+                                                   Value="@GetBetweenEndValue(columnName)"
+                                                   ValueChanged="@(val => SetBetweenEndValue(columnName, val))"
+                                                   Placeholder="Max value"
+                                                   Required="@filter.IsRequired"
+                                                   Style="flex: 1;" />
+                                </FluentStack>
+                            }
+                            else
+                            {
+                                <FluentTextField Type="TextFieldType.Text"
+                                               Value="@GetFilterValue(columnName)"
+                                               ValueChanged="@(val => SetFilterValue(columnName, val))"
+                                               Placeholder="@GetPlaceholderForOperator(filter)"
+                                               Required="@filter.IsRequired"
+                                               Style="width: 100%;" />
+                            }
+                            break;
+
+                        case "select":
+                            @if (!string.IsNullOrEmpty(filter.SelectOptions))
+                            {
+                                @if (filter.Operator == "IN" || filter.Operator == "NOT IN")
+                                {
+                                    <FluentSelect TOption="string"
+                                                Multiple="true"
+                                                SelectedOptions="@GetMultiSelectValue(columnName)"
+                                                SelectedOptionsChanged="@(val => SetMultiSelectValue(columnName, val))"
+                                                Required="@filter.IsRequired"
+                                                Style="width: 100%;">
+                                        @foreach (var option in filter.SelectOptions.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                        {
+                                            <FluentOption Value="@option">@option</FluentOption>
+                                        }
+                                    </FluentSelect>
+                                }
+                                else
+                                {
+                                    <FluentSelect TOption="string"
+                                                Value="@GetFilterValue(columnName)"
+                                                ValueChanged="@(val => SetFilterValue(columnName, val))"
+                                                Required="@filter.IsRequired"
+                                                Style="width: 100%;">
+                                        <FluentOption Value="">-- Select --</FluentOption>
+                                        @foreach (var option in filter.SelectOptions.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                                        {
+                                            <FluentOption Value="@option">@option</FluentOption>
+                                        }
+                                    </FluentSelect>
+                                }
+                            }
+                            break;
+
+                        case "text":
+                        default:
+                            @if (filter.Operator == "BETWEEN")
+                            {
+                                <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="8">
+                                    <FluentTextField Value="@GetBetweenStartValue(columnName)"
+                                                   ValueChanged="@(val => SetBetweenStartValue(columnName, val))"
+                                                   Placeholder="Start value"
+                                                   Required="@filter.IsRequired"
+                                                   Style="flex: 1;" />
+                                    <span style="align-self: center;">to</span>
+                                    <FluentTextField Value="@GetBetweenEndValue(columnName)"
+                                                   ValueChanged="@(val => SetBetweenEndValue(columnName, val))"
+                                                   Placeholder="End value"
+                                                   Required="@filter.IsRequired"
+                                                   Style="flex: 1;" />
+                                </FluentStack>
+                            }
+                            else
+                            {
+                                <FluentTextField Value="@GetFilterValue(columnName)"
+                                               ValueChanged="@(val => SetFilterValue(columnName, val))"
+                                               Placeholder="@GetPlaceholderForOperator(filter)"
+                                               Required="@filter.IsRequired"
+                                               Style="width: 100%;" />
+                            }
+                            break;
+                    }
+
+                    <p style="margin: 0; font-size: 0.75rem; color: #9ca3af;">
+                        Column: @filter.ColumnName
+                        @if (!string.IsNullOrEmpty(filter.DefaultValue))
+                        {
+                            <span> | Default: @filter.DefaultValue</span>
+                        }
+                    </p>
+                </div>
+            }
+        }
+    </div>
+</FluentDialogBody>
+
+<FluentDialogFooter>
+    <FluentButton Appearance="Appearance.Neutral" OnClick="@CancelAsync">
+        Cancel
+    </FluentButton>
+    <FluentButton Appearance="Appearance.Accent" OnClick="@SubmitAsync">
+        Run Query
+    </FluentButton>
+</FluentDialogFooter>
+
+@code {
+    [Parameter]
+    public Metric Content { get; set; } = new();
+
+    [CascadingParameter]
+    public FluentDialog Dialog { get; set; } = default!;
+
+    private Dictionary<string, string?> FilterValues = new();
+    private Dictionary<string, string?> BetweenStartValues = new();
+    private Dictionary<string, string?> BetweenEndValues = new();
+    private Dictionary<string, IEnumerable<string>> MultiSelectValues = new();
+
+    protected override void OnInitialized()
+    {
+        // Initialize filter values with defaults
+        foreach (var filter in Content.Filters)
+        {
+            if (filter.Operator == "BETWEEN" && !string.IsNullOrEmpty(filter.DefaultValue))
+            {
+                var parts = filter.DefaultValue.Split(';', StringSplitOptions.TrimEntries);
+                BetweenStartValues[filter.ColumnName] = parts.Length > 0 ? parts[0] : null;
+                BetweenEndValues[filter.ColumnName] = parts.Length > 1 ? parts[1] : null;
+            }
+            else if ((filter.Operator == "IN" || filter.Operator == "NOT IN") && filter.FilterType == "select")
+            {
+                var defaultValues = filter.DefaultValue?.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries) ?? Array.Empty<string>();
+                MultiSelectValues[filter.ColumnName] = defaultValues;
+            }
+            else
+            {
+                FilterValues[filter.ColumnName] = filter.DefaultValue;
+            }
+
+            // Ensure all dictionaries have entries for all filters
+            if (!BetweenStartValues.ContainsKey(filter.ColumnName)) BetweenStartValues[filter.ColumnName] = null;
+            if (!BetweenEndValues.ContainsKey(filter.ColumnName)) BetweenEndValues[filter.ColumnName] = null;
+            if (!MultiSelectValues.ContainsKey(filter.ColumnName)) MultiSelectValues[filter.ColumnName] = Enumerable.Empty<string>();
+            if (!FilterValues.ContainsKey(filter.ColumnName)) FilterValues[filter.ColumnName] = null;
+        }
+    }
+
+    // Getter/Setter methods to work around Blazor's dictionary indexer limitation
+    private string? GetFilterValue(string columnName) => FilterValues.GetValueOrDefault(columnName);
+    private void SetFilterValue(string columnName, string? value) => FilterValues[columnName] = value;
+
+    private string? GetBetweenStartValue(string columnName) => BetweenStartValues.GetValueOrDefault(columnName);
+    private void SetBetweenStartValue(string columnName, string? value) => BetweenStartValues[columnName] = value;
+
+    private string? GetBetweenEndValue(string columnName) => BetweenEndValues.GetValueOrDefault(columnName);
+    private void SetBetweenEndValue(string columnName, string? value) => BetweenEndValues[columnName] = value;
+
+    private IEnumerable<string> GetMultiSelectValue(string columnName) => MultiSelectValues.GetValueOrDefault(columnName) ?? Enumerable.Empty<string>();
+    private void SetMultiSelectValue(string columnName, IEnumerable<string> value) => MultiSelectValues[columnName] = value;
+
+    private async Task SubmitAsync()
+    {
+        // Validate required filters
+        var missingRequired = Content.Filters
+            .Where(f => f.IsRequired && !HasFilterValue(f))
+            .ToList();
+
+        if (missingRequired.Any())
+        {
+            return; // FluentUI handles validation UI
+        }
+
+        // Convert to MetricFilterValue list
+        var filterValuesList = new List<MetricFilterValue>();
+
+        foreach (var filter in Content.Filters)
+        {
+            var value = GetComputedFilterValue(filter);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                filterValuesList.Add(new MetricFilterValue
+                {
+                    ColumnName = filter.ColumnName,
+                    Value = value
+                });
+            }
+        }
+
+        await Dialog.CloseAsync(filterValuesList);
+    }
+
+    private bool HasFilterValue(MetricFilter filter)
+    {
+        if (filter.Operator == "BETWEEN")
+        {
+            return !string.IsNullOrWhiteSpace(BetweenStartValues.GetValueOrDefault(filter.ColumnName)) &&
+                   !string.IsNullOrWhiteSpace(BetweenEndValues.GetValueOrDefault(filter.ColumnName));
+        }
+        else if ((filter.Operator == "IN" || filter.Operator == "NOT IN") && filter.FilterType == "select")
+        {
+            return MultiSelectValues.GetValueOrDefault(filter.ColumnName)?.Any() == true;
+        }
+        else
+        {
+            return !string.IsNullOrWhiteSpace(FilterValues.GetValueOrDefault(filter.ColumnName));
+        }
+    }
+
+    private string? GetComputedFilterValue(MetricFilter filter)
+    {
+        if (filter.Operator == "BETWEEN")
+        {
+            var start = BetweenStartValues.GetValueOrDefault(filter.ColumnName);
+            var end = BetweenEndValues.GetValueOrDefault(filter.ColumnName);
+            if (!string.IsNullOrWhiteSpace(start) && !string.IsNullOrWhiteSpace(end))
+            {
+                return $"{start};{end}";
+            }
+            return null;
+        }
+        else if ((filter.Operator == "IN" || filter.Operator == "NOT IN") && filter.FilterType == "select")
+        {
+            var values = MultiSelectValues.GetValueOrDefault(filter.ColumnName);
+            if (values?.Any() == true)
+            {
+                return string.Join(";", values);
+            }
+            return null;
+        }
+        else
+        {
+            return FilterValues.GetValueOrDefault(filter.ColumnName);
+        }
+    }
+
+    private string GetOperatorLabel(string op)
+    {
+        return op switch
+        {
+            "=" => "equals",
+            "<>" => "not equals",
+            "<" => "less than",
+            ">" => "greater than",
+            "<=" => "at most",
+            ">=" => "at least",
+            "IN" => "is one of",
+            "NOT IN" => "is not one of",
+            "LIKE" => "contains",
+            "NOT LIKE" => "does not contain",
+            "BETWEEN" => "between",
+            _ => op
+        };
+    }
+
+    private string GetPlaceholderForOperator(MetricFilter filter)
+    {
+        if (!string.IsNullOrEmpty(filter.Placeholder))
+        {
+            return filter.Placeholder;
+        }
+
+        return filter.Operator switch
+        {
+            "IN" or "NOT IN" => "Enter values separated by ;",
+            "LIKE" or "NOT LIKE" => "Use % as wildcard (e.g., %search%)",
+            _ => "Enter value"
+        };
+    }
+
+    private async Task CancelAsync()
+    {
+        await Dialog.CancelAsync();
+    }
+}

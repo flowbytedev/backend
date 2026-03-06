@@ -1,7 +1,7 @@
 @using Application.Shared.Models
 @using Application.Client.Models
 @using Microsoft.FluentUI.AspNetCore.Components
-@implements IDialogContentComponent<Metric>
+@implements IDialogContentComponent<QueryResultsDialogData>
 @inject HttpClient HttpClient
 @inject IToastService ToastService
 
@@ -58,10 +58,13 @@
 
 @code {
     [Parameter]
-    public Metric Content { get; set; } = new();
+    public QueryResultsDialogData Content { get; set; } = new();
 
     [CascadingParameter]
     public FluentDialog Dialog { get; set; } = default!;
+
+    private Metric Metric => Content.Metric;
+    private List<MetricFilterValue>? FilterValues => Content.FilterValues;
 
     private List<Dictionary<string, object?>> QueryResults = new();
     private Dictionary<string, ColumnFormat>? ColumnFormats;
@@ -82,7 +85,7 @@
 
         try
         {
-            var response = await HttpClient.PostAsync($"api/metrics/{Content.Id}/execute", null);
+            var response = await HttpClient.PostAsJsonAsync($"api/metrics/{Metric.Id}/execute", FilterValues);
 
             if (response.IsSuccessStatusCode)
             {

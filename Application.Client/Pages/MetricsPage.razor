@@ -1,6 +1,7 @@
 @page "/metrics"
 @using Application.Shared.Models
 @using Application.Shared.Enums
+@using Application.Client.Models
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Authorization
 @inject HttpClient HttpClient
@@ -335,7 +336,39 @@
 
     private async Task OpenQueryResultsDialog(Metric metric)
     {
-        await DialogService.ShowDialogAsync<QueryResultsDialog>(metric, new DialogParameters
+        List<MetricFilterValue>? filterValues = null;
+
+        // If metric has filters, show filter dialog first
+        if (metric.Filters?.Any() == true)
+        {
+            var filterDialog = await DialogService.ShowDialogAsync<MetricFilterDialog>(metric, new DialogParameters
+            {
+                Title = $"Configure Filters: {metric.KPI}",
+                PrimaryAction = null,
+                SecondaryAction = null,
+                Width = "600px",
+                Height = "auto",
+                Modal = true,
+                ShowDismiss = false
+            });
+
+            var filterResult = await filterDialog.Result;
+            if (filterResult.Cancelled)
+            {
+                return; // User cancelled filter configuration
+            }
+
+            filterValues = filterResult.Data as List<MetricFilterValue>;
+        }
+
+        // Show query results dialog with filter values
+        var dialogData = new QueryResultsDialogData
+        {
+            Metric = metric,
+            FilterValues = filterValues
+        };
+
+        await DialogService.ShowDialogAsync<QueryResultsDialog>(dialogData, new DialogParameters
         {
             Title = $"Query Results: {metric.KPI}",
             PrimaryAction = null,

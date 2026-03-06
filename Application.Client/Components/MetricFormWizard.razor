@@ -315,7 +315,105 @@
         }
         else if (currentStep == 5)
         {
-            <!-- Step 6: Measurement & Data -->
+            <!-- Step 6: Query Filters -->
+            <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
+                <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
+                    🔍 Query Filters
+                </FluentLabel>
+                <FluentDivider Style="width: 100%;" />
+
+                <FluentLabel Color="Color.Neutral">
+                    Define filters that users can apply when running this metric's query. Filter placeholders in your query should use the format <code>@("{{filter_column_name}}")</code>.
+                </FluentLabel>
+
+                @foreach (var filter in Content.Filters.ToList())
+                {
+                    var currentFilter = filter;
+                    <FluentCard Style="background: #f8fafc; padding: 12px;">
+                        <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.SpaceBetween">
+                                <FluentLabel Weight="FontWeight.Bold">Filter: @(string.IsNullOrEmpty(currentFilter.FilterLabel) ? "(New Filter)" : currentFilter.FilterLabel)</FluentLabel>
+                                <FluentButton IconEnd="@(new Icons.Regular.Size16.Delete())"
+                                              Appearance="Appearance.Lightweight"
+                                              OnClick="@(() => Content.Filters.Remove(currentFilter))" />
+                            </FluentStack>
+
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                                <FluentTextField @bind-Value="currentFilter.FilterLabel" Label="Filter Label *" Required Style="flex: 1;"
+                                    Placeholder="e.g., Start Date, Region, Status" />
+                                <FluentTextField @bind-Value="currentFilter.ColumnName" Label="Column Name *" Required Style="flex: 1;"
+                                    Placeholder="e.g., start_date, region_id" />
+                            </FluentStack>
+
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                                <FluentSelect TOption="string" Items="@filterTypes" @bind-SelectedOption="currentFilter.FilterType"
+                                    Label="Data Type *" Style="flex: 1;" />
+                                <div style="flex: 1;">
+                                    <FluentSelect TOption="string"
+                                        Label="Operator *"
+                                        Style="width: 100%;"
+                                        Value="@currentFilter.Operator"
+                                        ValueChanged="@(val => currentFilter.Operator = val)"
+                                        SelectedOption="@currentFilter.Operator">
+                                        @foreach (var op in filterOperators)
+                                        {
+                                            <FluentOption TOption="string" Value="@op.Value">@op.Label</FluentOption>
+                                        }
+                                    </FluentSelect>
+                                </div>
+                                <FluentNumberField @bind-Value="currentFilter.SortOrder" Label="Sort Order" Style="flex: 0.5;"
+                                    Placeholder="0" />
+                            </FluentStack>
+
+                            <FluentStack Orientation="Orientation.Horizontal" HorizontalGap="12">
+                                <FluentTextField @bind-Value="currentFilter.DefaultValue" Label="Default Value" Style="flex: 1;"
+                                    Placeholder="@GetDefaultValuePlaceholder(currentFilter.Operator)" />
+                                <FluentTextField @bind-Value="currentFilter.Placeholder" Label="Placeholder" Style="flex: 1;"
+                                    Placeholder="Placeholder text shown to user" />
+                            </FluentStack>
+
+                            @if (currentFilter.Operator == "IN" || currentFilter.Operator == "NOT IN")
+                            {
+                                <FluentLabel Color="Color.Neutral" Style="font-size: 0.8rem;">
+                                    For IN/NOT IN operators, separate multiple values with semicolons (e.g., value1;value2;value3)
+                                </FluentLabel>
+                            }
+                            else if (currentFilter.Operator == "BETWEEN")
+                            {
+                                <FluentLabel Color="Color.Neutral" Style="font-size: 0.8rem;">
+                                    For BETWEEN operator, provide two values separated by semicolon (e.g., 2024-01-01;2024-12-31)
+                                </FluentLabel>
+                            }
+                            else if (currentFilter.Operator == "LIKE" || currentFilter.Operator == "NOT LIKE")
+                            {
+                                <FluentLabel Color="Color.Neutral" Style="font-size: 0.8rem;">
+                                    For LIKE/NOT LIKE operators, use % as wildcard (e.g., %search% for contains, search% for starts with)
+                                </FluentLabel>
+                            }
+
+                            @if (currentFilter.FilterType == "select")
+                            {
+                                <FluentTextArea @bind-Value="currentFilter.SelectOptions" Label="Select Options (semicolon-separated)" Rows="2" Style="width: 100%;"
+                                    Placeholder="Option 1;Option 2;Option 3" />
+                            }
+
+                            <FluentTextArea @bind-Value="currentFilter.Description" Label="Description" Rows="2" Style="width: 100%;"
+                                Placeholder="Help text explaining this filter" />
+
+                            <FluentCheckbox @bind-Value="currentFilter.IsRequired" Label="Required filter" />
+                        </FluentStack>
+                    </FluentCard>
+                }
+                <FluentButton IconStart="@(new Icons.Regular.Size16.Add())"
+                              Appearance="Appearance.Outline"
+                              OnClick="@AddFilter">
+                    Add Filter
+                </FluentButton>
+            </FluentStack>
+        }
+        else if (currentStep == 6)
+        {
+            <!-- Step 7: Measurement & Data -->
             <FluentStack Orientation="Orientation.Vertical" VerticalGap="16">
                 <FluentLabel Typo="Typography.Subject" Style="color: var(--accent-fill-rest);">
                     📊 Measurement & Data Management
@@ -388,7 +486,26 @@
     public FluentDialog Dialog { get; set; } = default!;
 
     private int currentStep = 0;
-    private int totalSteps = 6;
+    private int totalSteps = 7;
+
+    // Filter type options
+    private string[] filterTypes = new[] { "text", "date", "number", "select" };
+
+    // Filter operator options
+    private (string Value, string Label)[] filterOperators = new[]
+    {
+        ("=", "Equals (=)"),
+        ("<>", "Not Equals (<>)"),
+        ("<", "Less Than (<)"),
+        (">", "Greater Than (>)"),
+        ("<=", "Less Than or Equal (<=)"),
+        (">=", "Greater Than or Equal (>=)"),
+        ("IN", "In List (IN)"),
+        ("NOT IN", "Not In List (NOT IN)"),
+        ("LIKE", "Contains (LIKE)"),
+        ("NOT LIKE", "Does Not Contain (NOT LIKE)"),
+        ("BETWEEN", "Between (BETWEEN)")
+    };
 
     // Enum arrays for dropdowns
     private MetricType[] metricTypes = Enum.GetValues<MetricType>();
@@ -572,5 +689,29 @@
     private void AddDimension()
     {
         Content.Dimensions.Add(new MetricDimension { Name = string.Empty });
+    }
+
+    private void AddFilter()
+    {
+        var nextSortOrder = Content.Filters.Any() ? Content.Filters.Max(f => f.SortOrder) + 1 : 0;
+        Content.Filters.Add(new MetricFilter
+        {
+            FilterLabel = string.Empty,
+            ColumnName = string.Empty,
+            FilterType = "text",
+            Operator = "=",
+            SortOrder = nextSortOrder
+        });
+    }
+
+    private string GetDefaultValuePlaceholder(string op)
+    {
+        return op switch
+        {
+            "IN" or "NOT IN" => "value1;value2;value3",
+            "BETWEEN" => "start_value;end_value",
+            "LIKE" or "NOT LIKE" => "%search_term%",
+            _ => "Default value for this filter"
+        };
     }
 }

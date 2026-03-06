@@ -20,6 +20,6 @@ namespace Application.Shared.Services
         Task<bool> DeleteDataSource(int id, string companyId);
 
         // Query execution
-        Task<List<Dictionary<string, object?>>> ExecuteMetricQuery(int metricId, string companyId);
+        Task<List<Dictionary<string, object?>>> ExecuteMetricQuery(int metricId, string companyId, List<MetricFilterValue>? filterValues = null);
     }
 }

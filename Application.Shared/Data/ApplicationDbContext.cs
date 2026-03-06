@@ -104,6 +104,8 @@ namespace Application.Shared.Data
 
         public DbSet<MetricDataSource> MetricDataSources { get; set; }
 
+        public DbSet<MetricFilter> MetricFilters { get; set; }
+
 
 
         /// <summary>

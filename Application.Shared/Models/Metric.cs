@@ -13,6 +13,7 @@ public class Metric : BaseModel
     public ICollection<MetricRecipient> Recipients { get; set; } = new List<MetricRecipient>();
     public ICollection<MetricVerifier> Verifiers { get; set; } = new List<MetricVerifier>();
     public ICollection<MetricDimension> Dimensions { get; set; } = new List<MetricDimension>();
+    public ICollection<MetricFilter> Filters { get; set; } = new List<MetricFilter>();
 
     // Foreign key for data source (many-to-one: many metrics can share one data source)
     public int? MetricDataSourceId { get; set; }

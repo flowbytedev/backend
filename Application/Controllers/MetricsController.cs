@@ -157,7 +157,7 @@ namespace Application.Controllers
 
         // POST: api/Metrics/{id}/execute
         [HttpPost("{id}/execute")]
-        public async Task<ActionResult<List<Dictionary<string, object?>>>> ExecuteMetricQuery(int id, [FromHeader(Name = "X-Company-Id")] string companyId)
+        public async Task<ActionResult<List<Dictionary<string, object?>>>> ExecuteMetricQuery(int id, [FromHeader(Name = "X-Company-Id")] string companyId, [FromBody] List<MetricFilterValue>? filterValues = null)
         {
             if (string.IsNullOrEmpty(companyId))
             {
@@ -166,7 +166,7 @@ namespace Application.Controllers
 
             try
             {
-                var results = await _metricService.ExecuteMetricQuery(id, companyId);
+                var results = await _metricService.ExecuteMetricQuery(id, companyId, filterValues);
                 return Ok(results);
             }
             catch (InvalidOperationException ex)
