@@ -12,6 +12,11 @@ public interface IDatasetSharingService
     Task<bool> GrantTableAccessAsync(GrantTableShareRequest request, string sharedByUserId);
     Task<bool> UpdateDatasetUserTypeAsync(string datasetId, string userId, DatasetUserType userType);
     Task<bool> RemoveDatasetUserAsync(string datasetId, string userId);
+
+    /// <summary>Removes one table from a table-scoped user's access. If it was their only scoped table the
+    /// whole share is removed. Returns false for a user with full dataset access (no single-table scope to
+    /// revoke) or when the user isn't scoped to that table.</summary>
+    Task<bool> RevokeTableAccessAsync(string datasetId, string userId, string tableName);
     Task<List<Dataset>> GetSharedDatasetsAsync(string userId, string companyId);
     Task<bool> HasDatasetAccessAsync(string datasetId, string userId, DatasetUserType? requiredType = null);
 

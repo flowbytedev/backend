@@ -137,7 +137,18 @@ else
                                     }
                                     else { <span style="color:#a1a1aa">—</span> }
                                 </td>
-                                <td class="ds-td">@SharedBadge(st?.SharedWith ?? 0)</td>
+                                <td class="ds-td">
+                                    @if ((st?.SharedWith ?? 0) > 0)
+                                    {
+                                        <button type="button" title="@($"Shared with {st!.SharedWith} {(st.SharedWith == 1 ? "person" : "people")} — click to manage")"
+                                                @onclick="() => OpenSharedWith(dataset)"
+                                                style="display:inline-flex;align-items:center;gap:0.25rem;font-size:0.75rem;font-weight:500;color:#4f46e5;background:none;border:none;cursor:pointer;padding:0">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                            <span>@st.SharedWith</span>
+                                        </button>
+                                    }
+                                    else { <span style="font-size:0.75rem;color:#a1a1aa">Private</span> }
+                                </td>
                                 <td class="ds-td ds-td-date">@dataset.CreatedAt.ToString("MMM dd, yyyy")</td>
                                 <td class="ds-td ds-td-actions-cell">
                                     <div class="ds-actions">
@@ -224,6 +235,52 @@ else
                    DatasetName="@(selectedDatasetForSharing?.Name ?? string.Empty)"
                    CompanyId="@(companyId ?? string.Empty)" />
 
+@if (showSharedModal)
+{
+    <div class="ds-modal-backdrop" @onclick="() => showSharedModal = false">
+        <div class="ds-modal" @onclick:stopPropagation="true">
+            <div class="ds-modal-header">
+                <h2 class="ds-modal-title">Shared with <span style="color:#71717a;font-weight:400">— @sharedDatasetName</span></h2>
+                <button class="ds-modal-close" @onclick="() => showSharedModal = false" aria-label="Close">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+            </div>
+            <div class="ds-modal-body">
+                @if (isLoadingShared)
+                {
+                    <div class="ds-loading"><div class="ds-spinner"></div><span>Loading…</span></div>
+                }
+                else if (!sharedUsers.Any())
+                {
+                    <span class="ds-dataset-desc">This dataset isn't shared with anyone.</span>
+                }
+                else
+                {
+                    <p class="ds-hint" style="margin-top:0">People with access to this dataset. Stopping sharing removes their access entirely.</p>
+                    @foreach (var u in sharedUsers)
+                    {
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.65rem 0;border-top:1px solid #f4f4f5">
+                            <div>
+                                <div style="font-weight:500;color:#18181b">@(string.IsNullOrEmpty(u.Email) ? u.UserId : u.Email)</div>
+                                <div style="font-size:0.75rem;color:#a1a1aa">
+                                    @u.Type · @(u.Tables.Any() ? $"{u.Tables.Count} table{(u.Tables.Count == 1 ? "" : "s")}" : "All tables")
+                                </div>
+                            </div>
+                            @if (canEdit)
+                            {
+                                <button class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca"
+                                        @onclick="() => StopSharing(u.UserId)"
+                                        disabled="@(isRemovingShare || sharedUsers.Count <= 1)"
+                                        title="@(sharedUsers.Count <= 1 ? "Can't remove the only person this dataset is shared with." : "Stop sharing with this person")">Stop sharing</button>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<Dataset>? allItems;
     private List<Dataset>? filteredItems;
@@ -270,20 +327,6 @@ else
         _ => ("#f4f4f5", "#71717a"),
     };
 
-    private RenderFragment SharedBadge(int count) => __builder =>
-    {
-        if (count > 0)
-        {
-            <span title="@($"Shared with {count} {(count == 1 ? "person" : "people")}")" style="display:inline-flex;align-items:center;gap:0.25rem;font-size:0.75rem;font-weight:500;color:#4f46e5">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                <span>@count</span>
-            </span>
-        }
-        else
-        {
-            <span style="font-size:0.75rem;color:#a1a1aa">Private</span>
-        }
-    };
 
     [SupplyParameterFromQuery]
     public string? c { get; set; }
@@ -377,6 +420,62 @@ else
             }
         }
         catch { /* labels just fall back to the entity id / "External" */ }
+    }
+
+    // ----- "Shared with" popup -----
+    private bool showSharedModal = false;
+    private string? sharedDatasetId;
+    private string? sharedDatasetName;
+    private List<DatasetUserDto> sharedUsers = new();
+    private bool isLoadingShared = false;
+    private bool isRemovingShare = false;
+
+    private async Task OpenSharedWith(Dataset ds)
+    {
+        sharedDatasetId = ds.Id;
+        sharedDatasetName = ds.Name;
+        sharedUsers = new();
+        showSharedModal = true;
+        isLoadingShared = true;
+        StateHasChanged();
+        await LoadSharedUsers();
+    }
+
+    private async Task LoadSharedUsers()
+    {
+        if (string.IsNullOrEmpty(sharedDatasetId)) return;
+        try
+        {
+            isLoadingShared = true;
+            StateHasChanged();
+            var resp = await _httpClient.GetAsync($"api/datasets/{sharedDatasetId}/sharing");
+            if (resp.IsSuccessStatusCode)
+                sharedUsers = await resp.Content.ReadFromJsonAsync<List<DatasetUserDto>>() ?? new();
+            else
+                _toastService.ShowError($"Failed to load shares: {resp.StatusCode}");
+        }
+        catch (Exception ex) { _toastService.ShowError($"Error loading shares: {ex.Message}"); }
+        finally { isLoadingShared = false; StateHasChanged(); }
+    }
+
+    private async Task StopSharing(string userId)
+    {
+        if (string.IsNullOrEmpty(sharedDatasetId)) return;
+        try
+        {
+            isRemovingShare = true;
+            StateHasChanged();
+            var resp = await _httpClient.DeleteAsync($"api/datasets/{sharedDatasetId}/sharing/{userId}");
+            if (resp.IsSuccessStatusCode)
+            {
+                _toastService.ShowSuccess("Access removed.");
+                if (statsLookup.TryGetValue(sharedDatasetId, out var s) && s.SharedWith > 0) s.SharedWith--;
+                await LoadSharedUsers();
+            }
+            else { _toastService.ShowError($"Failed to remove: {await resp.Content.ReadAsStringAsync()}"); }
+        }
+        catch (Exception ex) { _toastService.ShowError($"Error: {ex.Message}"); }
+        finally { isRemovingShare = false; StateHasChanged(); }
     }
 
     private async Task LoadStats()

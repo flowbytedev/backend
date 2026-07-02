@@ -172,7 +172,18 @@ else
                                     }
                                     else { <span style="color:#a1a1aa">—</span> }
                                 </td>
-                                <td class="ds-td">@SharedBadge(ts?.SharedWith ?? 0)</td>
+                                <td class="ds-td">
+                                    @if ((ts?.SharedWith ?? 0) > 0)
+                                    {
+                                        <button type="button" title="@($"Shared with {ts!.SharedWith} {(ts.SharedWith == 1 ? "person" : "people")} — click to manage")"
+                                                @onclick="() => OpenSharedWith(tableName)"
+                                                style="display:inline-flex;align-items:center;gap:0.25rem;font-size:0.75rem;font-weight:500;color:#4f46e5;background:none;border:none;cursor:pointer;padding:0">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                            <span>@ts.SharedWith</span>
+                                        </button>
+                                    }
+                                    else { <span style="font-size:0.75rem;color:#a1a1aa">Private</span> }
+                                </td>
                                 <td class="ds-td ds-td-actions-cell">
                                     <div class="ds-actions">
                                         <button class="btn-icon btn-icon-open" title="View / edit table data" @onclick="() => ViewTable(tableName)">
@@ -358,9 +369,121 @@ else
     </div>
 }
 
+@if (showSharedModal)
+{
+    <div class="ds-modal-backdrop" @onclick="() => showSharedModal = false">
+        <div class="ds-modal" @onclick:stopPropagation="true">
+            <div class="ds-modal-header">
+                <h2 class="ds-modal-title">Shared with <span style="color:#71717a;font-weight:400">— @sharedTableName</span></h2>
+                <button class="ds-modal-close" @onclick="() => showSharedModal = false" aria-label="Close">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+            </div>
+            <div class="ds-modal-body">
+                @if (isLoadingShared)
+                {
+                    <div class="ds-loading"><div class="ds-spinner"></div><span>Loading…</span></div>
+                }
+                else if (!sharedTableUsers.Any())
+                {
+                    <span class="ds-dataset-desc">No one has access to this table.</span>
+                }
+                else
+                {
+                    <p class="ds-hint" style="margin-top:0">People who can access <strong>@sharedTableName</strong>. Users with full dataset access are managed from the datasets page.</p>
+                    @foreach (var u in sharedTableUsers)
+                    {
+                        var fullAccess = !u.Tables.Any();
+                        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.65rem 0;border-top:1px solid #f4f4f5">
+                            <div>
+                                <div style="font-weight:500;color:#18181b">@(string.IsNullOrEmpty(u.Email) ? u.UserId : u.Email)</div>
+                                <div style="font-size:0.75rem;color:#a1a1aa">@u.Type · @(fullAccess ? "Full dataset access" : "This table")</div>
+                            </div>
+                            @if (canEdit)
+                            {
+                                var lastOne = sharedTableUsers.Count <= 1;
+                                @if (fullAccess)
+                                {
+                                    <button class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca"
+                                            title="@(lastOne ? "Can't remove the only person this table is shared with." : "This person has access to the whole dataset — removing here revokes their entire dataset access.")"
+                                            @onclick="() => RemoveFromDataset(u.UserId)" disabled="@(isRemovingShare || lastOne)">Remove from dataset</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca"
+                                            title="@(lastOne ? "Can't remove the only person this table is shared with." : "Stop sharing this table with this person")"
+                                            @onclick="() => StopSharingTable(u.UserId)" disabled="@(isRemovingShare || lastOne)">Stop sharing</button>
+                                }
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [SupplyParameterFromQuery] public string? c { get; set; }
     [SupplyParameterFromQuery] public string? d { get; set; }
+
+    // ----- "Shared with" popup (per table) -----
+    private bool showSharedModal = false;
+    private string sharedTableName = string.Empty;
+    private List<DatasetUserDto> sharedTableUsers = new();
+    private bool isLoadingShared = false;
+    private bool isRemovingShare = false;
+
+    private async Task OpenSharedWith(string tableName)
+    {
+        sharedTableName = tableName;
+        sharedTableUsers = new();
+        showSharedModal = true;
+        isLoadingShared = true;
+        StateHasChanged();
+        await LoadSharedTableUsers();
+    }
+
+    private async Task LoadSharedTableUsers()
+    {
+        try
+        {
+            isLoadingShared = true;
+            StateHasChanged();
+            await SetUserHeaderAsync();
+            var all = await _httpClient.GetFromJsonAsync<List<DatasetUserDto>>($"api/datasets/{datasetId}/sharing") ?? new();
+            // People who can reach this table: full-dataset users + users scoped to it.
+            sharedTableUsers = all.Where(u => u.Tables.Count == 0 || u.Tables.Contains(sharedTableName)).ToList();
+        }
+        catch (Exception ex) { _toastService.ShowError($"Error loading shares: {ex.Message}"); }
+        finally { isLoadingShared = false; StateHasChanged(); }
+    }
+
+    private Task StopSharingTable(string userId)
+        => RemoveShare($"api/datasets/{datasetId}/sharing/{userId}/tables/{Uri.EscapeDataString(sharedTableName)}");
+
+    private Task RemoveFromDataset(string userId)
+        => RemoveShare($"api/datasets/{datasetId}/sharing/{userId}");
+
+    private async Task RemoveShare(string url)
+    {
+        try
+        {
+            isRemovingShare = true;
+            StateHasChanged();
+            await SetUserHeaderAsync();
+            var resp = await _httpClient.DeleteAsync(url);
+            if (resp.IsSuccessStatusCode)
+            {
+                _toastService.ShowSuccess("Access removed.");
+                await LoadSharedTableUsers();
+                await LoadTableStats(); // refresh the badge counts
+            }
+            else { _toastService.ShowError($"Failed to remove: {await resp.Content.ReadAsStringAsync()}"); }
+        }
+        catch (Exception ex) { _toastService.ShowError($"Error: {ex.Message}"); }
+        finally { isRemovingShare = false; StateHasChanged(); }
+    }
 
     private bool showConnectModal = false;
     private string connectTableName = string.Empty;
@@ -549,21 +672,6 @@ else
         };
     }
 
-    private RenderFragment SharedBadge(int count) => __builder =>
-    {
-        if (count > 0)
-        {
-            <span title="@($"Shared with {count} {(count == 1 ? "person" : "people")}")" style="display:inline-flex;align-items:center;gap:0.25rem;font-size:0.75rem;font-weight:500;color:#4f46e5">
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                <span>@count</span>
-            </span>
-        }
-        else
-        {
-            <span style="font-size:0.75rem;color:#a1a1aa">Private</span>
-        }
-    };
-
     private static string RelativeTime(DateTime? utc)
     {
         if (!utc.HasValue) return "never";
@@ -630,6 +738,11 @@ else
                 _httpClient.DefaultRequestHeaders.Add("UserId", userId);
             }
         }
+        if (!string.IsNullOrEmpty(companyId))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+            _httpClient.DefaultRequestHeaders.Add("X-Company-Id", companyId);
+        }
     }
 
     private async Task CheckDatabaseAsync()
@@ -682,17 +795,10 @@ else
             isLoading = true;
             StateHasChanged();
 
-            var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
-            var user = authState.User;
-            if (user.Identity?.IsAuthenticated == true)
-            {
-                var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-                if (!string.IsNullOrEmpty(userId))
-                {
-                    _httpClient.DefaultRequestHeaders.Remove("UserId");
-                    _httpClient.DefaultRequestHeaders.Add("UserId", userId);
-                }
-            }
+            // Set BOTH the UserId and X-Company-Id headers before any fetch. On a direct page refresh
+            // (deep link) this is the first request on a fresh HttpClient, so the company header must be
+            // set here — otherwise the API rejects the request and the table list fails to load.
+            await SetUserHeaderAsync();
 
             var datasetResponse = await _httpClient.GetAsync($"api/Datasets/{datasetId}");
             if (datasetResponse.IsSuccessStatusCode)

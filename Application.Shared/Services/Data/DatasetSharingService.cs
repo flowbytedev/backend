@@ -283,6 +283,44 @@ public class DatasetSharingService : IDatasetSharingService
         }
     }
 
+    public async Task<bool> RevokeTableAccessAsync(string datasetId, string userId, string tableName)
+    {
+        try
+        {
+            var datasetUser = await _context.DatasetUser
+                .FirstOrDefaultAsync(du => du.DatasetId == datasetId && du.UserId == userId);
+            if (datasetUser == null)
+                return false;
+
+            var tableRows = await _context.DatasetUserTable
+                .Where(t => t.DatasetId == datasetId && t.UserId == userId)
+                .ToListAsync();
+
+            // Full-access users (no table scope) can't have a single table revoked without enumerating the
+            // rest — that must be done from dataset sharing.
+            if (tableRows.Count == 0)
+                return false;
+
+            var row = tableRows.FirstOrDefault(t => t.TableName == tableName);
+            if (row == null)
+                return false; // not scoped to this table
+
+            _context.DatasetUserTable.Remove(row);
+
+            // If this was their only scoped table, removing it would leave them with "no scope" = full
+            // access, which is wrong — their access existed only for this table, so drop the share entirely.
+            if (tableRows.Count == 1)
+                _context.DatasetUser.Remove(datasetUser);
+
+            await _context.SaveChangesAsync();
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     public async Task<List<Dataset>> GetSharedDatasetsAsync(string userId, string companyId)
     {
         var sharedDatasets = await _context.DatasetUser

@@ -121,6 +121,29 @@ public class SharingController : ControllerBase
         }
     }
 
+    // DELETE: api/datasets/{datasetId}/sharing/{userId}/tables/{tableName} — stop sharing a single table
+    // with a table-scoped user (removes the whole share if it was their only table).
+    [HttpDelete("{userId}/tables/{tableName}")]
+    public async Task<ActionResult> RevokeTableAccess(string datasetId, string userId, string tableName, [FromHeader(Name = "X-Company-Id")] string companyId = "")
+    {
+        try
+        {
+            if (!User.HasCompanyRole(companyId, "EDIT_DATA"))
+                return Forbid();
+
+            var success = await _datasetSharingService.RevokeTableAccessAsync(datasetId, userId, tableName);
+
+            if (!success)
+                return NotFound("Table share not found, or the user has full dataset access (manage from dataset sharing).");
+
+            return Ok(new { message = "Table access removed successfully" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest($"Error removing table access: {ex.Message}");
+        }
+    }
+
     // DELETE: api/datasets/{datasetId}/sharing/{userId}
     [HttpDelete("{userId}")]
     public async Task<ActionResult> RemoveUserAccess(string datasetId, string userId, [FromHeader(Name = "X-Company-Id")] string companyId = "")
