@@ -33,4 +33,25 @@ public class KpiDashboardController : ControllerBase
         var cards = await _service.GetKpiCardsAsync(companyId, cancellationToken);
         return Ok(cards);
     }
+
+    // GET: api/kpi-dashboard/trend?department=&kpi=
+    [HttpGet("trend")]
+    public async Task<ActionResult<List<KpiTrendPointDto>>> GetTrend(
+        [FromHeader(Name = "X-Company-Id")] string? companyId,
+        [FromQuery] string? department,
+        [FromQuery] string? kpi,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(companyId))
+            return BadRequest("Company ID is required in headers");
+
+        if (string.IsNullOrWhiteSpace(kpi))
+            return BadRequest("KPI is required");
+
+        if (!User.HasCompanyRole(companyId, RoleSuffixes.MetricsRead, RoleSuffixes.MetricsWrite))
+            return Forbid();
+
+        var points = await _service.GetKpiTrendAsync(companyId, department ?? string.Empty, kpi, cancellationToken);
+        return Ok(points);
+    }
 }

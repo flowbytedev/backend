@@ -6,6 +6,8 @@ namespace Application.Shared.Services;
 public interface IKpiDashboardService
 {
     Task<List<KpiCardDto>> GetKpiCardsAsync(string companyId, CancellationToken ct = default);
+
+    Task<List<KpiTrendPointDto>> GetKpiTrendAsync(string companyId, string department, string kpi, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -101,6 +103,82 @@ public class KpiDashboardService : IKpiDashboardService
             .OrderBy(c => c.Department)
             .ThenBy(c => c.Kpi)
             .ToList();
+    }
+
+    private static readonly string[] MonthAbbrev =
+        { "", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
+
+    public async Task<List<KpiTrendPointDto>> GetKpiTrendAsync(string companyId, string department, string kpi, CancellationToken ct = default)
+    {
+        var rows = new List<(int Year, int MonthNum, double Value, double Target)>();
+
+        var connection = _context.Database.GetDbConnection();
+        try
+        {
+            await connection.OpenAsync(ct);
+
+            using var cmd = connection.CreateCommand();
+            cmd.CommandText = "SELECT [year], [month], [value], target FROM org.kpi " +
+                              "WHERE company_id = @companyId AND kpi = @kpi AND ISNULL(department, '') = @department";
+            AddParam(cmd, "@companyId", companyId);
+            AddParam(cmd, "@kpi", kpi);
+            AddParam(cmd, "@department", department ?? string.Empty);
+
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var year = reader.IsDBNull(0) ? 0 : Convert.ToInt32(reader.GetValue(0));
+                var month = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+                var value = reader.IsDBNull(2) ? 0d : Convert.ToDouble(reader.GetValue(2));
+                var target = reader.IsDBNull(3) ? 0d : Convert.ToDouble(reader.GetValue(3));
+
+                var monthKey = month.Length >= 3 ? month.Substring(0, 3) : month;
+                if (!MonthMap.TryGetValue(monthKey, out var monthNum)) continue;
+
+                rows.Add((year, monthNum, value, target));
+            }
+        }
+        finally
+        {
+            await connection.CloseAsync();
+        }
+
+        if (rows.Count == 0) return new List<KpiTrendPointDto>();
+
+        var byPeriod = rows
+            .GroupBy(r => (r.Year, r.MonthNum))
+            .ToDictionary(g => g.Key, g => g.Last());
+
+        // Window = the latest year to date, plus the immediately preceding month (December of the prior year).
+        var latest = rows.OrderBy(r => r.Year).ThenBy(r => r.MonthNum).Last();
+        var window = new List<(int Year, int MonthNum)> { (latest.Year - 1, 12) };
+        for (var m = 1; m <= latest.MonthNum; m++)
+            window.Add((latest.Year, m));
+
+        var points = new List<KpiTrendPointDto>();
+        foreach (var (year, monthNum) in window)
+        {
+            if (!byPeriod.TryGetValue((year, monthNum), out var row)) continue;
+            points.Add(new KpiTrendPointDto
+            {
+                Year = year,
+                MonthNum = monthNum,
+                Month = MonthAbbrev[monthNum],
+                Label = $"{MonthAbbrev[monthNum]} '{(year % 100):D2}",
+                Value = row.Value,
+                Target = row.Target
+            });
+        }
+
+        return points;
+    }
+
+    private static void AddParam(System.Data.Common.DbCommand cmd, string name, object value)
+    {
+        var p = cmd.CreateParameter();
+        p.ParameterName = name;
+        p.Value = value;
+        cmd.Parameters.Add(p);
     }
 
     /// <summary>

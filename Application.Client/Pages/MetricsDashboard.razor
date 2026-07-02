@@ -3,8 +3,11 @@
 @using Application.Shared.Models.Metrics
 @using Application.Shared.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.JSInterop
 @inject HttpClient HttpClient
 @inject NavigationManager NavigationManager
+@inject IJSRuntime JS
+@implements IAsyncDisposable
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @attribute [Authorize(Policy = PolicyNames.MetricsRead)]
 
@@ -101,6 +104,41 @@
 
     .kd-scope footer { margin-top:34px; font-size:12px; color:var(--muted); text-align:center; }
 
+    /* Card is clickable → opens the trend popup */
+    .kd-card { cursor:pointer; transition:border-color .15s ease, box-shadow .15s ease, transform .12s ease; }
+    .kd-card:hover { border-color:#C4CBD6; box-shadow:0 6px 18px rgba(22,35,59,.07); transform:translateY(-1px); }
+
+    /* Trend popup — rendered outside .kd-scope, so it carries its own tokens */
+    .kd-backdrop { --ink:#16233B; --card:#FFFFFF; --muted:#667085; --line:#E4E8EF;
+        --good:#2E7D57; --warn:#A8792F; --bad:#AC5347;
+        --display:'Space Grotesk',sans-serif; --body:'Inter',sans-serif; --mono:'IBM Plex Mono',monospace;
+        position:fixed; inset:0; background:rgba(22,35,59,.35); z-index:1000;
+        display:flex; align-items:center; justify-content:center; padding:24px; font-family:var(--body); }
+    .kd-modal { background:var(--card); border-radius:18px; width:100%; max-width:720px;
+        box-shadow:0 20px 60px rgba(22,35,59,.25); display:flex; flex-direction:column; overflow:hidden; }
+    .kd-modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px;
+        padding:20px 22px 14px; border-bottom:1px solid var(--line); }
+    .kd-modal-sub { font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+        color:var(--muted); margin:0 0 6px; }
+    .kd-modal-title { margin:0; font-family:var(--display); font-weight:600; font-size:18px; letter-spacing:-.01em; }
+    .kd-close { border:1px solid var(--line); background:var(--card); color:var(--muted); border-radius:10px;
+        width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; flex:none; }
+    .kd-close:hover { border-color:#C4CBD6; color:var(--ink); }
+    .kd-modal-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 22px 0; }
+    .kd-modal-body { padding:12px 22px 22px; }
+    .kd-chart-wrap { height:340px; position:relative; }
+    .kd-modal-note { font-size:12px; color:var(--muted); }
+
+    /* Data view */
+    .kd-dtable-wrap { max-height:340px; overflow:auto; border:1px solid var(--line); border-radius:12px; }
+    .kd-dtable { width:100%; border-collapse:collapse; font-size:13px; }
+    .kd-dtable thead th { position:sticky; top:0; background:#F7F9FC; z-index:1; text-align:left;
+        font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted);
+        padding:10px 14px; border-bottom:1px solid var(--line); white-space:nowrap; }
+    .kd-dtable tbody td { padding:9px 14px; border-bottom:1px solid var(--line); color:var(--ink); }
+    .kd-dtable tbody tr:last-child td { border-bottom:0; }
+    .kd-dtable .kd-num { text-align:right; font-variant-numeric:tabular-nums; }
+
     .kd-state { padding:60px 24px; text-align:center; color:var(--muted); font-size:14px; }
     .kd-spinner { width:26px; height:26px; margin:0 auto 12px; border:2px solid var(--line);
         border-top-color:var(--ink); border-radius:50%; animation:kd-spin .6s linear infinite; }
@@ -176,7 +214,7 @@
                     var frac = Math.Min(pct, 100) / 100.0;
                     var offset = Circ * (1 - (Animated ? frac : 0));
 
-                    <div class="kd-card @st">
+                    <div class="kd-card @st" @onclick="() => OpenTrend(k)" title="View trend">
                         <div class="kd-ctop">
                             <span class="kd-cat">@k.Department</span>
                             <span class="kd-chip @st"><span class="kd-sdot"></span>@StatusText(st)</span>
@@ -224,6 +262,71 @@
     </div>
 </div>
 
+@if (ShowTrend && TrendCard is not null)
+{
+    <div class="kd-backdrop" @onclick="CloseTrend">
+        <div class="kd-modal" @onclick:stopPropagation="true">
+            <div class="kd-modal-head">
+                <div>
+                    <p class="kd-modal-sub">@TrendCard.Department · Trend</p>
+                    <h2 class="kd-modal-title">@TrendCard.Kpi</h2>
+                </div>
+                <button class="kd-close" @onclick="CloseTrend" title="Close">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
+            </div>
+            <div class="kd-modal-toolbar">
+                <div class="kd-toggle">
+                    <button class="@(TrendChartType == "line" ? "active" : "")" @onclick='() => SetTrendType("line")'>Line</button>
+                    <button class="@(TrendChartType == "bar" ? "active" : "")" @onclick='() => SetTrendType("bar")'>Bar</button>
+                    <button class="@(TrendChartType == "data" ? "active" : "")" @onclick='() => SetTrendType("data")'>Data</button>
+                </div>
+                <span class="kd-modal-note">YTD @TrendCard.Year · incl. previous month</span>
+            </div>
+            <div class="kd-modal-body">
+                @if (TrendLoading)
+                {
+                    <div class="kd-state"><div class="kd-spinner"></div>Loading trend…</div>
+                }
+                else if (!TrendPoints.Any())
+                {
+                    <div class="kd-state">No trend data available.</div>
+                }
+                else if (TrendChartType == "data")
+                {
+                    <div class="kd-dtable-wrap">
+                        <table class="kd-dtable">
+                            <thead>
+                                <tr>
+                                    <th>Period</th>
+                                    <th class="kd-num">Value</th>
+                                    <th class="kd-num">Target</th>
+                                    <th class="kd-num">vs Target</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var p in TrendPoints)
+                                {
+                                    var diff = DiffVsTarget(p);
+                                    <tr>
+                                        <td>@p.Label</td>
+                                        <td class="kd-num">@Fmt(p.Value, TrendCard.Unit)</td>
+                                        <td class="kd-num">@Fmt(p.Target, TrendCard.Unit)</td>
+                                        <td class="kd-num" style="color:@DiffColor(p)">@diff</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                <div class="kd-chart-wrap" style="@(TrendLoading || !TrendPoints.Any() || TrendChartType == "data" ? "display:none" : "")">
+                    <canvas id="@TrendCanvasId"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private const double Radius = 32;
     private static readonly double Circ = 2 * Math.PI * Radius;
@@ -236,6 +339,16 @@
 
     private string Period = "mom";
     private string SelectedDept = "All";
+
+    // Trend popup
+    private const string TrendCanvasId = "kd-trend-canvas";
+    private bool ShowTrend = false;
+    private bool TrendLoading = false;
+    private KpiCardDto? TrendCard;
+    private List<KpiTrendPointDto> TrendPoints = new();
+    private string TrendChartType = "line";
+    private IJSObjectReference? _chartModule;
+    private string? _chartSig;
 
     private string BackUrl
     {
@@ -279,13 +392,24 @@
         await LoadCards();
     }
 
-    protected override void OnAfterRender(bool firstRender)
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         // Trigger the ring gauge fill transition once the cards are on screen.
         if (!Animated && !IsLoading && Cards.Any())
         {
             Animated = true;
             StateHasChanged();
+        }
+
+        // (Re)draw the trend chart when the popup is open and its inputs change.
+        if (ShowTrend && !TrendLoading && TrendPoints.Any())
+        {
+            var sig = $"{TrendCard?.Department}|{TrendCard?.Kpi}|{TrendChartType}|{TrendPoints.Count}";
+            if (sig != _chartSig)
+            {
+                _chartSig = sig;
+                await DrawChart();
+            }
         }
     }
 
@@ -339,6 +463,153 @@
     private static string RingColor(string st) => st == "good" ? "#2E7D57" : st == "warn" ? "#A8792F" : "#AC5347";
 
     private int CountByStatus(string st) => Visible.Count(k => Status(Attain(k)) == st);
+
+    private async Task OpenTrend(KpiCardDto card)
+    {
+        TrendCard = card;
+        ShowTrend = true;
+        TrendChartType = "line";
+        TrendPoints = new();
+        TrendLoading = true;
+        _chartSig = null;
+        StateHasChanged();
+        await LoadTrend();
+    }
+
+    private async Task LoadTrend()
+    {
+        if (TrendCard is null || string.IsNullOrEmpty(CompanyId)) { TrendLoading = false; return; }
+        try
+        {
+            HttpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+            HttpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId);
+            var url = $"api/kpi-dashboard/trend?department={Uri.EscapeDataString(TrendCard.Department ?? "")}&kpi={Uri.EscapeDataString(TrendCard.Kpi)}";
+            TrendPoints = await HttpClient.GetFromJsonAsync<List<KpiTrendPointDto>>(url) ?? new();
+        }
+        catch { TrendPoints = new(); }
+        finally { TrendLoading = false; _chartSig = null; StateHasChanged(); }
+    }
+
+    private void SetTrendType(string type)
+    {
+        TrendChartType = type;
+        _chartSig = null; // force a redraw on next render
+    }
+
+    private async Task CloseTrend()
+    {
+        ShowTrend = false;
+        _chartSig = null;
+        if (_chartModule is not null)
+        {
+            try { await _chartModule.InvokeVoidAsync("destroy", TrendCanvasId); } catch { }
+        }
+    }
+
+    private async Task DrawChart()
+    {
+        try
+        {
+            _chartModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/result-chart.js");
+            if (TrendCard is null || TrendPoints.Count == 0 || TrendChartType == "data")
+            {
+                await _chartModule.InvokeVoidAsync("destroy", TrendCanvasId);
+                return;
+            }
+            await _chartModule.InvokeVoidAsync("render", TrendCanvasId, BuildTrendConfig());
+        }
+        catch { /* charting unavailable — leave the canvas blank */ }
+    }
+
+    // Signed % difference of value vs target; sign is what happened, colour is whether that's good.
+    private string DiffVsTarget(KpiTrendPointDto p)
+    {
+        if (Math.Abs(p.Target) < 1e-12) return "—";
+        var pct = (p.Value - p.Target) / Math.Abs(p.Target) * 100.0;
+        var sign = pct > 0 ? "+" : "";
+        return $"{sign}{pct.ToString("F1")}%";
+    }
+
+    private string DiffColor(KpiTrendPointDto p)
+    {
+        if (Math.Abs(p.Target) < 1e-12) return "#667085";
+        var over = p.Value >= p.Target;                       // value above target?
+        var favorable = TrendCard!.Direction == "up" ? over : !over;
+        if (Math.Abs(p.Value - p.Target) < 1e-12) return "#667085";
+        return favorable ? "#2E7D57" : "#AC5347";
+    }
+
+    private object BuildTrendConfig()
+    {
+        var unit = TrendCard!.Unit;
+        var factor = unit == "%" ? 100.0 : 1.0;
+        var suffix = unit == "%" ? " (%)" : unit == "days" ? " (days)" : "";
+        var isLine = TrendChartType == "line";
+
+        var labels = TrendPoints.Select(p => p.Label).ToList();
+        var values = TrendPoints.Select(p => Math.Round(p.Value * factor, 4)).ToList();
+        var targets = TrendPoints.Select(p => Math.Round(p.Target * factor, 4)).ToList();
+
+        var datasets = new List<object>
+        {
+            new
+            {
+                label = "Value" + suffix,
+                data = values,
+                borderColor = "#16233B",
+                backgroundColor = isLine ? "rgba(22,35,59,0.08)" : "#16233B",
+                borderWidth = 2,
+                fill = isLine,
+                tension = 0.35,
+                pointRadius = 3,
+                pointBackgroundColor = "#16233B"
+            },
+            new
+            {
+                label = "Target" + suffix,
+                data = targets,
+                borderColor = "#A8792F",
+                backgroundColor = isLine ? "rgba(168,121,47,0)" : "#E0B978",
+                borderWidth = 2,
+                borderDash = isLine ? new[] { 6, 4 } : Array.Empty<int>(),
+                fill = false,
+                tension = 0.35,
+                pointRadius = isLine ? 0 : 3,
+                pointBackgroundColor = "#A8792F"
+            }
+        };
+
+        return new
+        {
+            type = TrendChartType,
+            data = new { labels, datasets },
+            options = new
+            {
+                responsive = true,
+                maintainAspectRatio = false,
+                interaction = new { mode = "index", intersect = false },
+                plugins = new { legend = new { display = true, position = "bottom" } },
+                scales = new
+                {
+                    x = new { grid = new { display = false } },
+                    y = new { beginAtZero = false, grid = new { color = "#EEF1F5" } }
+                }
+            }
+        };
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_chartModule is not null)
+            {
+                await _chartModule.InvokeVoidAsync("destroy", TrendCanvasId);
+                await _chartModule.DisposeAsync();
+            }
+        }
+        catch { /* ignore teardown races */ }
+    }
 
     private static string Fmt(double v, string unit)
     {
