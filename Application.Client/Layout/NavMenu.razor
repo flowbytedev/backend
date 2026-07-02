@@ -11,7 +11,7 @@
 
 <style>
     .nav-sidebar {
-        width: 220px;
+        width: 250px;
         flex-shrink: 0;
         background: white;
         border-right: 1px solid #e5e7eb;
@@ -19,8 +19,26 @@
         flex-direction: column;
         height: 100%;
         overflow-y: auto;
+        overscroll-behavior: contain;
         transition: transform .22s ease;
+        /* Firefox: thin, subtle scrollbar */
+        scrollbar-width: thin;
+        scrollbar-color: transparent transparent;
     }
+    .nav-sidebar:hover { scrollbar-color: #d1d5db transparent; }
+
+    /* WebKit/Chromium: slim, rounded thumb that reveals on hover */
+    .nav-sidebar::-webkit-scrollbar { width: 8px; }
+    .nav-sidebar::-webkit-scrollbar-track { background: transparent; }
+    .nav-sidebar::-webkit-scrollbar-thumb {
+        background: transparent;
+        border-radius: 999px;
+        border: 2px solid transparent;
+        background-clip: content-box;
+        transition: background-color .15s ease;
+    }
+    .nav-sidebar:hover::-webkit-scrollbar-thumb { background: #d1d5db; background-clip: content-box; }
+    .nav-sidebar::-webkit-scrollbar-thumb:hover { background: #9ca3af; background-clip: content-box; }
 
     .nav-body { flex: 1; padding: 8px; }
 
