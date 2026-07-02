@@ -1,0 +1,360 @@
+@page "/metrics/dashboard"
+@using Application.Shared.Models
+@using Application.Shared.Models.Metrics
+@using Application.Shared.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@inject HttpClient HttpClient
+@inject NavigationManager NavigationManager
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize(Policy = PolicyNames.MetricsRead)]
+
+<PageTitle>KPI Dashboard</PageTitle>
+
+<style>
+    .kd-scope { --ink:#16233B; --bg:#EDF0F4; --card:#FFFFFF; --muted:#667085; --line:#E4E8EF;
+        --good:#2E7D57; --warn:#A8792F; --bad:#AC5347;
+        --display:'Space Grotesk',sans-serif; --body:'Inter',sans-serif; --mono:'IBM Plex Mono',monospace; }
+    .kd-scope * { box-sizing:border-box; }
+    /* Neutralise the layout's content padding so the dashboard runs edge-to-edge (only while this page is mounted). */
+    .al-main:has(.kd-scope) { padding:0; }
+    .kd-scope { background:var(--bg); color:var(--ink); font-family:var(--body);
+        -webkit-font-smoothing:antialiased; padding:0; min-height:100%; }
+    .kd-wrap { max-width:1180px; margin:0 auto; }
+
+    /* Header */
+    .kd-scope header { margin-bottom:22px; padding-top:24px; }
+    .kd-topline { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; }
+    .kd-eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.14em;
+        text-transform:uppercase; color:var(--muted); margin:0 0 8px; }
+    .kd-scope h1 { font-family:var(--display); font-weight:600; font-size:30px;
+        letter-spacing:-.01em; margin:0 0 6px; }
+    .kd-sub { color:var(--muted); font-size:14px; margin:0; }
+    .kd-back { display:inline-flex; align-items:center; gap:7px; height:36px; padding:0 14px;
+        border-radius:999px; border:1px solid var(--line); background:var(--card); color:var(--muted);
+        font-family:var(--body); font-size:13px; cursor:pointer; text-decoration:none; white-space:nowrap; }
+    .kd-back:hover { border-color:#C4CBD6; color:var(--ink); }
+
+    .kd-controls { display:flex; flex-wrap:wrap; gap:14px; align-items:center;
+        justify-content:space-between; margin-top:20px; }
+    .kd-pills { display:flex; flex-wrap:wrap; gap:6px; }
+    .kd-pill { font-family:var(--body); font-size:13px; padding:7px 14px; border-radius:999px;
+        border:1px solid var(--line); background:var(--card); color:var(--muted); cursor:pointer;
+        transition:all .15s ease; }
+    .kd-pill:hover { border-color:#C4CBD6; }
+    .kd-pill.active { background:var(--ink); color:#fff; border-color:var(--ink); }
+
+    .kd-toggle { display:inline-flex; background:var(--card); border:1px solid var(--line);
+        border-radius:999px; padding:3px; gap:2px; }
+    .kd-toggle button { font-family:var(--body); font-size:13px; border:0; background:transparent;
+        color:var(--muted); padding:6px 14px; border-radius:999px; cursor:pointer; transition:all .15s ease; }
+    .kd-toggle button.active { background:var(--ink); color:#fff; }
+
+    /* Summary strip */
+    .kd-summary { display:flex; gap:20px; flex-wrap:wrap; margin:22px 0 4px; font-size:13px; color:var(--muted); }
+    .kd-summary b { font-family:var(--display); color:var(--ink); font-weight:600; }
+    .kd-dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; vertical-align:1px; }
+    .kd-dot.good { background:var(--good); } .kd-dot.warn { background:var(--warn); } .kd-dot.bad { background:var(--bad); }
+
+    /* Grid */
+    .kd-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:16px; margin-top:18px; }
+    .kd-card { background:var(--card); border:1px solid var(--line); border-radius:16px;
+        padding:18px 18px 16px; display:flex; flex-direction:column; animation:kd-fade .4s ease both; }
+    @@keyframes kd-fade { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+    .kd-ctop { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+    .kd-cat { font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); }
+    .kd-chip { font-size:11.5px; font-weight:500; color:var(--muted); white-space:nowrap;
+        display:inline-flex; align-items:center; gap:6px; }
+    .kd-chip .kd-sdot { width:7px; height:7px; border-radius:50%; display:inline-block; }
+    .kd-chip.good .kd-sdot { background:var(--good); }
+    .kd-chip.warn .kd-sdot { background:var(--warn); }
+    .kd-chip.bad .kd-sdot { background:var(--bad); }
+
+    .kd-name { font-size:14px; font-weight:500; margin:12px 0 0; line-height:1.3; min-height:36px; }
+
+    .kd-cbody { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; margin-top:10px; }
+    .kd-valwrap { flex:1; min-width:0; }
+    .kd-value { font-family:var(--display); font-weight:600; font-size:30px; letter-spacing:-.02em;
+        line-height:1; font-variant-numeric:tabular-nums; }
+    .kd-delta { font-size:12.5px; margin-top:9px; display:flex; align-items:center; gap:5px; flex-wrap:wrap; }
+    .kd-delta .kd-chg { font-weight:600; font-variant-numeric:tabular-nums; display:inline-flex;
+        align-items:center; gap:3px; color:var(--ink); }
+    .kd-delta .kd-was { color:var(--muted); }
+    .kd-arrow { font-size:11px; line-height:1; }
+
+    /* Ring gauge */
+    .kd-ring { width:78px; height:78px; flex:none; position:relative; }
+    .kd-ring svg { transform:rotate(-90deg); }
+    .kd-ring .kd-track { fill:none; stroke:var(--line); stroke-width:7; }
+    .kd-ring .kd-prog { fill:none; stroke-width:7; stroke-linecap:round;
+        transition:stroke-dashoffset 1.1s cubic-bezier(.2,.7,.2,1); }
+    .kd-ring .kd-lbl { position:absolute; inset:0; display:flex; flex-direction:column;
+        align-items:center; justify-content:center; }
+    .kd-ring .kd-pct { font-family:var(--display); font-weight:600; font-size:16px; line-height:1;
+        font-variant-numeric:tabular-nums; }
+    .kd-ring .kd-cap { font-family:var(--mono); font-size:8px; letter-spacing:.06em; color:var(--muted);
+        text-transform:uppercase; margin-top:2px; }
+
+    .kd-foot { margin-top:14px; padding-top:11px; border-top:1px solid var(--line);
+        font-size:12px; color:var(--muted); display:flex; justify-content:space-between; }
+    .kd-foot b { color:var(--ink); font-weight:500; font-variant-numeric:tabular-nums; }
+
+    .kd-scope footer { margin-top:34px; font-size:12px; color:var(--muted); text-align:center; }
+
+    .kd-state { padding:60px 24px; text-align:center; color:var(--muted); font-size:14px; }
+    .kd-spinner { width:26px; height:26px; margin:0 auto 12px; border:2px solid var(--line);
+        border-top-color:var(--ink); border-radius:50%; animation:kd-spin .6s linear infinite; }
+    @@keyframes kd-spin { to { transform:rotate(360deg); } }
+
+    @@media (max-width:520px) {
+        .kd-scope { padding:0; }
+        .kd-scope h1 { font-size:24px; }
+        .kd-name { min-height:0; }
+    }
+</style>
+
+<div class="kd-scope">
+    <div class="kd-wrap">
+        <header>
+            <div class="kd-topline">
+                <div>
+                    <p class="kd-eyebrow">Performance monitor@(LatestPeriod is null ? "" : " · " + LatestPeriod)</p>
+                    <h1>Departmental KPIs</h1>
+                    <p class="kd-sub">Current period against target, with change on the selected comparison window.</p>
+                </div>
+                <a class="kd-back" href="@BackUrl">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                    Metrics
+                </a>
+            </div>
+
+            <div class="kd-controls">
+                <div class="kd-pills">
+                    @foreach (var d in Departments)
+                    {
+                        var dept = d;
+                        <button class="kd-pill @(SelectedDept == dept ? "active" : "")" @onclick="() => SelectDept(dept)">@dept</button>
+                    }
+                </div>
+                <div class="kd-toggle">
+                    <button class="@(Period == "mom" ? "active" : "")" @onclick='() => SetPeriod("mom")'>vs last month</button>
+                    <button class="@(Period == "yoy" ? "active" : "")" @onclick='() => SetPeriod("yoy")'>vs last year</button>
+                </div>
+            </div>
+
+            @if (!IsLoading && Visible.Any())
+            {
+                <div class="kd-summary">
+                    <span><span class="kd-dot good"></span><b>@CountByStatus("good")</b> on target</span>
+                    <span><span class="kd-dot warn"></span><b>@CountByStatus("warn")</b> at risk</span>
+                    <span><span class="kd-dot bad"></span><b>@CountByStatus("bad")</b> below target</span>
+                </div>
+            }
+        </header>
+
+        @if (IsLoading)
+        {
+            <div class="kd-state"><div class="kd-spinner"></div>Loading KPIs…</div>
+        }
+        else if (LoadError is not null)
+        {
+            <div class="kd-state">@LoadError</div>
+        }
+        else if (!Cards.Any())
+        {
+            <div class="kd-state">No KPI data found for this company.</div>
+        }
+        else
+        {
+            <div class="kd-grid">
+                @foreach (var k in Visible)
+                {
+                    var pct = Attain(k);
+                    var st = Status(pct);
+                    var prev = Period == "mom" ? k.PrevMonth : k.PrevYear;
+                    var label = Period == "mom" ? "last month" : "last year";
+                    var frac = Math.Min(pct, 100) / 100.0;
+                    var offset = Circ * (1 - (Animated ? frac : 0));
+
+                    <div class="kd-card @st">
+                        <div class="kd-ctop">
+                            <span class="kd-cat">@k.Department</span>
+                            <span class="kd-chip @st"><span class="kd-sdot"></span>@StatusText(st)</span>
+                        </div>
+                        <p class="kd-name">@k.Kpi</p>
+                        <div class="kd-cbody">
+                            <div class="kd-valwrap">
+                                <div class="kd-value">@Fmt(k.Current, k.Unit)</div>
+                                @if (prev is not null && Math.Abs(prev.Value) > 1e-12)
+                                {
+                                    var chgPct = (k.Current - prev.Value) / Math.Abs(prev.Value) * 100.0;
+                                    var same = Math.Abs(k.Current - prev.Value) < 1e-9;
+                                    var arrow = same ? "→" : (k.Current > prev.Value ? "▲" : "▼");
+                                    <div class="kd-delta">
+                                        <span class="kd-chg"><span class="kd-arrow">@arrow</span>@Math.Abs(chgPct).ToString("F1")%</span>
+                                        <span class="kd-was">vs @label (@Fmt(prev.Value, k.Unit))</span>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="kd-delta"><span class="kd-was">no @label data</span></div>
+                                }
+                            </div>
+                            <div class="kd-ring">
+                                <svg width="78" height="78" viewBox="0 0 78 78">
+                                    <circle class="kd-track" cx="39" cy="39" r="@Radius"></circle>
+                                    <circle class="kd-prog" cx="39" cy="39" r="@Radius"
+                                            stroke="@RingColor(st)"
+                                            stroke-dasharray="@Circ.ToString("F2")"
+                                            stroke-dashoffset="@offset.ToString("F2")"></circle>
+                                </svg>
+                                <div class="kd-lbl">
+                                    <span class="kd-pct">@Math.Round(pct)%</span>
+                                    <span class="kd-cap">target</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="kd-foot"><span>Target</span><b>@Fmt(k.Target, k.Unit)</b></div>
+                    </div>
+                }
+            </div>
+
+            <footer>@Cards.Count KPIs across @(Departments.Count(d => d != "All")) departments</footer>
+        }
+    </div>
+</div>
+
+@code {
+    private const double Radius = 32;
+    private static readonly double Circ = 2 * Math.PI * Radius;
+
+    private List<KpiCardDto> Cards = new();
+    private bool IsLoading = true;
+    private bool Animated = false;
+    private string? LoadError;
+    private string? CompanyId;
+
+    private string Period = "mom";
+    private string SelectedDept = "All";
+
+    private string BackUrl
+    {
+        get
+        {
+            var c = ReadQueryValue(NavigationManager.Uri, "c");
+            return string.IsNullOrEmpty(c) ? "metrics" : $"metrics?c={Uri.EscapeDataString(c)}";
+        }
+    }
+
+    private static string? ReadQueryValue(string url, string key)
+    {
+        var queryIndex = url.IndexOf('?');
+        if (queryIndex < 0 || queryIndex == url.Length - 1) return null;
+        foreach (var pair in url[(queryIndex + 1)..].Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var eq = pair.IndexOf('=');
+            var name = eq < 0 ? pair : pair[..eq];
+            if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
+                return eq < 0 ? string.Empty : Uri.UnescapeDataString(pair[(eq + 1)..]);
+        }
+        return null;
+    }
+
+    private List<string> Departments = new() { "All" };
+    private List<KpiCardDto> Visible =>
+        SelectedDept == "All" ? Cards : Cards.Where(c => c.Department == SelectedDept).ToList();
+
+    private string? LatestPeriod
+    {
+        get
+        {
+            var latest = Cards.OrderByDescending(c => c.Year).FirstOrDefault();
+            return latest is null ? null : $"{latest.Month} {latest.Year}";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCompanyId();
+        await LoadCards();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        // Trigger the ring gauge fill transition once the cards are on screen.
+        if (!Animated && !IsLoading && Cards.Any())
+        {
+            Animated = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadCompanyId()
+    {
+        try
+        {
+            var companies = await HttpClient.GetFromJsonAsync<List<Company>>("api/companies");
+            if (companies?.Any() == true) CompanyId = companies.First().Id;
+        }
+        catch (Exception ex) { LoadError = $"Error loading company: {ex.Message}"; }
+    }
+
+    private async Task LoadCards()
+    {
+        if (string.IsNullOrEmpty(CompanyId)) { IsLoading = false; return; }
+        IsLoading = true;
+        try
+        {
+            HttpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+            HttpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId);
+            var response = await HttpClient.GetFromJsonAsync<List<KpiCardDto>>("api/kpi-dashboard");
+            Cards = response ?? new();
+            Departments = new List<string> { "All" };
+            Departments.AddRange(Cards.Select(c => c.Department)
+                                      .Where(d => !string.IsNullOrWhiteSpace(d))
+                                      .Distinct()
+                                      .OrderBy(d => d));
+            if (!Departments.Contains(SelectedDept)) SelectedDept = "All";
+        }
+        catch (Exception ex) { LoadError = $"Error loading KPIs: {ex.Message}"; }
+        finally { IsLoading = false; }
+    }
+
+    private void SelectDept(string dept) { SelectedDept = dept; }
+    private void SetPeriod(string period) { Period = period; }
+
+    // dir "up" = higher is better; "down" = lower is better.
+    private static double Attain(KpiCardDto k)
+    {
+        double raw;
+        if (k.Direction == "up")
+            raw = k.Target == 0 ? (k.Current == 0 ? 1 : 2) : k.Current / k.Target;
+        else
+            raw = k.Current == 0 ? (k.Target == 0 ? 1 : 2) : k.Target / k.Current;
+        return raw * 100.0;
+    }
+
+    private static string Status(double pct) => pct >= 100 ? "good" : pct >= 90 ? "warn" : "bad";
+    private static string StatusText(string st) => st == "good" ? "On target" : st == "warn" ? "At risk" : "Below";
+    private static string RingColor(string st) => st == "good" ? "#2E7D57" : st == "warn" ? "#A8792F" : "#AC5347";
+
+    private int CountByStatus(string st) => Visible.Count(k => Status(Attain(k)) == st);
+
+    private static string Fmt(double v, string unit)
+    {
+        switch (unit)
+        {
+            case "%":
+                return (v * 100).ToString("F1") + "%";
+            case "days":
+                return v.ToString("F1") + " d";
+            default:
+                if (Math.Abs(v) >= 1000)
+                {
+                    var k = v / 1000.0;
+                    return (Math.Abs(k) >= 100 ? Math.Round(k).ToString("F0") : k.ToString("F1")) + "K";
+                }
+                return v.ToString("F2");
+        }
+    }
+}

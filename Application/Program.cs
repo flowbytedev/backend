@@ -236,6 +236,9 @@ Application.Dashboard.DashboardServiceExtensions.AddDashboard(builder.Services);
 // Add Data Warehouse Service
 builder.Services.AddScoped<DataWarehouseService>();
 
+// Add KPI Dashboard Service (reads warehouse org.kpi)
+builder.Services.AddScoped<IKpiDashboardService, KpiDashboardService>();
+
 // Add Dataset Sharing Services
 builder.Services.AddScoped<IDatasetSharingService, DatasetSharingService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.IEmailNotificationService, Application.Services.Data.EmailNotificationService>();

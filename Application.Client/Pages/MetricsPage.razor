@@ -139,6 +139,10 @@
             <h1 class="mp-title">Key Performance Indicators</h1>
         </div>
         <div class="mp-header-actions">
+            <button class="mp-btn mp-btn-outline" @onclick="OpenDashboard">
+                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+                Dashboard
+            </button>
             <button class="mp-btn mp-btn-outline" @onclick="RefreshData" disabled="@IsLoading">
                 <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 Refresh
@@ -439,6 +443,29 @@
     private void GoToPage(int p) { CurrentPage = p; }
 
     private async Task RefreshData() => await LoadMetrics();
+
+    private void OpenDashboard()
+    {
+        // The dashboard page resolves the active company from the `c` query param, so carry it through
+        // (preserve the current URL's `c` if present, otherwise use the loaded company).
+        var c = ReadQueryValue(NavigationManager.Uri, "c") ?? CompanyId;
+        var target = string.IsNullOrEmpty(c) ? "metrics/dashboard" : $"metrics/dashboard?c={Uri.EscapeDataString(c)}";
+        NavigationManager.NavigateTo(target);
+    }
+
+    private static string? ReadQueryValue(string url, string key)
+    {
+        var queryIndex = url.IndexOf('?');
+        if (queryIndex < 0 || queryIndex == url.Length - 1) return null;
+        foreach (var pair in url[(queryIndex + 1)..].Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var eq = pair.IndexOf('=');
+            var name = eq < 0 ? pair : pair[..eq];
+            if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase))
+                return eq < 0 ? string.Empty : Uri.UnescapeDataString(pair[(eq + 1)..]);
+        }
+        return null;
+    }
 
     private void OpenCreate()
     {
