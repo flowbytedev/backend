@@ -120,13 +120,13 @@ else
                                 </td>
                                 @{ var ts = TableStatFor(tableName); }
                                 <td class="ds-td">
-                                    @if (ts != null) { <span>@ts.RowCount.ToString("N0")</span> } else { <span style="color:#a1a1aa">—</span> }
+                                    @if (ts != null) { <span class="ds-stat">@ts.RowCount.ToString("N0")</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
                                 </td>
                                 <td class="ds-td">
-                                    @if (ts != null) { <span>@FormatBytes(ts.SizeBytes)</span> } else { <span style="color:#a1a1aa">—</span> }
+                                    @if (ts != null) { <span class="ds-stat">@FormatBytes(ts.SizeBytes)</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
                                 </td>
                                 <td class="ds-td">
-                                    @if (ts != null) { <span>@ts.ColumnCount</span> } else { <span style="color:#a1a1aa">—</span> }
+                                    @if (ts != null) { <span class="ds-stat">@ts.ColumnCount</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
                                 </td>
                                 <td class="ds-td">
                                     @if (ts != null)

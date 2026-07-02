@@ -276,20 +276,42 @@ public class DuckdbService : IDuckdbService
         // Column-type mix per table (text/num/date/bool/other) from one information_schema sweep.
         var typeSummaries = await ReadColumnTypeBucketsAsync(connection, ct);
 
-        // Per-table on-disk size: sum the compressed segment sizes from the storage catalog. This is a
-        // best-effort estimate — if pragma_storage_info is unavailable for a table, its size stays 0.
+        // DuckDB doesn't expose a per-table byte size directly (pragma_storage_info has no size column in
+        // this version). Estimate it as (distinct data blocks the table occupies) × the database block
+        // size — the block size comes from the storage catalog.
+        long blockSize = 0;
+        try
+        {
+            using var bs = connection.CreateCommand();
+            bs.CommandText = "SELECT block_size FROM pragma_database_size()";
+            var v = NormalizeValue(await bs.ExecuteScalarAsync(ct));
+            blockSize = v is null ? 0 : Convert.ToInt64(v);
+        }
+        catch { /* no block size → sizes stay 0 */ }
+
         foreach (var t in tables)
         {
             long sizeBytes = 0;
-            try
+            if (blockSize > 0)
             {
-                using var sizeCmd = connection.CreateCommand();
-                sizeCmd.CommandText = $"SELECT COALESCE(SUM(compressed_size), 0) FROM pragma_storage_info('{t.Name.Replace("'", "''")}')";
-                var scalar = await sizeCmd.ExecuteScalarAsync(ct);
-                var normalized = NormalizeValue(scalar);
-                sizeBytes = normalized is null ? 0 : Convert.ToInt64(normalized);
+                try
+                {
+                    // Count the distinct blocks referenced by all of the table's column segments (including
+                    // the overflow blocks in additional_block_ids), then multiply by the block size.
+                    using var sizeCmd = connection.CreateCommand();
+                    sizeCmd.CommandText = $@"
+                        WITH s AS (SELECT * FROM pragma_storage_info('{t.Name.Replace("'", "''")}'))
+                        SELECT COUNT(DISTINCT b) FROM (
+                            SELECT block_id AS b FROM s WHERE block_id >= 0
+                            UNION
+                            SELECT UNNEST(additional_block_ids) AS b FROM s
+                        )";
+                    var normalized = NormalizeValue(await sizeCmd.ExecuteScalarAsync(ct));
+                    var blocks = normalized is null ? 0 : Convert.ToInt64(normalized);
+                    sizeBytes = blocks * blockSize;
+                }
+                catch { /* storage_info unavailable for this table → leave size at 0 */ }
             }
-            catch { /* storage_info unavailable for this table → leave size at 0 */ }
 
             result.Add(new TableStats
             {

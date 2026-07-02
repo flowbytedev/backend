@@ -378,6 +378,7 @@ code {
 .ds-tr:last-child { border-bottom: none; }
 .ds-tr:hover { background: #fafafa; }
 .ds-td { padding: 0.75rem 1rem; color: #18181b; vertical-align: middle; }
+.ds-stat { font-size: 0.75rem; color: #52525b; font-variant-numeric: tabular-nums; }
 .ds-td-name { font-weight: 500; }
 .ds-dataset-name { display: block; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ds-dataset-desc { display: block; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #71717a; }

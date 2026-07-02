@@ -121,13 +121,13 @@ else
                                 </td>
                                 <td class="ds-td">
                                     @{ var st = StatsFor(dataset.Id); }
-                                    @if (st != null) { <span>@st.TableCount</span> } else { <span style="color:#a1a1aa">—</span> }
+                                    @if (st != null) { <span class="ds-stat">@st.TableCount</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
                                 </td>
                                 <td class="ds-td">
-                                    @if (st != null && st.DatabaseExists) { <span>@FormatBytes(st.SizeBytes)</span> } else { <span style="color:#a1a1aa">—</span> }
+                                    @if (st != null && st.DatabaseExists) { <span class="ds-stat">@FormatBytes(st.SizeBytes)</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
                                 </td>
                                 <td class="ds-td">
-                                    @if (st != null) { <span>@st.TotalRows.ToString("N0")</span> } else { <span style="color:#a1a1aa">—</span> }
+                                    @if (st != null) { <span class="ds-stat">@st.TotalRows.ToString("N0")</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
                                 </td>
                                 <td class="ds-td">
                                     @if (st != null)
