@@ -20,6 +20,9 @@
     .kd-scope * { box-sizing:border-box; }
     /* Neutralise the layout's content padding so the dashboard runs edge-to-edge (only while this page is mounted). */
     .al-main:has(.kd-scope) { padding:0; }
+    /* Paint the layout footer with the dashboard background on this page so it blends in
+       (a bare `footer` rule sets a brown Fluent layer, so `transparent` isn't enough). */
+    .al-root:has(.kd-scope) .al-footer { background:#EDF0F4 !important; border-top-color:transparent; }
     .kd-scope { background:var(--bg); color:var(--ink); font-family:var(--body);
         -webkit-font-smoothing:antialiased; padding:0; min-height:100%; }
     .kd-wrap { max-width:1180px; margin:0 auto; }
@@ -145,7 +148,7 @@
     @@keyframes kd-spin { to { transform:rotate(360deg); } }
 
     @@media (max-width:520px) {
-        .kd-scope { padding:0; }
+        .kd-scope { padding:0 16px; }
         .kd-scope h1 { font-size:24px; }
         .kd-name { min-height:0; }
     }
