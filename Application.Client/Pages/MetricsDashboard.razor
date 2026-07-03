@@ -49,6 +49,16 @@
     .kd-pill:hover { border-color:#C4CBD6; }
     .kd-pill.active { background:var(--ink); color:#fff; border-color:var(--ink); }
 
+    .kd-right { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .kd-search-wrap { position:relative; }
+    .kd-search-wrap svg { position:absolute; left:11px; top:50%; transform:translateY(-50%);
+        width:13px; height:13px; color:var(--muted); pointer-events:none; }
+    .kd-search { height:34px; width:190px; padding:0 12px 0 30px; border:1px solid var(--line);
+        border-radius:999px; background:var(--card); color:var(--ink); font-family:var(--body);
+        font-size:13px; outline:none; transition:border-color .15s ease; }
+    .kd-search:focus { border-color:#C4CBD6; }
+    .kd-search::placeholder { color:var(--muted); }
+
     .kd-toggle { display:inline-flex; background:var(--card); border:1px solid var(--line);
         border-radius:999px; padding:3px; gap:2px; }
     .kd-toggle button { font-family:var(--body); font-size:13px; border:0; background:transparent;
@@ -177,9 +187,15 @@
                         <button class="kd-pill @(SelectedDept == dept ? "active" : "")" @onclick="() => SelectDept(dept)">@dept</button>
                     }
                 </div>
-                <div class="kd-toggle">
-                    <button class="@(Period == "mom" ? "active" : "")" @onclick='() => SetPeriod("mom")'>vs last month</button>
-                    <button class="@(Period == "yoy" ? "active" : "")" @onclick='() => SetPeriod("yoy")'>vs last year</button>
+                <div class="kd-right">
+                    <div class="kd-search-wrap">
+                        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                        <input class="kd-search" type="search" placeholder="Search KPIs…" value="@SearchText" @oninput="OnSearchInput" />
+                    </div>
+                    <div class="kd-toggle">
+                        <button class="@(Period == "mom" ? "active" : "")" @onclick='() => SetPeriod("mom")'>vs last month</button>
+                        <button class="@(Period == "yoy" ? "active" : "")" @onclick='() => SetPeriod("yoy")'>vs last year</button>
+                    </div>
                 </div>
             </div>
 
@@ -204,6 +220,10 @@
         else if (!Cards.Any())
         {
             <div class="kd-state">No KPI data found for this company.</div>
+        }
+        else if (!Visible.Any())
+        {
+            <div class="kd-state">No KPIs match your filters.</div>
         }
         else
         {
@@ -342,6 +362,7 @@
 
     private string Period = "mom";
     private string SelectedDept = "All";
+    private string SearchText = string.Empty;
 
     // Trend popup
     private const string TrendCanvasId = "kd-trend-canvas";
@@ -377,8 +398,16 @@
     }
 
     private List<string> Departments = new() { "All" };
-    private List<KpiCardDto> Visible =>
-        SelectedDept == "All" ? Cards : Cards.Where(c => c.Department == SelectedDept).ToList();
+    private List<KpiCardDto> Visible
+    {
+        get
+        {
+            var q = SelectedDept == "All" ? Cards.AsEnumerable() : Cards.Where(c => c.Department == SelectedDept);
+            if (!string.IsNullOrWhiteSpace(SearchText))
+                q = q.Where(c => c.Kpi.Contains(SearchText, StringComparison.OrdinalIgnoreCase));
+            return q.ToList();
+        }
+    }
 
     private string? LatestPeriod
     {
@@ -449,6 +478,7 @@
 
     private void SelectDept(string dept) { SelectedDept = dept; }
     private void SetPeriod(string period) { Period = period; }
+    private void OnSearchInput(ChangeEventArgs e) { SearchText = e.Value?.ToString() ?? string.Empty; }
 
     // dir "up" = higher is better; "down" = lower is better.
     private static double Attain(KpiCardDto k)
