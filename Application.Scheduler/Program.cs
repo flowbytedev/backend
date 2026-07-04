@@ -213,7 +213,8 @@ foreach (var db in databases)
         recurringJobId: $"sales-grouped-by-store-hour-{db.Name}",
         methodCall: job => job.RunAsync(db, null, CancellationToken.None), // context and ct are not used in this example
         cronExpression: $"{minuteOffset}/5 * * * *",
-        timeZone: tz
+        timeZone: tz,
+        queue: "sales" // Pin the recurring definition's queue; in Hangfire 1.8 this overrides the [Queue] attribute.
     );
 
     offset++;
@@ -221,21 +222,29 @@ foreach (var db in databases)
 
 
 
-minuteOffset = 0; // ensure it’s within 0-9
-//#pragma warning restore CS0618 // Type or member is obsolete
-RecurringJob.AddOrUpdate<SalesJob>(
-    recurringJobId: $"sales-grouped-by-store-hour_FO", //{db.Name}
-    methodCall: job => job.RunNokNokFoAsync(null, CancellationToken.None), // context and ct are not used in this example
-    cronExpression: $"{minuteOffset}/15 * * * *",
-    timeZone: tz
-);
+// These sales recurring jobs are [Queue("sales")]-tagged, so their triggers enqueue into the "sales"
+// queue. Only register them on a server that OWNS the sales queue — otherwise a default-only server
+// keeps enqueuing them into a queue it never processes, so they pile up "enqueued but never run".
+if (ownsSalesQueue)
+{
+    minuteOffset = 0; // ensure it’s within 0-9
+    //#pragma warning restore CS0618 // Type or member is obsolete
+    RecurringJob.AddOrUpdate<SalesJob>(
+        recurringJobId: $"sales-grouped-by-store-hour_FO", //{db.Name}
+        methodCall: job => job.RunNokNokFoAsync(null, CancellationToken.None), // context and ct are not used in this example
+        cronExpression: $"{minuteOffset}/15 * * * *",
+        timeZone: tz,
+        queue: "sales" // Pin the recurring definition's queue; in Hangfire 1.8 this overrides the [Queue] attribute.
+    );
 
-RecurringJob.AddOrUpdate<SalesSnapshotEmailJob>(
-    recurringJobId: "sales-snapshot-email",
-    methodCall: job => job.RunAsync(CancellationToken.None),
-    cronExpression: "5 0 * * *",
-    timeZone: tz
-);
+    RecurringJob.AddOrUpdate<SalesSnapshotEmailJob>(
+        recurringJobId: "sales-snapshot-email",
+        methodCall: job => job.RunAsync(CancellationToken.None),
+        cronExpression: "5 0 * * *",
+        timeZone: tz,
+        queue: "sales" // Without this, the recurring definition defaulted to "default" and the sales-only server never picked it up.
+    );
+}
 
 
 
