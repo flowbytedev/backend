@@ -1,0 +1,101 @@
+Module,Page,Route,Function,HTTP,RequiredRole,Notes
+Metrics,Metrics List,/metrics,View metrics list,GET,GMRL_METRICS_READ,Page access via MetricsRead policy
+Metrics,Metrics List,/metrics,Load metrics (API),GET,GMRL_VIEW_METRIC,Raw role check - ADMIN NOT auto-allowed
+Metrics,Metrics List,/metrics,Execute metric query,POST,GMRL_VIEW_METRIC,Raw role check - ADMIN NOT auto-allowed
+Metrics,Metrics List,/metrics,Create metric,POST,GMRL_EDIT_METRIC,MetricsWrite policy + raw EDIT_METRIC check
+Metrics,Metrics List,/metrics,Edit metric,PUT,GMRL_EDIT_METRIC,MetricsWrite policy + raw EDIT_METRIC check
+Metrics,Metrics List,/metrics,Delete metric,DELETE,GMRL_EDIT_METRIC,MetricsWrite policy + raw EDIT_METRIC check
+Metrics,Metrics List,/metrics,View data sources,GET,GMRL_VIEW_METRIC,
+Metrics,Metrics List,/metrics,Create/Edit/Delete data source,POST/PUT/DELETE,GMRL_EDIT_METRIC,
+Metrics,Metrics List,/metrics,View metric targets,GET,GMRL_VIEW_METRIC,
+Metrics,Metrics List,/metrics,Create/Edit/Delete/Deactivate target,POST/PUT/DELETE,GMRL_EDIT_METRIC,
+Metrics,Metrics List,/metrics,View metric values,GET,GMRL_VIEW_METRIC,
+Metrics,Metrics List,/metrics,Create/Edit/Delete/Validate value,POST/PUT/DELETE,GMRL_EDIT_METRIC,
+Metrics,KPI Dashboard,/metrics/dashboard,View dashboard page,GET,GMRL_METRICS_READ,Page access via MetricsRead policy
+Metrics,KPI Dashboard,/metrics/dashboard,Load KPI cards,GET,GMRL_METRICS_READ,ADMIN/METRICS_WRITE also allowed
+Metrics,KPI Dashboard,/metrics/dashboard,Load KPI trend,GET,GMRL_METRICS_READ,ADMIN/METRICS_WRITE also allowed
+Status,Monitoring Overview,/status,View overview,GET,GMRL_STATUS_READ,Page access via StatusRead policy
+Status,Monitored Assets,/status/entities,View assets list,GET,GMRL_STATUS_READ,
+Status,Monitored Assets,/status/entities,Create asset,POST,GMRL_INCIDENTS,StatusWrite policy
+Status,Asset Create/Edit,/status/entities/create;/status/entities/{id}/edit,Create/Edit asset,POST/PUT,GMRL_INCIDENTS,StatusWrite policy
+Status,Monitored Assets,/status/entities,Delete asset,DELETE,GMRL_INCIDENTS,StatusWrite policy
+Status,Asset Details,/status/entities/{id},View asset detail,GET,GMRL_STATUS_READ,
+Status,Asset Details,/status/entities/{id},Update asset status,POST,GMRL_INCIDENTS,StatusWrite policy
+Status,Asset Details,/status/entities/{id},Ping asset,POST,GMRL_INCIDENTS,StatusWrite policy
+Status,Asset Details,/status/entities/{id},Manage audience,POST/PUT/DELETE,GMRL_INCIDENTS,StatusWrite policy
+Status,Asset Dependencies,/status/entities/{id}/dependencies,View dependencies,GET,GMRL_STATUS_READ,
+Status,Asset Dependencies,/status/entities/{id}/dependencies,Create/Edit/Delete dependency,POST/PUT/DELETE,GMRL_INCIDENTS,StatusWrite policy
+Status,Asset Details,/status/entities/{id},View status history,GET,GMRL_STATUS_READ,
+Status,Asset Details,/status/entities/{id},Create/Edit/Delete status history,POST/PUT/DELETE,GMRL_INCIDENTS,StatusWrite policy
+Status,Incidents,/status/incidents,View incidents list,GET,GMRL_STATUS_READ,
+Status,Incidents,/status/incidents,Create incident,POST,GMRL_INCIDENTS,StatusWrite policy
+Status,Incident Create/Edit,/status/incidents/create;/status/incidents/{id}/edit,Create/Edit incident,POST/PUT,GMRL_INCIDENTS,StatusWrite policy
+Status,Incidents,/status/incidents,Delete incident,DELETE,GMRL_INCIDENTS,StatusWrite policy
+Status,Incident Details,/status/incidents/{id},View incident detail,GET,GMRL_STATUS_READ,
+Status,Incident Details,/status/incidents/{id},Update status/Resolve,PUT,GMRL_INCIDENTS,StatusWrite policy
+Status,Incident Details,/status/incidents/{id},Add incident update,POST,GMRL_INCIDENTS,StatusWrite policy
+Status,Status Board,/status/board,View status board,GET,GMRL_STATUS_READ,Requires authentication + company status access
+Status,PowerBI Connections,(in Status pages),View PowerBI connections/links/refreshes,GET,GMRL_STATUS_READ,
+Status,PowerBI Connections,(in Status pages),Create/Edit/Delete connection or link,POST/PUT/DELETE,GMRL_INCIDENTS,StatusWrite policy
+Status,PowerBI Connections,(in Status pages),Trigger refresh,POST,GMRL_INCIDENTS,StatusWrite policy
+Status,DB Table Check,(in Status pages),View DB connection/tables/check,GET,GMRL_STATUS_READ,
+Status,DB Table Check,(in Status pages),Save/Delete/Test connection or check; run check,POST/PUT/DELETE,GMRL_INCIDENTS,StatusWrite policy
+Data,Datasets List,/data/datasets,View datasets page,GET,GMRL_DATASETS,Page access via DatasetsAccess policy
+Data,Datasets List,/data/datasets,List datasets/stats,GET,GMRL_VIEW_DATA,ADMIN implicitly allowed
+Data,Dataset Create,/data/datasets/create,Create dataset,POST,GMRL_EDIT_DATA,ADMIN implicitly allowed
+Data,Dataset Edit,/data/datasets/edit/{id},Edit dataset,PUT,GMRL_EDIT_DATA,ADMIN implicitly allowed
+Data,Datasets List,/data/datasets,Delete dataset,DELETE,GMRL_EDIT_DATA,ADMIN implicitly allowed
+Data,Tables List,/data/tables,View tables page,GET,GMRL_DATASETS,Page access via DatasetsAccess policy
+Data,Tables List,/data/tables,List tables/columns/stats,GET,GMRL_VIEW_DATA,
+Data,Table Create,/data/tables/{action},Create table,POST,GMRL_EDIT_DATA,
+Data,Tables List,/data/tables,Delete table,DELETE,GMRL_EDIT_DATA,
+Data,View/Edit Data,/data/view;/data/edit,View table data,GET/POST,GMRL_VIEW_DATA,Page access via DatasetsAccess policy
+Data,View/Edit Data,/data/view;/data/edit,Insert/Update/Delete/Bulk-edit rows,POST/PUT/DELETE,GMRL_EDIT_DATA,
+Data,View/Edit Data,/data/view;/data/edit,Download table (full/filtered),GET/POST,GMRL_VIEW_DATA,
+Data,View/Edit Data,/data/view;/data/edit,View comments,GET,GMRL_VIEW_DATA,
+Data,View/Edit Data,/data/view;/data/edit,Add/Edit/Delete comment,POST/PUT/DELETE,GMRL_EDIT_DATA,
+Data,View/Edit Data,/data/view;/data/edit,Save column preferences,POST,GMRL_EDIT_DATA,
+Data,Import Data,/data/import,View import wizard,GET,GMRL_DATASETS,Page access via DatasetsAccess policy
+Data,Import Data,/data/import,Infer schema,POST,GMRL_EDIT_DATA,
+Data,Import Data,/data/import,Peek/Validate file,POST,GMRL_EDIT_DATA,
+Data,Import Data,/data/import,Import CSV/file,POST,GMRL_EDIT_DATA,
+Data,Query Workbench,/data/query,View query page,GET,GMRL_DATASETS,Page access via DatasetsAccess policy
+Data,Query Workbench,/data/query,Run query,POST,GMRL_VIEW_DATA,Write-back within run requires EDIT_DATA
+Data,Query Workbench,/data/query,Save query result,POST,GMRL_EDIT_DATA,
+Data,Query Workbench,/data/query,View/Create/Update saved queries,GET/POST/PUT,GMRL_VIEW_DATA,Editing others' queries requires ADMIN
+Data,Query Workbench,/data/query,Delete saved query,DELETE,GMRL_VIEW_DATA,Deleting others' queries requires ADMIN
+Data,Ingestion Sources,/data/ingestion,View ingestion sources,GET,GMRL_VIEW_DATA,Page access via DatasetsAccess policy
+Data,Ingestion Sources,/data/ingestion,Create/Edit/Delete source,POST/PUT/DELETE,GMRL_EDIT_DATA,
+Data,Ingestion Sources,/data/ingestion,Run now / Run batch / Reconcile,POST,GMRL_EDIT_DATA,
+Data,API Keys,/data/api-keys,View API keys page,GET,GMRL_DATASETS,Page access via DatasetsAccess policy
+Data,API Keys,/data/api-keys,List/Create/Update/Revoke/Delete key,GET/POST/PUT/DELETE,GMRL_ADMIN,Company-admin only (HasCompanyRole with no suffix)
+Data,Dashboard Links,(in Data pages),List dashboards,GET,GMRL_DATASETS,No extra role beyond page policy
+Data,Dashboard Links,(in Data pages),View links for table,GET,GMRL_VIEW_DATA,
+Data,Dashboard Links,(in Data pages),Connect/Disconnect link,POST/DELETE,GMRL_EDIT_DATA,
+Data,Dataset Sharing,(in Data pages),View dataset users,GET,GMRL_VIEW_DATA,
+Data,Dataset Sharing,(in Data pages),Share/Grant/Update/Revoke/Remove access,POST/PUT/DELETE,GMRL_EDIT_DATA,
+Sales,Real-Time Sales Dashboard,/realtime/sales-dashboard,View real-time sales,GET,GMRL_SALES,Page access via SalesRead policy
+Sales,Real-Time Sales Dashboard,/realtime/sales-dashboard,Ingest sales data,POST,GMRL_SALES,Endpoint is AllowAnonymous (external POS ingest)
+Sales,Real-Time Sales Dashboard,/realtime/sales-dashboard,Get sales / by store / by scheme / analytics,GET,GMRL_SALES,
+Sales,Real-Time Sales Dashboard,/realtime/sales-dashboard,Mark processed / Delete sales record,PUT/DELETE,GMRL_SALES,
+Dashboards,Daily Sales,/dashboards/daily-sales,View daily sales dashboard,GET,GMRL_DASHBOARDS_READ + GMRL_SALES,Both roles required (AND); ADMIN bypasses
+Dashboards,Daily Sales,/dashboards/daily-sales,Load daily sales (scope/view/drill/filter),GET,GMRL_DASHBOARDS_READ + GMRL_SALES,Both roles required (AND); ADMIN bypasses
+Dashboards,Sales Performance Overview,/dashboards/sales-overview,View sales overview,GET,GMRL_DASHBOARDS_READ + GMRL_SALES,Both roles required (AND); ADMIN bypasses
+Dashboards,Out-of-Stock Report,/dashboards/oos,View OOS dashboard,GET,GMRL_DASHBOARDS_READ + GMRL_INVENTORY_READ,Both roles required (AND); ADMIN bypasses
+Demand,Daily Inventory,/demand/daily-inventory,View daily inventory,GET,GMRL_INVENTORY_READ,Page access via InventoryRead policy
+Demand,Daily Inventory,/demand/daily-inventory,Load locations,GET,GMRL_INVENTORY_READ,
+Demand,Daily Inventory,/demand/daily-inventory,Load inventory rows / detail columns / item details,GET/POST,GMRL_INVENTORY_READ,
+Demand,Daily Inventory,/demand/daily-inventory,Export CSV,GET,GMRL_INVENTORY_READ,
+Demand,Daily Inventory (AG Grid),/demand/daily-inventory-aggrid,View inventory (AG Grid),GET,GMRL_INVENTORY_READ,Page access via InventoryRead policy
+DataWarehouse,Data Warehouse,/datawarehouse,View warehouse page,GET,GMRL_DATA_WAREHOUSE,Page access via DataWarehouseRead policy
+DataWarehouse,Data Warehouse,/datawarehouse,List tables / query data,GET,GMRL_DATA_WAREHOUSE,
+Admin,Admin Home,/admin/users/{action?}/{id?},View admin area,GET,GMRL_VIEW_ADMIN,
+Admin,Admin Home,/admin/users/{action?}/{id?},Edit admin area,GET,GMRL_EDIT_ADMIN,
+Admin,Users List,/admin/users/test,View users list,GET,GMRL_VIEW_ADMIN,
+Admin,Users,(Admin pages),List users / roles / emails,GET,GMRL_VIEW_ADMIN,Raw role check - ADMIN NOT auto-allowed
+Admin,Users,(Admin pages),Create user,POST,GMRL_EDIT_ADMIN,Raw role check - ADMIN NOT auto-allowed
+Admin,Users,(Admin pages),Update user / reset password,PUT,GMRL_EDIT_ADMIN,
+Admin,Roles,(Admin pages),List roles,GET,GMRL_VIEW_ADMIN,
+Chat,AI Chat,(global component),Send message / history / search,POST/GET,GMRL_VIEW_DATA,Requires authentication + VIEW_DATA
+Auth,Auth,/auth,View auth landing,GET,(any authenticated),No company role required
+Auth,Auth Details,/auth/details,View auth/claims details,GET,(any authenticated),Sections gated by specific roles
