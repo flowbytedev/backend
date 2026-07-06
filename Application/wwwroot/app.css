@@ -44,6 +44,39 @@ body {
 }
 .al-company-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; flex-shrink: 0; }
 
+/* Company switcher (native <details> dropdown) */
+.al-company-switch { position: relative; }
+.al-company-switch > summary { list-style: none; cursor: pointer; user-select: none; }
+.al-company-switch > summary::-webkit-details-marker { display: none; }
+.al-company-badge-btn { transition: background 0.12s, border-color 0.12s; }
+.al-company-badge-btn:hover { background: #e5e7eb; border-color: #d1d5db; }
+.al-company-current { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.al-company-caret { color: #9ca3af; transition: transform 0.15s; flex-shrink: 0; }
+.al-company-switch[open] > summary .al-company-caret { transform: rotate(180deg); }
+
+.al-company-menu {
+    position: absolute; top: calc(100% + 6px); right: 0; z-index: 100;
+    min-width: 240px; max-height: 360px; overflow-y: auto;
+    background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+    box-shadow: 0 10px 30px -8px rgba(0,0,0,0.18), 0 2px 6px -2px rgba(0,0,0,0.08);
+    padding: 6px;
+}
+.al-company-menu-head {
+    font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    color: #9ca3af; padding: 6px 10px 8px;
+}
+.al-company-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 10px; border-radius: 7px; text-decoration: none;
+    color: #374151; transition: background 0.1s;
+}
+.al-company-item:hover { background: #f3f4f6; }
+.al-company-item-on { background: #f9fafb; }
+.al-company-item-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.al-company-item-name { font-size: 13px; font-weight: 500; color: #18181b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.al-company-item-id { font-size: 11px; color: #9ca3af; font-family: ui-monospace, Consolas, monospace; }
+.al-company-check { color: #22c55e; flex-shrink: 0; }
+
 .al-body { display: flex; flex: 1; overflow: hidden; }
 
 .al-main { flex: 1; overflow-y: auto; background: #f9fafb; padding: 20px 24px; }
