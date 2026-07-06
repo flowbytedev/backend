@@ -7,6 +7,7 @@
 @inject IToastService _toastService
 @inject NavigationManager _navigationManager
 @inject AuthenticationStateProvider _authenticationStateProvider
+@inject Application.Client.Services.ActivityLogClient _activityLog
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @attribute [Authorize(Policy = PolicyNames.DatasetsAccess)]
 
@@ -497,6 +498,8 @@ else
     {
         currentPage = 0;
         ApplyFilterAndSort();
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+            _ = _activityLog.LogAsync(companyId, "dataset.search", "dataset", route: "/data/datasets", details: searchTerm);
     }
 
     private void SetSort(string field)
@@ -505,6 +508,8 @@ else
         else { sortField = field; sortAsc = true; }
         currentPage = 0;
         ApplyFilterAndSort();
+        _ = _activityLog.LogAsync(companyId, "dataset.sort", "dataset", route: "/data/datasets",
+            details: $"{sortField} {(sortAsc ? "asc" : "desc")}");
     }
 
     private void ApplyFilterAndSort()

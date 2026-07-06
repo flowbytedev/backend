@@ -1,0 +1,457 @@
+@page "/data/activity-log"
+@using System.Net.Http.Json
+@using Application.Shared.Authorization
+@using Application.Shared.Models.Logging
+@inject HttpClient _httpClient
+@inject AuthenticationStateProvider _authenticationStateProvider
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize(Policy = PolicyNames.DataLogRead)]
+
+<PageTitle>Activity Log</PageTitle>
+
+@if (!canView && !isLoading)
+{
+    <div class="ds-empty" style="padding:6rem 0">
+        <div class="ds-empty-icon">
+            <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        </div>
+        <p class="ds-empty-title">Access denied</p>
+        <p class="ds-empty-sub">You need the <code>@(companyId)_DATA_ADMIN</code> or <code>@(companyId)_ADMIN</code> role to view the activity log.</p>
+    </div>
+}
+else
+{
+<div class="ds-page al-page">
+
+    <div class="ds-header">
+        <div>
+            <h1 class="ds-title">Activity Log</h1>
+            <p class="ds-subtitle">Audit trail of every Datasets &amp; Tables action across your company.</p>
+        </div>
+        <button class="btn btn-outline" @onclick="Refresh" disabled="@isLoading">
+            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Refresh
+        </button>
+    </div>
+
+    <!-- KPI cards -->
+    <div class="al-kpis">
+        <div class="al-kpi">
+            <span class="al-kpi-label">Events</span>
+            <span class="al-kpi-value">@((result?.Total ?? 0).ToString("#,##0"))</span>
+            <span class="al-kpi-foot">matching filters</span>
+        </div>
+        <div class="al-kpi">
+            <span class="al-kpi-label">Failures</span>
+            <span class="al-kpi-value @(PageFailures > 0 ? "al-kpi-bad" : "")">@PageFailures.ToString("#,##0")</span>
+            <span class="al-kpi-foot">on this page</span>
+        </div>
+        <div class="al-kpi">
+            <span class="al-kpi-label">Users</span>
+            <span class="al-kpi-value">@PageUsers.ToString("#,##0")</span>
+            <span class="al-kpi-foot">on this page</span>
+        </div>
+        <div class="al-kpi">
+            <span class="al-kpi-label">Avg latency</span>
+            <span class="al-kpi-value">@PageAvgMs<span class="al-kpi-unit">ms</span></span>
+            <span class="al-kpi-foot">on this page</span>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="ds-card al-filtercard">
+        <div class="al-filterbar">
+            <div class="ds-search-wrap al-search">
+                <span class="ds-search-icon">
+                    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </span>
+                <input class="ds-search" placeholder="Search user, action, table, query…" @bind="search" @bind:event="oninput" @onkeyup="OnSearchKey" />
+            </div>
+
+            <div class="al-chips">
+                @foreach (var a in Areas)
+                {
+                    <button class="al-chip @(area == a.Value ? "al-chip-on" : "")" @onclick="() => SetArea(a.Value)">@a.Label</button>
+                }
+            </div>
+
+            <div class="al-seg" role="group" aria-label="Source">
+                @foreach (var s in Sources)
+                {
+                    <button class="al-seg-btn @(source == s.Value ? "al-seg-on" : "")" @onclick="() => SetSource(s.Value)">@s.Label</button>
+                }
+            </div>
+
+            <div class="al-daterange">
+                <input class="ds-input al-date" type="date" @bind="fromDate" title="From" />
+                <span class="al-dash">–</span>
+                <input class="ds-input al-date" type="date" @bind="toDate" title="To" />
+            </div>
+
+            <input class="ds-input al-tablefilter" placeholder="Table…" @bind="tableName" @onkeyup="OnSearchKey" />
+
+            <div class="al-filter-actions">
+                <button class="btn btn-default" @onclick="ApplyFilters">Apply</button>
+                @if (HasActiveFilters)
+                {
+                    <button class="btn btn-ghost" @onclick="ResetFilters">Clear</button>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- Results -->
+    <div class="ds-card al-results">
+        @if (isLoading)
+        {
+            <div class="ds-loading"><span class="ds-spinner"></span> Loading activity…</div>
+        }
+        else if (result is null || result.Items.Count == 0)
+        {
+            <div class="ds-empty">
+                <div class="ds-empty-icon">
+                    <svg width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
+                </div>
+                <p class="ds-empty-title">No activity found</p>
+                <p class="ds-empty-sub">No events match these filters@(HasActiveFilters ? " — try clearing them." : ".")</p>
+            </div>
+        }
+        else
+        {
+            <div class="ds-table-wrap">
+                <table class="ds-table al-table">
+                    <thead>
+                        <tr>
+                            <th class="ds-th" style="width:32px"></th>
+                            <th class="ds-th">When</th>
+                            <th class="ds-th">User</th>
+                            <th class="ds-th">Action</th>
+                            <th class="ds-th">Target</th>
+                            <th class="ds-th">Status</th>
+                            <th class="ds-th" style="text-align:right">Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (var i = 0; i < result.Items.Count; i++)
+                        {
+                            var idx = i;
+                            var r = result.Items[i];
+                            var open = expandedIndex == idx;
+                            <tr class="ds-tr al-tr @(open ? "al-tr-open" : "")" @onclick="() => Toggle(idx)">
+                                <td class="ds-td al-td-chevron">
+                                    <svg class="al-chevron @(open ? "al-chevron-open" : "")" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+                                </td>
+                                <td class="ds-td al-nowrap">
+                                    <div class="al-time-rel">@Relative(r.EventTime)</div>
+                                    <div class="al-time-abs">@r.EventTime.ToString("MMM d, HH:mm:ss")</div>
+                                </td>
+                                <td class="ds-td">
+                                    <div class="al-user">@(string.IsNullOrWhiteSpace(r.UserName) ? (string.IsNullOrWhiteSpace(r.UserId) ? "—" : r.UserId) : r.UserName)</div>
+                                    <div class="al-user-src">@(r.Source == "client" ? "UI" : r.HttpMethod)</div>
+                                </td>
+                                <td class="ds-td">
+                                    <span class="al-badge @AreaClass(r.Area)">@r.Area</span>
+                                    <span class="al-action">@ActionLabel(r.Action)</span>
+                                </td>
+                                <td class="ds-td al-target">
+                                    @if (!string.IsNullOrWhiteSpace(r.TableName))
+                                    {
+                                        <span class="al-mono" title="@r.TableName">@Trunc(r.TableName, 22)</span>
+                                    }
+                                    else if (!string.IsNullOrWhiteSpace(r.DatasetId))
+                                    {
+                                        <span class="al-mono al-muted" title="@r.DatasetId">@Trunc(r.DatasetId, 16)</span>
+                                    }
+                                    else { <span class="al-muted">—</span> }
+                                </td>
+                                <td class="ds-td">
+                                    @if (r.Success)
+                                    {
+                                        <span class="al-badge al-badge-ok">@(r.StatusCode == 0 ? "OK" : r.StatusCode.ToString())</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="al-badge al-badge-err">@(r.StatusCode == 0 ? "ERR" : r.StatusCode.ToString())</span>
+                                    }
+                                </td>
+                                <td class="ds-td al-dur" style="text-align:right">@FmtDuration(r.DurationMs)</td>
+                            </tr>
+                            @if (open)
+                            {
+                                <tr class="al-detail-row">
+                                    <td class="ds-td" colspan="7">
+                                        <div class="al-detail-grid">
+                                            @if (!string.IsNullOrWhiteSpace(r.Error))
+                                            {
+                                                <div class="al-detail-block al-detail-error">
+                                                    <span class="al-detail-key">Error</span>
+                                                    <div class="al-detail-val">@r.Error</div>
+                                                </div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(r.QueryText))
+                                            {
+                                                <div class="al-detail-block al-detail-full">
+                                                    <span class="al-detail-key">Query</span>
+                                                    <pre class="al-code">@r.QueryText</pre>
+                                                </div>
+                                            }
+                                            @if (!string.IsNullOrWhiteSpace(r.Details))
+                                            {
+                                                <div class="al-detail-block al-detail-full">
+                                                    <span class="al-detail-key">Details</span>
+                                                    <pre class="al-code">@r.Details</pre>
+                                                </div>
+                                            }
+                                            <div class="al-detail-meta">
+                                                <div><span class="al-detail-key">Route</span><span class="al-mono">@(string.IsNullOrWhiteSpace(r.Route) ? "—" : r.Route)</span></div>
+                                                <div><span class="al-detail-key">Dataset</span><span class="al-mono">@(string.IsNullOrWhiteSpace(r.DatasetId) ? "—" : r.DatasetId)</span></div>
+                                                <div><span class="al-detail-key">User ID</span><span class="al-mono">@(string.IsNullOrWhiteSpace(r.UserId) ? "—" : r.UserId)</span></div>
+                                                <div><span class="al-detail-key">IP</span><span class="al-mono">@(string.IsNullOrWhiteSpace(r.ClientIp) ? "—" : r.ClientIp)</span></div>
+                                                <div><span class="al-detail-key">When (UTC)</span><span class="al-mono">@r.EventTime.ToString("yyyy-MM-dd HH:mm:ss")</span></div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="ds-pagination">
+                <span>Showing @RangeStart–@RangeEnd of @result.Total.ToString("#,##0")</span>
+                <div class="ds-page-btns">
+                    <button class="btn-page" disabled="@(page <= 1)" @onclick="PrevPage">‹ Prev</button>
+                    <span class="al-pageinfo">Page @(page) / @TotalPages</span>
+                    <button class="btn-page" disabled="@(page >= TotalPages)" @onclick="NextPage">Next ›</button>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+}
+
+<style>
+    /* Fill the scroll area exactly so the PAGE doesn't scroll — only the table body does. */
+    .al-page { max-width: none; width: 100%; height: 100%; overflow: hidden; min-height: 0; }
+    .al-page > .ds-header, .al-page > .al-kpis, .al-page > .al-filtercard { flex: 0 0 auto; }
+
+    /* Results card grows to fill remaining space; its table wrap is the scroll container. */
+    .al-results { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .al-results .ds-table-wrap { flex: 1 1 auto; min-height: 0; overflow: auto; }
+    .al-results .ds-pagination { flex: 0 0 auto; }
+    .al-results .ds-loading, .al-results .ds-empty { flex: 1 1 auto; }
+
+    /* KPI cards */
+    .al-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; }
+    .al-kpi { background: #fff; border: 1px solid #e4e4e7; border-radius: 0.5rem; padding: 0.875rem 1rem; display: flex; flex-direction: column; gap: 0.125rem; }
+    .al-kpi-label { font-size: 0.6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #a1a1aa; }
+    .al-kpi-value { font-size: 1.5rem; font-weight: 700; color: #18181b; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+    .al-kpi-unit { font-size: 0.875rem; font-weight: 600; color: #a1a1aa; margin-left: 2px; }
+    .al-kpi-bad { color: #dc2626; }
+    .al-kpi-foot { font-size: 0.6875rem; color: #a1a1aa; }
+
+    /* Filter bar */
+    .al-filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.625rem; padding: 0.75rem 1rem; }
+    .al-search { flex: 1 1 260px; max-width: 340px; }
+    .al-chips { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+    .al-chip { border: 1px solid #e4e4e7; background: #fff; color: #52525b; border-radius: 9999px; padding: 0.3125rem 0.75rem; font-size: 0.75rem; font-weight: 500; cursor: pointer; transition: all 0.12s; font-family: inherit; }
+    .al-chip:hover { border-color: #d4d4d8; background: #fafafa; }
+    .al-chip-on { background: #18181b; border-color: #18181b; color: #fff; }
+
+    .al-seg { display: inline-flex; border: 1px solid #e4e4e7; border-radius: 0.375rem; overflow: hidden; }
+    .al-seg-btn { border: none; background: #fff; color: #52525b; padding: 0.3125rem 0.75rem; font-size: 0.75rem; font-weight: 500; cursor: pointer; font-family: inherit; border-right: 1px solid #e4e4e7; }
+    .al-seg-btn:last-child { border-right: none; }
+    .al-seg-btn:hover { background: #fafafa; }
+    .al-seg-on { background: #18181b; color: #fff; }
+
+    .al-daterange { display: inline-flex; align-items: center; gap: 0.375rem; }
+    .al-date { width: 140px; padding: 0.375rem 0.5rem !important; }
+    .al-dash { color: #a1a1aa; }
+    .al-tablefilter { width: 150px; }
+    .al-filter-actions { display: flex; gap: 0.375rem; margin-left: auto; }
+
+    /* Table */
+    .al-table .ds-th { position: sticky; top: 0; z-index: 1; }
+    .al-tr { cursor: pointer; }
+    .al-tr:hover { background: #fafafa; }
+    .al-tr-open { background: #f4f4f5; }
+    .al-td-chevron { color: #a1a1aa; }
+    .al-chevron { transition: transform 0.15s; }
+    .al-chevron-open { transform: rotate(90deg); color: #18181b; }
+    .al-nowrap { white-space: nowrap; }
+
+    .al-time-rel { font-size: 0.8125rem; font-weight: 500; color: #18181b; }
+    .al-time-abs { font-size: 0.6875rem; color: #a1a1aa; }
+    .al-user { font-size: 0.8125rem; font-weight: 500; color: #18181b; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .al-user-src { font-size: 0.6875rem; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.03em; }
+
+    .al-badge { display: inline-flex; align-items: center; font-size: 0.6875rem; font-weight: 600; padding: 0.125rem 0.5rem; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .al-a-dataset { background: #eef2ff; color: #4f46e5; }
+    .al-a-table { background: #eff6ff; color: #2563eb; }
+    .al-a-ingestion { background: #fffbeb; color: #b45309; }
+    .al-a-sharing { background: #f5f3ff; color: #7c3aed; }
+    .al-a-default { background: #f4f4f5; color: #71717a; }
+    .al-badge-ok { background: #ecfdf5; color: #059669; }
+    .al-badge-err { background: #fef2f2; color: #dc2626; }
+
+    .al-action { margin-left: 0.5rem; font-size: 0.8125rem; color: #3f3f46; font-family: ui-monospace, 'JetBrains Mono', Consolas, monospace; }
+    .al-mono { font-family: ui-monospace, 'JetBrains Mono', Consolas, monospace; font-size: 0.78rem; color: #3f3f46; }
+    .al-muted { color: #a1a1aa; }
+    .al-dur { font-variant-numeric: tabular-nums; color: #52525b; font-size: 0.8125rem; white-space: nowrap; }
+
+    /* Detail row */
+    .al-detail-row td { background: #fafafa; border-bottom: 1px solid #e4e4e7 !important; }
+    .al-detail-grid { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.5rem 0.25rem 0.75rem 2rem; }
+    .al-detail-key { display: block; font-size: 0.625rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #a1a1aa; margin-bottom: 0.25rem; }
+    .al-detail-val { font-size: 0.8125rem; color: #b91c1c; }
+    .al-code { margin: 0; background: #18181b; color: #e4e4e7; border-radius: 0.375rem; padding: 0.625rem 0.875rem; font-size: 0.75rem; font-family: ui-monospace, 'JetBrains Mono', Consolas, monospace; overflow-x: auto; white-space: pre-wrap; word-break: break-word; max-height: 240px; }
+    .al-detail-error .al-detail-val { padding: 0.5rem 0.75rem; background: #fef2f2; border: 1px solid #fecaca; border-radius: 0.375rem; }
+    .al-detail-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.5rem 1.5rem; }
+    .al-detail-meta > div { display: flex; flex-direction: column; gap: 0.125rem; }
+
+    .al-pageinfo { font-size: 0.8125rem; color: #71717a; padding: 0 0.5rem; }
+
+    @@media (max-width: 720px) {
+        .al-kpis { grid-template-columns: repeat(2, 1fr); }
+        .al-filter-actions { margin-left: 0; }
+    }
+</style>
+
+@code {
+    [SupplyParameterFromQuery(Name = "c")] public string? companyId { get; set; }
+
+    private bool canView;
+    private bool isLoading = true;
+    private DataAppLogQueryResult? result;
+    private int? expandedIndex;
+
+    // filters
+    private string search = "";
+    private string area = "";
+    private string source = "";
+    private string tableName = "";
+    private DateTime? fromDate;
+    private DateTime? toDate;
+    private int page = 1;
+    private const int PageSize = 50;
+
+    private record Opt(string Value, string Label);
+    private static readonly Opt[] Areas =
+    {
+        new("", "All"), new("dataset", "Datasets"), new("table", "Tables"),
+        new("ingestion", "Ingestion"), new("sharing", "Sharing")
+    };
+    private static readonly Opt[] Sources = { new("", "All"), new("api", "API"), new("client", "UI") };
+
+    private int TotalPages => result is null ? 1 : Math.Max(1, (int)Math.Ceiling(result.Total / (double)PageSize));
+    private int RangeStart => result is null || result.Total == 0 ? 0 : ((page - 1) * PageSize) + 1;
+    private int RangeEnd => result is null ? 0 : Math.Min(page * PageSize, result.Total);
+
+    private bool HasActiveFilters =>
+        !string.IsNullOrWhiteSpace(search) || !string.IsNullOrWhiteSpace(area) ||
+        !string.IsNullOrWhiteSpace(source) || !string.IsNullOrWhiteSpace(tableName) ||
+        fromDate.HasValue || toDate.HasValue;
+
+    private int PageFailures => result?.Items.Count(x => !x.Success) ?? 0;
+    private int PageUsers => result?.Items.Select(x => x.UserId).Where(u => !string.IsNullOrWhiteSpace(u)).Distinct().Count() ?? 0;
+    private string PageAvgMs => result is { Items.Count: > 0 }
+        ? ((long)result.Items.Average(x => x.DurationMs)).ToString("#,##0") : "0";
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (string.IsNullOrEmpty(companyId)) { isLoading = false; return; }
+
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        // {companyId}_ADMIN is implicitly allowed by HasCompanyRole.
+        canView = authState.User.HasCompanyRole(companyId, RoleSuffixes.DataAdmin);
+        if (!canView) { isLoading = false; return; }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        isLoading = true;
+        expandedIndex = null;
+        StateHasChanged();
+        try
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, BuildUrl());
+            request.Headers.Add("X-Company-Id", companyId);
+            var resp = await _httpClient.SendAsync(request);
+            if (resp.IsSuccessStatusCode)
+                result = await resp.Content.ReadFromJsonAsync<DataAppLogQueryResult>();
+        }
+        catch (Exception ex) { Console.WriteLine($"Activity log load failed: {ex.Message}"); }
+        finally { isLoading = false; StateHasChanged(); }
+    }
+
+    private string BuildUrl()
+    {
+        var q = new List<string> { $"page={page}", $"pageSize={PageSize}" };
+        if (!string.IsNullOrWhiteSpace(search)) q.Add($"search={Uri.EscapeDataString(search)}");
+        if (!string.IsNullOrWhiteSpace(area)) q.Add($"area={area}");
+        if (!string.IsNullOrWhiteSpace(source)) q.Add($"source={source}");
+        if (!string.IsNullOrWhiteSpace(tableName)) q.Add($"tableName={Uri.EscapeDataString(tableName)}");
+        if (fromDate.HasValue) q.Add($"from={fromDate.Value:yyyy-MM-dd}");
+        if (toDate.HasValue) q.Add($"to={toDate.Value.AddDays(1):yyyy-MM-dd}"); // inclusive end day
+        return "api/data-log?" + string.Join("&", q);
+    }
+
+    private async Task Refresh() => await LoadAsync();
+    private async Task ApplyFilters() { page = 1; await LoadAsync(); }
+
+    private async Task SetArea(string value) { area = value; page = 1; await LoadAsync(); }
+    private async Task SetSource(string value) { source = value; page = 1; await LoadAsync(); }
+
+    private async Task ResetFilters()
+    {
+        search = area = source = tableName = "";
+        fromDate = toDate = null;
+        page = 1;
+        await LoadAsync();
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await ApplyFilters();
+    }
+
+    private void Toggle(int idx) => expandedIndex = expandedIndex == idx ? null : idx;
+
+    private async Task PrevPage() { if (page > 1) { page--; await LoadAsync(); } }
+    private async Task NextPage() { if (page < TotalPages) { page++; await LoadAsync(); } }
+
+    private static string AreaClass(string area) => area switch
+    {
+        "dataset" => "al-a-dataset",
+        "table" => "al-a-table",
+        "ingestion" => "al-a-ingestion",
+        "sharing" => "al-a-sharing",
+        _ => "al-a-default"
+    };
+
+    // "table.query_run" -> "query_run"
+    private static string ActionLabel(string action)
+    {
+        var dot = action.IndexOf('.');
+        return dot >= 0 && dot < action.Length - 1 ? action[(dot + 1)..] : action;
+    }
+
+    private static string FmtDuration(long ms)
+        => ms <= 0 ? "—" : (ms < 1000 ? $"{ms} ms" : $"{ms / 1000.0:0.0} s");
+
+    private static string Relative(DateTime utc)
+    {
+        var diff = DateTime.UtcNow - utc;
+        if (diff.TotalSeconds < 60) return "just now";
+        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
+        if (diff.TotalDays < 30) return $"{(int)diff.TotalDays}d ago";
+        return utc.ToString("MMM d");
+    }
+
+    private static string Trunc(string? s, int max)
+        => string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max] + "…");
+}

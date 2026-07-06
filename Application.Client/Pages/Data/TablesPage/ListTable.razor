@@ -8,6 +8,7 @@
 @inject NavigationManager _navigationManager
 @inject AuthenticationStateProvider _authenticationStateProvider
 @inject IJSRuntime _jsRuntime
+@inject Application.Client.Services.ActivityLogClient _activityLog
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @attribute [Authorize(Policy = PolicyNames.DatasetsAccess)]
 
@@ -862,12 +863,16 @@ else
     {
         currentPage = 0;
         ApplyFilterAndSort();
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+            _ = _activityLog.LogAsync(companyId, "table.search", "table", datasetId, route: "/data/tables", details: searchTerm);
     }
 
     private void ToggleSort()
     {
         sortAsc = !sortAsc;
         ApplyFilterAndSort();
+        _ = _activityLog.LogAsync(companyId, "table.sort", "table", datasetId, route: "/data/tables",
+            details: sortAsc ? "asc" : "desc");
     }
 
     private void ApplyFilterAndSort()

@@ -5,6 +5,7 @@
 @inject HttpClient _httpClient
 @inject IToastService _toastService
 @inject AuthenticationStateProvider _authenticationStateProvider
+@inject Application.Client.Services.ActivityLogClient _activityLog
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @attribute [Authorize(Policy = PolicyNames.DatasetsAccess)]
 
@@ -456,6 +457,7 @@ else
         try { datasets = await _httpClient.GetFromJsonAsync<List<Dataset>>("api/datasets") ?? new(); }
         catch { datasets = new(); }
         isLoading = false;
+        _ = _activityLog.LogAsync(companyId, "ingestion.page_open", "ingestion", route: "/data/ingestion");
     }
 
     private async Task OnDatasetChanged(ChangeEventArgs e)

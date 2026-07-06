@@ -18,6 +18,9 @@ public static class RoleSuffixes
     public const string InventoryRead = "INVENTORY_READ";
     public const string DashboardsRead = "DASHBOARDS_READ";
 
+    /// <summary>Grants access to the Datasets/Tables audit log viewer (ADMIN also passes).</summary>
+    public const string DataAdmin = "DATA_ADMIN";
+
     /// <summary>Builds the full, company-prefixed role name (e.g. <c>ACME_METRICS_READ</c>).</summary>
     public static string Role(string companyId, string suffix) => $"{companyId}_{suffix}";
 }

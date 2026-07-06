@@ -12,6 +12,7 @@
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject IJSRuntime JSRuntime
 @inject IToastService ToastService
+@inject Application.Client.Services.ActivityLogClient ActivityLog
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @attribute [Authorize(Policy = PolicyNames.DatasetsAccess)]
 @implements IAsyncDisposable
@@ -233,6 +234,7 @@ else
             TableInfo = await HttpClient.GetFromJsonAsync<Table>($"api/Datasets/{DatasetId}/tables/{TableName}");
             TableColumns = TableInfo?.Columns;
             await LoadCommentsCount();
+            _ = ActivityLog.LogAsync(c, "table.page_open", "table", DatasetId, TableName, "/data/view");
         }
         catch (Exception ex)
         {

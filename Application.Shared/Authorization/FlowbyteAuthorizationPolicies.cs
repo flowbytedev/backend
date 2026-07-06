@@ -19,6 +19,7 @@ public static class FlowbyteAuthorizationPolicies
         Add(options, PolicyNames.StatusWrite, RoleSuffixes.Incidents);
         Add(options, PolicyNames.InventoryRead, RoleSuffixes.InventoryRead);
         Add(options, PolicyNames.DashboardsRead, RoleSuffixes.DashboardsRead);
+        Add(options, PolicyNames.DataLogRead, RoleSuffixes.DataAdmin);
     }
 
     private static void Add(AuthorizationOptions options, string policyName, params string[] suffixes)

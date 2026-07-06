@@ -44,7 +44,11 @@ var builder = WebApplication.CreateBuilder(args);
 AppContext.SetSwitch("DuckDB.NET.Native.DisableLibraryLoad", false);
 
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options =>
+{
+    // Audit/usage logging for Datasets & Tables API calls (no-ops for other controllers / when disabled).
+    options.Filters.Add<Application.Logging.DataActivityLogFilter>();
+});
 
 
 // Add services to the container.
@@ -229,6 +233,13 @@ builder.Services.AddScoped<IClickHouseService, ClickHouseService>();
 
 // Daily Inventory (ClickHouse reporting)
 builder.Services.AddDailyInventory(builder.Configuration);
+
+// Data app audit/usage log (ClickHouse data_app_log). Singleton buffer + one background writer.
+var dataAppLogSettings = builder.Configuration.GetSection("DataAppLog").Get<Application.Shared.Services.Logging.DataAppLogSettings>()
+    ?? new Application.Shared.Services.Logging.DataAppLogSettings();
+builder.Services.AddSingleton(dataAppLogSettings);
+builder.Services.AddSingleton<Application.Shared.Services.Logging.IDataAppLogService, Application.Shared.Services.Logging.DataAppLogService>();
+builder.Services.AddHostedService<Application.Logging.DataAppLogHostedService>();
 
 // Dashboards (OOS dashboard + dashboard/table links) — Application.Dashboard feature project.
 Application.Dashboard.DashboardServiceExtensions.AddDashboard(builder.Services, builder.Configuration);
