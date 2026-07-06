@@ -1,3 +1,4 @@
+@using Application.Shared.Models.Data
 @inject HttpClient _httpClient
 @inject IToastService _toastService
 @inject AuthenticationStateProvider _authenticationStateProvider
@@ -25,7 +26,31 @@
 
                     <div class="ds-field">
                         <label class="ds-label">Email Address</label>
-                        <InputText class="ds-input" @bind-Value="shareRequest.Email" placeholder="Enter user email address" />
+                        <div class="sd-autocomplete">
+                            <input class="ds-input" type="text" autocomplete="off"
+                                   placeholder="Search company members by name or email"
+                                   value="@shareRequest.Email"
+                                   @oninput="OnEmailInput" @onfocus="OnEmailFocus" @onblur="OnEmailBlur" />
+                            @if (showSuggestions && memberSuggestions.Any())
+                            {
+                                <div class="sd-suggestions">
+                                    @foreach (var m in memberSuggestions)
+                                    {
+                                        var member = m;
+                                        <div class="sd-suggestion" @onmousedown="() => SelectMember(member)">
+                                            <div class="sd-suggestion-avatar">@(string.IsNullOrEmpty(member.Email) ? "?" : member.Email[..1].ToUpper())</div>
+                                            <div style="min-width:0">
+                                                @if (!string.IsNullOrWhiteSpace(member.FullName) && member.FullName != member.Email)
+                                                {
+                                                    <div class="sd-suggestion-name">@member.FullName</div>
+                                                }
+                                                <div class="sd-suggestion-email">@member.Email</div>
+                                            </div>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </div>
                         <ValidationMessage For="() => shareRequest.Email" class="ds-error" />
                     </div>
 
@@ -124,6 +149,27 @@
     </div>
 }
 
+<style>
+    .sd-autocomplete { position: relative; }
+    .sd-suggestions {
+        position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+        background: #fff; border: 1px solid #e4e4e7; border-radius: 8px;
+        box-shadow: 0 8px 24px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; padding: 4px;
+    }
+    .sd-suggestion {
+        display: flex; align-items: center; gap: .5rem; padding: .4rem .5rem;
+        border-radius: 6px; cursor: pointer;
+    }
+    .sd-suggestion:hover { background: #f4f4f5; }
+    .sd-suggestion-avatar {
+        flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%;
+        background: #e4e4e7; color: #3f3f46; font-size: .75rem; font-weight: 600;
+        display: flex; align-items: center; justify-content: center;
+    }
+    .sd-suggestion-name { font-size: .8125rem; font-weight: 600; color: #18181b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sd-suggestion-email { font-size: .75rem; color: #71717a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public EventCallback<bool> IsVisibleChanged { get; set; }
@@ -140,6 +186,60 @@
     private bool shareAllTables = true;
     private List<string> datasetTables = new();
     private HashSet<string> selectedTables = new(StringComparer.OrdinalIgnoreCase);
+
+    private List<UserMention> memberSuggestions = new();
+    private bool showSuggestions = false;
+    private CancellationTokenSource? suggestCts;
+
+    private async Task OnEmailInput(ChangeEventArgs e)
+    {
+        shareRequest.Email = e.Value?.ToString() ?? string.Empty;
+        await SearchMembers(shareRequest.Email);
+    }
+
+    private async Task OnEmailFocus() => await SearchMembers(shareRequest.Email);
+
+    // Delay hiding so an @onmousedown selection on a suggestion registers before blur closes the list.
+    private async Task OnEmailBlur()
+    {
+        await Task.Delay(150);
+        showSuggestions = false;
+        StateHasChanged();
+    }
+
+    private async Task SearchMembers(string term)
+    {
+        // Debounce rapid keystrokes.
+        suggestCts?.Cancel();
+        var cts = suggestCts = new CancellationTokenSource();
+        try
+        {
+            await Task.Delay(200, cts.Token);
+
+            if (!_httpClient.DefaultRequestHeaders.Contains("X-Company-ID"))
+                _httpClient.DefaultRequestHeaders.Add("X-Company-ID", CompanyId);
+
+            var url = $"api/DataViews/users/search?maxResults=8";
+            if (!string.IsNullOrWhiteSpace(term))
+                url += $"&searchTerm={Uri.EscapeDataString(term)}";
+
+            var results = await _httpClient.GetFromJsonAsync<List<UserMention>>(url, cts.Token);
+            if (cts.IsCancellationRequested) return;
+
+            memberSuggestions = results ?? new();
+            showSuggestions = memberSuggestions.Any();
+            StateHasChanged();
+        }
+        catch (OperationCanceledException) { /* superseded by a newer keystroke */ }
+        catch (Exception ex) { Console.WriteLine($"Member search failed: {ex.Message}"); }
+    }
+
+    private void SelectMember(UserMention member)
+    {
+        shareRequest.Email = member.Email;
+        showSuggestions = false;
+        StateHasChanged();
+    }
 
     private void ToggleTable(string table, bool on)
     {

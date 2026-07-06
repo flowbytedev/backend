@@ -1,17 +1,27 @@
 using Application.Shared.Data;
 using Application.Shared.Models.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Application.Shared.Services.Data;
 
 public class CommentService : ICommentService
 {
     private readonly ApplicationDbContext _context;
-    
+    private readonly UserManagementDbContext _userContext;
+    private readonly ICommentMentionNotificationService _mentionNotifier;
+    private readonly ILogger<CommentService> _logger;
 
-    public CommentService(ApplicationDbContext context)
+    public CommentService(
+        ApplicationDbContext context,
+        UserManagementDbContext userContext,
+        ICommentMentionNotificationService mentionNotifier,
+        ILogger<CommentService> logger)
     {
         _context = context;
+        _userContext = userContext;
+        _mentionNotifier = mentionNotifier;
+        _logger = logger;
     }
 
     public async Task<List<DataTableComment>> GetCommentsAsync(string datasetId, string tableName)
@@ -22,19 +32,85 @@ public class CommentService : ICommentService
             .ToListAsync();
     }
 
-    public async Task<DataTableComment> AddCommentAsync(DataTableComment comment)
+    public async Task<DataTableComment> AddCommentAsync(DataTableComment comment, string companyId)
     {
         comment.Id = Guid.NewGuid().ToString();
         comment.CreatedAt = DateTime.UtcNow;
-        
-        // Get user info (simplified - in real implementation you'd get from user service)
-        comment.UserName = "Current User"; // TODO: Get from user service
-        comment.UserEmail = "user@example.com"; // TODO: Get from user service
-        
+
+        // Resolve the commenter's real display name/email so the comment renders correctly.
+        var author = await _userContext.ApplicationUser
+            .FirstOrDefaultAsync(u => u.Id == comment.UserId);
+        comment.UserName = author?.UserName ?? author?.Email ?? "Unknown user";
+        comment.UserEmail = author?.Email ?? string.Empty;
+
         _context.Set<DataTableComment>().Add(comment);
         await _context.SaveChangesAsync();
-        
+
+        await NotifyMentionedUsersAsync(comment, companyId);
+
         return comment;
+    }
+
+    /// <summary>Emails every mentioned user (excluding the author). Never throws.</summary>
+    private async Task NotifyMentionedUsersAsync(DataTableComment comment, string companyId)
+    {
+        try
+        {
+            _logger.LogInformation(
+                "[CommentMention] Processing comment {CommentId} (dataset {DatasetId}, table {TableName}) with {MentionCount} raw mentioned id(s): [{MentionedIds}].",
+                comment.Id, comment.DatasetId, comment.TableName, comment.MentionedUserIds.Count, string.Join(", ", comment.MentionedUserIds));
+
+            var targetIds = comment.MentionedUserIds
+                .Where(id => !string.IsNullOrWhiteSpace(id) && id != comment.UserId)
+                .Distinct()
+                .ToList();
+            if (targetIds.Count == 0)
+            {
+                _logger.LogInformation(
+                    "[CommentMention] No mention notifications to send for comment {CommentId} — no mentioned users other than the author.",
+                    comment.Id);
+                return;
+            }
+
+            var recipients = await _userContext.ApplicationUser
+                .Where(u => targetIds.Contains(u.Id) && u.Email != null)
+                .Select(u => new { u.UserName, u.Email })
+                .ToListAsync();
+            if (recipients.Count == 0)
+            {
+                _logger.LogWarning(
+                    "[CommentMention] {TargetCount} user(s) were mentioned in comment {CommentId} but none have an email on file (or the ids matched no user): [{TargetIds}].",
+                    targetIds.Count, comment.Id, string.Join(", ", targetIds));
+                return;
+            }
+
+            var datasetName = await _context.Dataset
+                .Where(d => d.Id == comment.DatasetId)
+                .Select(d => d.Name)
+                .FirstOrDefaultAsync() ?? comment.DatasetId;
+
+            _logger.LogInformation(
+                "[CommentMention] Sending mention emails for comment {CommentId} to {RecipientCount} recipient(s): [{Recipients}].",
+                comment.Id, recipients.Count, string.Join(", ", recipients.Select(r => r.Email)));
+
+            foreach (var r in recipients)
+            {
+                await _mentionNotifier.SendMentionNotificationAsync(
+                    recipientEmail: r.Email!,
+                    recipientName: r.UserName,
+                    mentionedByName: comment.UserName,
+                    datasetId: comment.DatasetId,
+                    datasetName: datasetName!,
+                    tableName: comment.TableName,
+                    commentContent: comment.Content,
+                    companyId: companyId);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Mention notifications must never break comment creation.
+            _logger.LogError(ex, "[CommentMention] Failed while dispatching mention notifications for comment {CommentId}.", comment.Id);
+        }
     }
 
     public async Task<bool> DeleteCommentAsync(string commentId, string userId)
@@ -108,11 +184,24 @@ public class UserSearchService : IUserSearchService
 
     public async Task<List<UserMention>> SearchUsersAsync(string companyId, string searchTerm, int maxResults = 5)
     {
-        // Get users from the company that match the search term
-        var users = await _userContext.ApplicationUser
-            .Where(u => (u.UserName!.Contains(searchTerm) || 
-                        u.Email!.Contains(searchTerm) ||
-                        (u.UserName != null && u.UserName.Contains(searchTerm))))
+        // Restrict the search to members of the company (via CompanyMember) — never leak users from
+        // other tenants. An empty search term returns the company's members (used by autocomplete on focus).
+        var memberIds = await _userContext.CompanyMember
+            .Where(m => m.CompanyId == companyId)
+            .Select(m => m.ApplicationUserId)
+            .ToListAsync();
+
+        var query = _userContext.ApplicationUser.Where(u => memberIds.Contains(u.Id));
+
+        if (!string.IsNullOrWhiteSpace(searchTerm))
+        {
+            query = query.Where(u =>
+                (u.UserName != null && u.UserName.Contains(searchTerm)) ||
+                (u.Email != null && u.Email.Contains(searchTerm)));
+        }
+
+        return await query
+            .OrderBy(u => u.UserName)
             .Take(maxResults)
             .Select(u => new UserMention
             {
@@ -122,7 +211,5 @@ public class UserSearchService : IUserSearchService
                 Email = u.Email ?? ""
             })
             .ToListAsync();
-
-        return users;
     }
 }

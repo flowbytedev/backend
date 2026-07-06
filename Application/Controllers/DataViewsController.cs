@@ -59,7 +59,7 @@ public class DataViewsController : ControllerBase
         try
         {
             comment.UserId = userId;
-            var addedComment = await _commentService.AddCommentAsync(comment);
+            var addedComment = await _commentService.AddCommentAsync(comment, companyId);
             return CreatedAtAction(nameof(GetComments), 
                 new { datasetId = comment.DatasetId, tableName = comment.TableName }, addedComment);
         }
@@ -170,7 +170,7 @@ public class DataViewsController : ControllerBase
 
     // GET: api/DataViews/users/search
     [HttpGet("users/search")]
-    public async Task<ActionResult<List<UserMention>>> SearchUsers([FromQuery] string searchTerm, [FromQuery] int maxResults = 5)
+    public async Task<ActionResult<List<UserMention>>> SearchUsers([FromQuery] string? searchTerm = null, [FromQuery] int maxResults = 5)
     {
         var companyId = Request.Headers["X-Company-ID"].ToString();
         if (string.IsNullOrWhiteSpace(companyId))
@@ -179,12 +179,9 @@ public class DataViewsController : ControllerBase
         if (!User.HasCompanyRole(companyId, "VIEW_DATA"))
             return Forbid();
 
-        if (string.IsNullOrWhiteSpace(searchTerm))
-            return BadRequest("Search term is required");
-
         try
         {
-            var users = await _userSearchService.SearchUsersAsync(companyId, searchTerm, maxResults);
+            var users = await _userSearchService.SearchUsersAsync(companyId, searchTerm ?? string.Empty, maxResults);
             return Ok(users);
         }
         catch (Exception ex)

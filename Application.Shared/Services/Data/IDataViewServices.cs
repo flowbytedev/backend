@@ -5,7 +5,7 @@ namespace Application.Shared.Services.Data;
 public interface ICommentService
 {
     Task<List<DataTableComment>> GetCommentsAsync(string datasetId, string tableName);
-    Task<DataTableComment> AddCommentAsync(DataTableComment comment);
+    Task<DataTableComment> AddCommentAsync(DataTableComment comment, string companyId);
     Task<bool> DeleteCommentAsync(string commentId, string userId);
     Task<DataTableComment?> UpdateCommentAsync(string commentId, string content, string userId);
 }

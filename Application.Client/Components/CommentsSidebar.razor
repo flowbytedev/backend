@@ -133,6 +133,9 @@
 
     private List<DataTableComment> Comments = new();
     private List<UserMention> MentionUsers = new();
+    // Users the author has actually picked from the dropdown, keyed by the exact @token that was inserted.
+    // Used to resolve mentions to user-ids reliably (MentionUsers only holds the last search's results).
+    private Dictionary<string, UserMention> SelectedMentions = new(StringComparer.OrdinalIgnoreCase);
     private string NewCommentContent = string.Empty;
     private string EditingContent = string.Empty;
     private string? EditingCommentId = null;
@@ -196,6 +199,7 @@
                 {
                     Comments.Insert(0, added);
                     NewCommentContent = string.Empty;
+                    SelectedMentions.Clear();
                     await OnCommentAdded.InvokeAsync(added);
                     StateHasChanged();
                 }
@@ -242,7 +246,7 @@
     }
 
     private void CancelEditing() { EditingCommentId = null; EditingContent = string.Empty; }
-    private void ClearComment() { NewCommentContent = string.Empty; ShowMentionDropdown = false; }
+    private void ClearComment() { NewCommentContent = string.Empty; ShowMentionDropdown = false; SelectedMentions.Clear(); }
     private bool CanEditComment(DataTableComment comment) => comment.UserId == CurrentUserId;
     private void ToggleDropdown(string id) { OpenDropdownId = OpenDropdownId == id ? null : id; StateHasChanged(); }
     private void CloseDropdown() { OpenDropdownId = null; StateHasChanged(); }
@@ -293,6 +297,7 @@
             var before = NewCommentContent.Substring(0, MentionStartPosition);
             var after = NewCommentContent.Substring(MentionStartPosition + CurrentMentionQuery.Length + 1);
             NewCommentContent = $"{before}@{user.UserName} {after}";
+            SelectedMentions[user.UserName] = user;
         }
         ShowMentionDropdown = false;
         MentionStartPosition = -1;
@@ -300,13 +305,21 @@
         StateHasChanged();
     }
 
+    // Matches an @mention whose username may be an email or contain dots/hyphens/plus, e.g.
+    // @john, @kevork.keheian, @kevork.keheian@gmrlgroup.com. The optional (?:@domain) tail keeps
+    // email-style usernames whole instead of stopping at the first '.' or '@'.
+    private const string MentionPattern = @"@([\w.+\-]+(?:@[\w.\-]+)?)";
+
     private List<string> ExtractMentionedUserIds(string content)
     {
         var ids = new List<string>();
-        var matches = System.Text.RegularExpressions.Regex.Matches(content, @"@(\w+)");
+        var matches = System.Text.RegularExpressions.Regex.Matches(content, MentionPattern);
         foreach (System.Text.RegularExpressions.Match match in matches)
         {
-            var user = MentionUsers.FirstOrDefault(u => u.UserName == match.Groups[1].Value);
+            var token = match.Groups[1].Value;
+            var user = SelectedMentions.TryGetValue(token, out var picked)
+                ? picked
+                : MentionUsers.FirstOrDefault(u => string.Equals(u.UserName, token, StringComparison.OrdinalIgnoreCase));
             if (user != null) ids.Add(user.Id);
         }
         return ids.Distinct().ToList();
@@ -315,7 +328,8 @@
     private string FormatCommentContent(string content)
     {
         if (string.IsNullOrEmpty(content)) return content;
-        return System.Text.RegularExpressions.Regex.Replace(content, @"@(\w+)",
+        var encoded = System.Net.WebUtility.HtmlEncode(content);
+        return System.Text.RegularExpressions.Regex.Replace(encoded, MentionPattern,
             "<span style='color:#18181b;font-weight:600;background:#f4f4f5;padding:1px 4px;border-radius:3px'>@$1</span>");
     }
 
