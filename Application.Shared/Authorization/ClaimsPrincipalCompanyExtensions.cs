@@ -29,4 +29,26 @@ public static class ClaimsPrincipalCompanyExtensions
 
         return false;
     }
+
+    /// <summary>
+    /// True when the user holds <c>{companyId}_ADMIN</c>, or <b>all</b> of the given company-prefixed
+    /// role suffixes. Use this for functions that require several module roles at once (e.g. a
+    /// dashboard gated by both <c>DASHBOARDS_READ</c> and <c>SALES</c>). ADMIN is always allowed.
+    /// </summary>
+    public static bool HasAllCompanyRoles(this ClaimsPrincipal user, string? companyId, params string[] suffixes)
+    {
+        if (user is null || string.IsNullOrWhiteSpace(companyId))
+            return false;
+
+        if (user.IsInRole($"{companyId}_ADMIN"))
+            return true;
+
+        foreach (var suffix in suffixes)
+        {
+            if (string.IsNullOrEmpty(suffix) || !user.IsInRole($"{companyId}_{suffix}"))
+                return false;
+        }
+
+        return suffixes.Length > 0;
+    }
 }

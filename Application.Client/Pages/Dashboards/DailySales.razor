@@ -1,0 +1,557 @@
+@page "/dashboards/daily-sales"
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@using System.Globalization
+@using Application.Shared.Authorization
+@using Application.Shared.Models.Dashboards.Sales
+@using Microsoft.AspNetCore.Authorization
+@using System.Net.Http.Json
+@attribute [Authorize(Policy = PolicyNames.DashboardsRead)]
+@attribute [Authorize(Policy = PolicyNames.SalesRead)]
+@inject HttpClient Http
+@inject StateContainer _stateContainer
+@implements IDisposable
+
+<PageTitle>Daily Sales</PageTitle>
+
+<HeadContent>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</HeadContent>
+
+<div class="ds-scope">
+    <div class="ds-wrap">
+        <header>
+            <p class="eyebrow">Sales performance monitor</p>
+            <h1>Daily Sales</h1>
+            <p class="sub">
+                @if (_resp.Configured)
+                {
+                    <text>@_resp.CurrentLabel · vs last month (@_resp.LastMonthLabel) · vs last year (@_resp.LastYearLabel)</text>
+                }
+                else
+                {
+                    <text>Store &amp; scheme performance with month- and year-over-year comparison.</text>
+                }
+            </p>
+
+            <div class="controls">
+                <div class="cgroup">
+                    <span class="clabel">Scope</span>
+                    <div class="toggle">
+                        <button class="@(_scope == "Day" ? "active" : "")" @onclick='() => SetScope("Day")'>Yesterday</button>
+                        <button class="@(_scope == "MTD" ? "active" : "")" @onclick='() => SetScope("MTD")'>MTD</button>
+                        <button class="@(_scope == "YTD" ? "active" : "")" @onclick='() => SetScope("YTD")'>YTD</button>
+                    </div>
+                </div>
+                <div class="cgroup">
+                    <span class="clabel">View</span>
+                    <div class="toggle">
+                        <button class="@(_view == "Day" ? "active" : "")" @onclick='() => SetView("Day")'>Day</button>
+                        <button class="@(_view == "ToDate" ? "active" : "")" @onclick='() => SetView("ToDate")'>To-Date</button>
+                    </div>
+                </div>
+                <div class="cgroup">
+                    <span class="clabel">As of</span>
+                    <input type="date" class="datein" value="@_date.ToString("yyyy-MM-dd")" @onchange="OnDateChange" max="@DateTime.Today.ToString("yyyy-MM-dd")" />
+                </div>
+                <div class="cgroup">
+                    <span class="clabel">Compare vs</span>
+                    <div class="toggle">
+                        <button class="@(_compare == "LM" ? "active" : "")" @onclick='() => SetCompare("LM")'>Last month</button>
+                        <button class="@(_compare == "LY" ? "active" : "")" @onclick='() => SetCompare("LY")'>Last year</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        @if (_loading)
+        {
+            <div class="state"><div class="spinner"></div>Loading sales…</div>
+        }
+        else if (!_resp.Configured)
+        {
+            <div class="state"><b>Sales warehouse not configured.</b><br />Set the <span class="mono">SalesDataset</span> ClickHouse connection in appsettings to power this dashboard.</div>
+        }
+        else
+        {
+            var t = _resp.Totals ?? new DailySalesRow();
+            <section class="cards">
+                <div class="card">
+                    <div class="clabel2">Sales</div>
+                    <div class="cval">@FmtMoney(t.Value.Sales)</div>
+                    <div class="deltas">
+                        <span class="dline">@Delta(t.CmpCurrent.Sales, t.CmpLastMonth.Sales) <span class="dwas">vs LM</span> <span class="cmpv">@FmtMoney(t.CmpLastMonth.Sales)</span></span>
+                        <span class="dline">@Delta(t.CmpCurrent.Sales, t.CmpLastYear.Sales) <span class="dwas">vs LY</span> <span class="cmpv">@FmtMoney(t.CmpLastYear.Sales)</span></span>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="clabel2">Transactions</div>
+                    <div class="cval">@FmtNum(t.Value.Transactions)</div>
+                    <div class="deltas">
+                        <span class="dline">@Delta(t.CmpCurrent.Transactions, t.CmpLastMonth.Transactions) <span class="dwas">vs LM</span> <span class="cmpv">@FmtNum(t.CmpLastMonth.Transactions)</span></span>
+                        <span class="dline">@Delta(t.CmpCurrent.Transactions, t.CmpLastYear.Transactions) <span class="dwas">vs LY</span> <span class="cmpv">@FmtNum(t.CmpLastYear.Transactions)</span></span>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="clabel2">Avg basket</div>
+                    <div class="cval">@FmtMoney(Avg(t.Value))</div>
+                    <div class="deltas">
+                        <span class="dline">@Delta(Avg(t.CmpCurrent), Avg(t.CmpLastMonth)) <span class="dwas">vs LM</span> <span class="cmpv">@FmtMoney(Avg(t.CmpLastMonth))</span></span>
+                        <span class="dline">@Delta(Avg(t.CmpCurrent), Avg(t.CmpLastYear)) <span class="dwas">vs LY</span> <span class="cmpv">@FmtMoney(Avg(t.CmpLastYear))</span></span>
+                    </div>
+                </div>
+            </section>
+
+            <div class="tabletools">
+                <div class="search-wrap">
+                    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+                    <input class="search" type="search" placeholder="Filter scheme or store…" value="@_filter" @oninput="OnFilterInput" />
+                </div>
+                <span class="hint">Click a scheme or store to see its divisions &amp; categories</span>
+            </div>
+
+            <section class="tablewrap">
+                <table class="dtable">
+                    <thead>
+                        <tr>
+                            <th>Scheme / Store</th>
+                            <th class="num">Sales</th>
+                            <th class="num">Transactions</th>
+                            <th class="num">Avg basket</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @{ var rows = VisibleRows(); }
+                        @if (rows.Count == 0)
+                        {
+                            <tr><td colspan="4" class="empty">@(_roots.Count == 0 ? "No sales for the selected period." : "No scheme or store matches the filter.")</td></tr>
+                        }
+                        else
+                        {
+                            @foreach (var node in rows)
+                            {
+                                <tr class="lvl-@node.Row.Level">
+                                    <td>
+                                        <div class="name" style="padding-left:@(node.Depth * 18)px">
+                                            @if (node.Row.Level == "scheme")
+                                            {
+                                                <button class="chev @(node.Expanded || Filtering ? "open" : "")" @onclick="() => ToggleScheme(node)" aria-label="Expand stores">
+                                                    @if (node.Loading)
+                                                    {
+                                                        <span class="minispin"></span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6" /></svg>
+                                                    }
+                                                </button>
+                                            }
+                                            else
+                                            {
+                                                <span class="chev-space"></span>
+                                            }
+                                            <button class="rowlink" @onclick="() => OpenModalAsync(node)" title="View divisions &amp; categories">@node.Row.Label</button>
+                                        </div>
+                                    </td>
+                                    @{ var cmp = Cmp(node.Row); }
+                                    <td class="num"><span class="mval">@FmtMoney(node.Row.Value.Sales)</span> @Delta(node.Row.CmpCurrent.Sales, cmp.Sales)</td>
+                                    <td class="num"><span class="mval">@FmtNum(node.Row.Value.Transactions)</span> @Delta(node.Row.CmpCurrent.Transactions, cmp.Transactions)</td>
+                                    <td class="num"><span class="mval">@FmtMoney(Avg(node.Row.Value))</span> @Delta(Avg(node.Row.CmpCurrent), Avg(cmp))</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </section>
+
+            <footer>Figures aggregated live from ClickHouse <span class="mono">sales_line</span> · accounting currency · basket = distinct receipt.</footer>
+        }
+    </div>
+
+    @if (_modalOpen)
+    {
+        <div class="ds-modal-backdrop" @onclick="CloseModal">
+            <div class="ds-modal" @onclick:stopPropagation="true">
+                <div class="ds-modal-head">
+                    <div>
+                        <p class="ds-modal-sub">@(_modalScheme != null ? "Scheme" : "Store") · divisions &amp; categories</p>
+                        <h2 class="ds-modal-title">@_modalTitle</h2>
+                    </div>
+                    <button class="ds-modal-close" @onclick="CloseModal" title="Close">
+                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    </button>
+                </div>
+                <div class="ds-modal-tools">
+                    <div class="search-wrap">
+                        <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+                        <input class="search" type="search" placeholder="Filter division or category…" value="@_modalFilter" @oninput="OnModalFilterInput" />
+                    </div>
+                    <span class="ds-modal-note">@_resp.CurrentLabel · vs @(_compare == "LY" ? "last year" : "last month")</span>
+                </div>
+                <div class="ds-modal-body">
+                    @if (_modalLoading)
+                    {
+                        <div class="state"><div class="spinner"></div>Loading…</div>
+                    }
+                    else
+                    {
+                        <table class="dtable">
+                            <thead>
+                                <tr>
+                                    <th>Division / Category</th>
+                                    <th class="num">Sales</th>
+                                    <th class="num">Transactions</th>
+                                    <th class="num">Avg basket</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @{ var mrows = ModalVisibleRows(); }
+                                @if (mrows.Count == 0)
+                                {
+                                    <tr><td colspan="4" class="empty">@(_modalRoots.Count == 0 ? "No sales for this selection." : "No division or category matches the filter.")</td></tr>
+                                }
+                                else
+                                {
+                                    @foreach (var node in mrows)
+                                    {
+                                        <tr class="lvl-@node.Row.Level">
+                                            <td>
+                                                <div class="name" style="padding-left:@(node.Depth * 18)px">
+                                                    @if (node.Row.Level == "division")
+                                                    {
+                                                        <button class="chev @(node.Expanded || ModalFiltering ? "open" : "")" @onclick="() => ToggleModalDivision(node)" aria-label="Expand categories">
+                                                            @if (node.Loading)
+                                                            {
+                                                                <span class="minispin"></span>
+                                                            }
+                                                            else
+                                                            {
+                                                                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6" /></svg>
+                                                            }
+                                                        </button>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="chev-space"></span>
+                                                    }
+                                                    <span class="nlabel" title="@node.Row.Label">@node.Row.Label</span>
+                                                </div>
+                                            </td>
+                                            @{ var mcmp = Cmp(node.Row); }
+                                            <td class="num"><span class="mval">@FmtMoney(node.Row.Value.Sales)</span> @Delta(node.Row.CmpCurrent.Sales, mcmp.Sales)</td>
+                                            <td class="num"><span class="mval">@FmtNum(node.Row.Value.Transactions)</span> @Delta(node.Row.CmpCurrent.Transactions, mcmp.Transactions)</td>
+                                            <td class="num"><span class="mval">@FmtMoney(Avg(node.Row.Value))</span> @Delta(Avg(node.Row.CmpCurrent), Avg(mcmp))</td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private static readonly CultureInfo EnUs = CultureInfo.GetCultureInfo("en-US");
+
+    private sealed class Node
+    {
+        public DailySalesRow Row = default!;
+        public int Depth;
+        public bool Expanded;
+        public bool Loading;
+        public List<Node>? Children;
+        public Node? Parent;
+    }
+
+    private DailySalesResponse _resp = new();
+    private List<Node> _roots = new();
+    private string _scope = "Day";   // default: yesterday
+    private string _view = "Day";    // default: single day (so Yesterday opens on yesterday's sales)
+    private string _compare = "LM";  // per-row comparison shown: LM or LY (display-only, no reload)
+    private DateTime _date = DateTime.Today.AddDays(-1);
+    private bool _loading = true;
+    private string _filter = string.Empty;
+
+    // Modal (division → category drill for the clicked scheme/store)
+    private bool _modalOpen;
+    private bool _modalLoading;
+    private string _modalTitle = string.Empty;
+    private string? _modalScheme;
+    private string? _modalStore;
+    private List<Node> _modalRoots = new();
+    private string _modalFilter = string.Empty;
+
+    private bool Filtering => !string.IsNullOrWhiteSpace(_filter);
+    private bool ModalFiltering => !string.IsNullOrWhiteSpace(_modalFilter);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _stateContainer.OnChange += OnCompanyChanged;
+        await LoadRootAsync();
+    }
+
+    private async void OnCompanyChanged() => await InvokeAsync(LoadRootAsync);
+
+    private async Task<string?> GetCompanyIdAsync()
+    {
+        for (var i = 0; i < 50 && _stateContainer.Company is null; i++)
+            await Task.Delay(100);
+        return _stateContainer.Company?.Id;
+    }
+
+    private async Task SetScope(string s)
+    {
+        if (_scope == s) return;
+        _scope = s;
+        // Default the comparison basis to match the scope: day-over-day for Yesterday,
+        // period-over-period for MTD/YTD. The View toggle can still override it.
+        _view = s == "Day" ? "Day" : "ToDate";
+        await LoadRootAsync();
+    }
+
+    private async Task SetView(string v) { if (_view != v) { _view = v; await LoadRootAsync(); } }
+
+    // Both comparison windows are already in the payload, so switching is display-only — no reload.
+    private void SetCompare(string c) => _compare = c;
+
+    private DailySalesFigures Cmp(DailySalesRow r) => _compare == "LY" ? r.CmpLastYear : r.CmpLastMonth;
+
+    private async Task OnDateChange(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+        {
+            _date = d.Date;
+            await LoadRootAsync();
+        }
+    }
+
+    private string BaseQuery() => $"date={_date:yyyy-MM-dd}&scope={_scope}&view={_view}";
+
+    private async Task<DailySalesResponse?> FetchAsync(string levelQuery, string companyId)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Get, $"api/dashboards/daily-sales?{BaseQuery()}&{levelQuery}");
+        req.Headers.Add("X-Company-ID", companyId);
+        var resp = await Http.SendAsync(req);
+        if (!resp.IsSuccessStatusCode)
+        {
+            Console.WriteLine($"Daily sales fetch failed ({(int)resp.StatusCode}): {await resp.Content.ReadAsStringAsync()}");
+            return null;
+        }
+        return await resp.Content.ReadFromJsonAsync<DailySalesResponse>();
+    }
+
+    private async Task LoadRootAsync()
+    {
+        var companyId = await GetCompanyIdAsync();
+        if (string.IsNullOrEmpty(companyId)) return;
+
+        _loading = true;
+        _filter = string.Empty;
+        StateHasChanged();
+        try
+        {
+            var data = await FetchAsync("level=scheme", companyId);
+            if (data != null)
+            {
+                _resp = data;
+                _roots = data.Rows.Select(r => new Node { Row = r, Depth = 0 }).ToList();
+            }
+        }
+        catch (Exception ex) { Console.WriteLine(ex.Message); }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    // Scheme → store (the only inline expansion; deeper levels live in the modal).
+    private async Task ToggleScheme(Node node)
+    {
+        if (node.Children != null) { node.Expanded = !node.Expanded; return; }
+
+        var companyId = await GetCompanyIdAsync();
+        if (string.IsNullOrEmpty(companyId)) return;
+
+        node.Loading = true;
+        node.Expanded = true;
+        StateHasChanged();
+        try
+        {
+            var data = await FetchAsync($"level=store&scheme={Uri.EscapeDataString(node.Row.Key)}", companyId);
+            node.Children = (data?.Rows ?? new())
+                .Select(r => new Node { Row = r, Depth = 1, Parent = node }).ToList();
+        }
+        catch (Exception ex) { Console.WriteLine(ex.Message); node.Children = new(); }
+        finally { node.Loading = false; StateHasChanged(); }
+    }
+
+    // Filtering scheme/store needs every scheme's stores loaded so a store match can surface.
+    private async Task EnsureAllStoresLoadedAsync()
+    {
+        var companyId = await GetCompanyIdAsync();
+        if (string.IsNullOrEmpty(companyId)) return;
+        foreach (var scheme in _roots.Where(s => s.Children == null))
+        {
+            var data = await FetchAsync($"level=store&scheme={Uri.EscapeDataString(scheme.Row.Key)}", companyId);
+            scheme.Children = (data?.Rows ?? new())
+                .Select(r => new Node { Row = r, Depth = 1, Parent = scheme }).ToList();
+        }
+    }
+
+    private async Task OnFilterInput(ChangeEventArgs e)
+    {
+        _filter = e.Value?.ToString() ?? string.Empty;
+        if (Filtering) await EnsureAllStoresLoadedAsync();
+        StateHasChanged();
+    }
+
+    // Visible scheme/store rows, honouring the filter (auto-reveals matching stores).
+    private List<Node> VisibleRows()
+    {
+        var list = new List<Node>();
+        foreach (var scheme in _roots)
+        {
+            var stores = scheme.Children ?? new();
+            if (!Filtering)
+            {
+                list.Add(scheme);
+                if (scheme.Expanded) list.AddRange(stores);
+            }
+            else
+            {
+                var schemeMatch = Match(scheme, _filter);
+                var matchStores = stores.Where(s => schemeMatch || Match(s, _filter)).ToList();
+                if (schemeMatch || matchStores.Count > 0)
+                {
+                    list.Add(scheme);
+                    list.AddRange(schemeMatch ? stores : matchStores);
+                }
+            }
+        }
+        return list;
+    }
+
+    // ---- Modal ----
+
+    private async Task OpenModalAsync(Node node)
+    {
+        _modalOpen = true;
+        _modalLoading = true;
+        _modalFilter = string.Empty;
+        _modalTitle = node.Row.Label;
+        _modalRoots = new();
+        if (node.Row.Level == "scheme") { _modalScheme = node.Row.Key; _modalStore = null; }
+        else { _modalStore = node.Row.Key; _modalScheme = null; }
+        StateHasChanged();
+
+        var companyId = await GetCompanyIdAsync();
+        if (!string.IsNullOrEmpty(companyId))
+        {
+            var data = await FetchAsync($"level=division&{ModalScopeParam()}", companyId);
+            _modalRoots = (data?.Rows ?? new()).Select(r => new Node { Row = r, Depth = 0 }).ToList();
+        }
+        _modalLoading = false;
+        StateHasChanged();
+    }
+
+    private string ModalScopeParam() => _modalScheme != null
+        ? $"scheme={Uri.EscapeDataString(_modalScheme)}"
+        : $"store={Uri.EscapeDataString(_modalStore ?? string.Empty)}";
+
+    private async Task ToggleModalDivision(Node node)
+    {
+        if (node.Children != null) { node.Expanded = !node.Expanded; return; }
+
+        var companyId = await GetCompanyIdAsync();
+        if (string.IsNullOrEmpty(companyId)) return;
+
+        node.Loading = true;
+        node.Expanded = true;
+        StateHasChanged();
+        try
+        {
+            var data = await FetchAsync($"level=category&{ModalScopeParam()}&division={Uri.EscapeDataString(node.Row.Key)}", companyId);
+            node.Children = (data?.Rows ?? new())
+                .Select(r => new Node { Row = r, Depth = node.Depth + 1, Parent = node }).ToList();
+        }
+        catch (Exception ex) { Console.WriteLine(ex.Message); node.Children = new(); }
+        finally { node.Loading = false; StateHasChanged(); }
+    }
+
+    private async Task EnsureAllModalCategoriesLoadedAsync()
+    {
+        var companyId = await GetCompanyIdAsync();
+        if (string.IsNullOrEmpty(companyId)) return;
+        foreach (var div in _modalRoots.Where(d => d.Children == null))
+        {
+            var data = await FetchAsync($"level=category&{ModalScopeParam()}&division={Uri.EscapeDataString(div.Row.Key)}", companyId);
+            div.Children = (data?.Rows ?? new())
+                .Select(r => new Node { Row = r, Depth = 1, Parent = div }).ToList();
+        }
+    }
+
+    private async Task OnModalFilterInput(ChangeEventArgs e)
+    {
+        _modalFilter = e.Value?.ToString() ?? string.Empty;
+        if (ModalFiltering) await EnsureAllModalCategoriesLoadedAsync();
+        StateHasChanged();
+    }
+
+    private List<Node> ModalVisibleRows()
+    {
+        var list = new List<Node>();
+        foreach (var div in _modalRoots)
+        {
+            var cats = div.Children ?? new();
+            if (!ModalFiltering)
+            {
+                list.Add(div);
+                if (div.Expanded) list.AddRange(cats);
+            }
+            else
+            {
+                var divMatch = Match(div, _modalFilter);
+                var matchCats = cats.Where(c => divMatch || Match(c, _modalFilter)).ToList();
+                if (divMatch || matchCats.Count > 0)
+                {
+                    list.Add(div);
+                    list.AddRange(divMatch ? cats : matchCats);
+                }
+            }
+        }
+        return list;
+    }
+
+    private void CloseModal() { _modalOpen = false; _modalRoots = new(); }
+
+    private static bool Match(Node n, string f) => n.Row.Label.Contains(f.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private static double Avg(DailySalesFigures f) => f.Transactions > 0 ? f.Sales / f.Transactions : 0;
+
+    private static MarkupString Delta(double cur, double prev)
+    {
+        if (prev <= 0)
+        {
+            var txt = cur > 0 ? "new" : "—";
+            return new MarkupString($"<span class=\"delta flat\">{txt}</span>");
+        }
+        var pct = (cur - prev) / prev * 100.0;
+        var same = Math.Abs(pct) < 0.05;
+        var cls = same ? "flat" : (pct > 0 ? "pos" : "neg");
+        var arrow = same ? "→" : (pct > 0 ? "▲" : "▼");
+        return new MarkupString($"<span class=\"delta {cls}\">{arrow} {Math.Abs(pct).ToString("0.0", EnUs)}%</span>");
+    }
+
+    private static string FmtMoney(double n)
+    {
+        var a = Math.Abs(n);
+        if (a >= 1_000_000) return (n / 1_000_000).ToString("0.##", EnUs) + "M";
+        if (a >= 1_000) return (n / 1_000).ToString("0.#", EnUs) + "K";
+        return Math.Round(n).ToString("#,##0", EnUs);
+    }
+
+    private static string FmtNum(double n) => Math.Round(n).ToString("#,##0", EnUs);
+
+    public void Dispose() => _stateContainer.OnChange -= OnCompanyChanged;
+}

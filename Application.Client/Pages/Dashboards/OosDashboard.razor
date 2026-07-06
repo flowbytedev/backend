@@ -6,6 +6,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using System.Net.Http.Json
 @attribute [Authorize(Policy = PolicyNames.DashboardsRead)]
+@attribute [Authorize(Policy = PolicyNames.InventoryRead)]
 @inject HttpClient Http
 @inject StateContainer _stateContainer
 @inject NavigationManager Nav

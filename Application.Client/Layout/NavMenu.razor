@@ -208,12 +208,26 @@
 
         <AuthorizeView Roles="@($"{companyId}_ADMIN, {companyId}_DASHBOARDS_READ")">
             <Authorized Context="dashboards">
+                @* Each dashboard also requires its domain role (DASHBOARDS_READ + SALES, or + INVENTORY_READ).
+                   Nested AuthorizeViews AND the checks; {companyId}_ADMIN satisfies every check. *@
                 <hr class="nav-divider" />
                 <div class="nav-section-label">Dashboards</div>
-                <a class="nav-item @NavClass("dashboards/oos")" href="@($"dashboards/oos{queryParameter}")" onclick="document.body.classList.remove('nav-open')">
-                    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
-                    Out-of-Stock Report
-                </a>
+                <AuthorizeView Roles="@($"{companyId}_ADMIN, {companyId}_SALES")" Context="dsSales">
+                    <a class="nav-item @NavClass("dashboards/daily-sales")" href="@($"dashboards/daily-sales{queryParameter}")" onclick="document.body.classList.remove('nav-open')">
+                        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
+                        Daily Sales
+                    </a>
+                    <a class="nav-item @NavClass("dashboards/sales-overview")" href="@($"dashboards/sales-overview{queryParameter}")" onclick="document.body.classList.remove('nav-open')">
+                        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+                        Sales Performance
+                    </a>
+                </AuthorizeView>
+                <AuthorizeView Roles="@($"{companyId}_ADMIN, {companyId}_INVENTORY_READ")" Context="dsOos">
+                    <a class="nav-item @NavClass("dashboards/oos")" href="@($"dashboards/oos{queryParameter}")" onclick="document.body.classList.remove('nav-open')">
+                        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg>
+                        Out-of-Stock Report
+                    </a>
+                </AuthorizeView>
             </Authorized>
         </AuthorizeView>
 

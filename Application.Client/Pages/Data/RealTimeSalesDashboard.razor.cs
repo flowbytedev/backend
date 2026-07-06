@@ -226,6 +226,15 @@ public partial class RealTimeSalesDashboard : IAsyncDisposable
         }
     }
 
+    // Navigate to the historical Daily Sales dashboard, preserving the selected company (?c=).
+    private void ViewHistory()
+    {
+        var target = "dashboards/daily-sales";
+        if (!string.IsNullOrEmpty(companyId))
+            target += $"?c={Uri.EscapeDataString(companyId)}";
+        NavigationManager.NavigateTo(target);
+    }
+
     private async Task RefreshData()
     {
         isLoading = true;

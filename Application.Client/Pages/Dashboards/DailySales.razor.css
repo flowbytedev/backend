@@ -1,0 +1,124 @@
+/* Daily Sales — shares the KPI-dashboard design language (/metrics/dashboard), scoped via CSS isolation. */
+.ds-scope {
+    --ink: #16233B;
+    --bg: #EDF0F4;
+    --card: #FFFFFF;
+    --muted: #667085;
+    --line: #E4E8EF;
+    --good: #2E7D57;
+    --bad: #AC5347;
+    --display: 'Space Grotesk', system-ui, sans-serif;
+    --body: 'Inter', system-ui, -apple-system, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, monospace;
+
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--body);
+    -webkit-font-smoothing: antialiased;
+    padding: 24px 22px 60px;
+    min-height: 100%;
+    box-sizing: border-box;
+}
+
+.ds-scope *, .ds-scope *::before, .ds-scope *::after { box-sizing: border-box; }
+.ds-wrap { max-width: 1180px; margin: 0 auto; }
+.mono { font-family: var(--mono); font-size: .92em; }
+
+/* header */
+.eyebrow { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 0 0 8px; }
+.ds-scope h1 { font-family: var(--display); font-weight: 600; font-size: 30px; letter-spacing: -.01em; margin: 0 0 6px; }
+.sub { color: var(--muted); font-size: 13.5px; margin: 0; }
+
+/* controls */
+.controls { display: flex; flex-wrap: wrap; gap: 20px; align-items: center; margin-top: 20px; }
+.cgroup { display: flex; align-items: center; gap: 9px; }
+.clabel { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.toggle { display: inline-flex; background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
+.toggle button { font-family: var(--body); font-size: 13px; border: 0; background: transparent; color: var(--muted); padding: 6px 15px; border-radius: 999px; cursor: pointer; transition: all .15s ease; }
+.toggle button:hover { color: var(--ink); }
+.toggle button.active { background: var(--ink); color: #fff; }
+.datein { height: 34px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); font-family: var(--body); font-size: 13px; padding: 0 14px; outline: none; }
+.datein:focus { border-color: #C4CBD6; }
+
+/* KPI cards */
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 24px 0 18px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 20px; animation: dsfade .4s ease both; }
+@keyframes dsfade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.clabel2 { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.cval { font-family: var(--display); font-weight: 600; font-size: 32px; letter-spacing: -.02em; line-height: 1; font-variant-numeric: tabular-nums; margin: 12px 0 0; }
+.deltas { display: flex; flex-direction: column; gap: 7px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.dline { font-size: 12.5px; display: inline-flex; align-items: baseline; gap: 6px; }
+.dwas { color: var(--muted); font-size: 11.5px; }
+.cmpv { font-family: var(--mono); font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* per-metric table cell: value with a single colored delta beside it (comparison chosen by the toggle) */
+.mval { font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 6px; }
+
+/* filter bar above the table */
+.tabletools { display: flex; align-items: center; gap: 14px; margin: 22px 0 10px; flex-wrap: wrap; }
+.search-wrap { position: relative; }
+.search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 13px; height: 13px; color: var(--muted); pointer-events: none; }
+.search { height: 34px; width: 260px; max-width: 100%; padding: 0 12px 0 32px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--ink); font-family: var(--body); font-size: 13px; outline: none; }
+.search:focus { border-color: #C4CBD6; }
+.search::placeholder { color: var(--muted); }
+.hint { font-size: 12px; color: var(--muted); }
+
+/* clickable scheme/store name → opens the modal */
+.rowlink { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: var(--ink); cursor: pointer; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
+.rowlink:hover { color: #0F1D33; text-decoration: underline; }
+
+/* ---------- modal (ds- prefixed to avoid collisions with global .modal styles) ---------- */
+.ds-modal-backdrop { position: fixed; inset: 0; background: rgba(22,35,59,.35); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.ds-modal { position: relative; background: var(--card); border-radius: 16px; width: 100%; max-width: 860px; max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(22,35,59,.25); animation: dsfade .18s ease both; }
+.ds-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+.ds-modal-sub { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 5px; }
+.ds-modal-title { margin: 0; font-family: var(--display); font-weight: 600; font-size: 18px; letter-spacing: -.01em; }
+.ds-modal-close { border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 9px; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+.ds-modal-close:hover { color: var(--ink); border-color: #C4CBD6; }
+.ds-modal-tools { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.ds-modal-note { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.ds-modal-body { overflow: auto; }
+.ds-modal-body .dtable { border: 0; }
+
+/* delta chips — rendered via MarkupString, so pierce CSS isolation with ::deep to colour them */
+.ds-scope ::deep .delta { font-family: var(--mono); font-weight: 600; font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ds-scope ::deep .delta.pos { color: var(--good); }
+.ds-scope ::deep .delta.neg { color: var(--bad); }
+.ds-scope ::deep .delta.flat { color: var(--muted); }
+
+/* table */
+.tablewrap { background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow-x: auto; overflow-y: hidden; }
+.dtable { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 560px; }
+.dtable thead th { position: sticky; top: 0; background: #F7F9FC; z-index: 1; text-align: left; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 11px 16px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.dtable th.num, .dtable td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dtable tbody td { padding: 9px 16px; border-bottom: 1px solid var(--line); color: var(--ink); }
+.dtable tbody tr:last-child td { border-bottom: 0; }
+.dtable tbody tr:hover { background: #FAFBFD; }
+.dtable td.strong { font-weight: 600; }
+
+/* row level accents */
+.dtable tr.lvl-scheme td { background: #F4F7FB; font-weight: 600; }
+.dtable tr.lvl-scheme:hover td { background: #EFF3F9; }
+.dtable tr.lvl-store td .nlabel { font-weight: 500; }
+
+.name { display: flex; align-items: center; gap: 8px; }
+.nlabel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 360px; }
+.chev { flex: none; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 6px; cursor: pointer; padding: 0; transition: transform .15s ease, color .15s ease, border-color .15s ease; }
+.chev:hover { color: var(--ink); border-color: #C4CBD6; }
+.chev.open { transform: rotate(90deg); color: var(--ink); }
+.chev-space { flex: none; width: 20px; height: 20px; display: inline-block; }
+.minispin { width: 10px; height: 10px; border: 1.5px solid var(--line); border-top-color: var(--ink); border-radius: 50%; animation: dsspin .6s linear infinite; }
+
+/* states */
+.state { padding: 60px 24px; text-align: center; color: var(--muted); font-size: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; }
+.state b { color: var(--ink); }
+.empty { text-align: center; color: var(--muted); padding: 34px 16px; }
+.spinner { width: 26px; height: 26px; margin: 0 auto 12px; border: 2px solid var(--line); border-top-color: var(--ink); border-radius: 50%; animation: dsspin .6s linear infinite; }
+@keyframes dsspin { to { transform: rotate(360deg); } }
+
+footer { margin-top: 22px; font-size: 12px; color: var(--muted); text-align: center; }
+
+@media (max-width: 720px) {
+    .cards { grid-template-columns: 1fr; }
+    .controls { gap: 12px; }
+}

@@ -173,6 +173,10 @@
                 <span class="rsd-dot"></span>
                 @(IsConnected ? "Live" : "Disconnected")
             </span>
+            <button class="rsd-btn rsd-btn-outline" @onclick="ViewHistory">
+                <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg>
+                View history
+            </button>
             <button class="rsd-btn rsd-btn-outline" @onclick="RefreshData">
                 <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
                 Refresh

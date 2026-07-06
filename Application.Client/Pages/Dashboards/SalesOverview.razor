@@ -1,0 +1,280 @@
+@page "/dashboards/sales-overview"
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@using System.Globalization
+@using Application.Shared.Authorization
+@using Application.Shared.Models.Dashboards.Sales
+@using Microsoft.AspNetCore.Authorization
+@using System.Net.Http.Json
+@attribute [Authorize(Policy = PolicyNames.DashboardsRead)]
+@attribute [Authorize(Policy = PolicyNames.SalesRead)]
+@inject HttpClient Http
+@inject StateContainer _stateContainer
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<PageTitle>Sales Performance Overview</PageTitle>
+
+<HeadContent>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+</HeadContent>
+
+<div class="sales-wrap">
+
+    <header class="top">
+        <div class="brand">
+            <div class="mark">SLS</div>
+            <div>
+                <h1>Sales Performance Overview</h1>
+                <div class="sub">Revenue, baskets &amp; product mix · @_from.ToString("MMM d", EnUs) – @_to.ToString("MMM d, yyyy", EnUs)</div>
+            </div>
+        </div>
+        <div class="period" role="group" aria-label="Reporting period">
+            <button class="seg @(_days == 7 ? "active" : "")" @onclick="() => SetDays(7)">7d</button>
+            <button class="seg @(_days == 30 ? "active" : "")" @onclick="() => SetDays(30)">30d</button>
+            <button class="seg @(_days == 90 ? "active" : "")" @onclick="() => SetDays(90)">90d</button>
+        </div>
+    </header>
+
+    @if (_loading)
+    {
+        <div class="empty">Loading sales performance…</div>
+    }
+    else if (!_data.Configured)
+    {
+        <div class="empty">
+            <b>No ClickHouse data source configured for this company.</b><br />
+            Add a ClickHouse connection under Metrics → Data Sources to power this dashboard.
+        </div>
+    }
+    else
+    {
+        <section class="kpis" aria-label="Key metrics">
+            <div class="tag fade" style="animation-delay:.02s">
+                <div class="klabel">Revenue</div>
+                <div class="kval">@FmtMoney(_data.TotalRevenue)</div>
+                <div class="kfoot">@DeltaBadge(_data.TotalRevenue, _data.PrevRevenue) vs. prior @_days d</div>
+            </div>
+            <div class="tag fade" style="animation-delay:.07s">
+                <div class="klabel">Baskets</div>
+                <div class="kval">@_data.TotalBaskets.ToString("#,##0", EnUs)</div>
+                <div class="kfoot">@DeltaBadge(_data.TotalBaskets, _data.PrevBaskets) vs. prior @_days d</div>
+            </div>
+            <div class="tag fade" style="animation-delay:.12s">
+                <div class="klabel">Avg basket value</div>
+                <div class="kval">@FmtMoney(_data.AvgBasketValue)</div>
+                <div class="kfoot"><span>@FmtNum(_data.TotalUnits) units sold</span></div>
+            </div>
+            <div class="tag fade" style="animation-delay:.17s">
+                <div class="klabel">Discount given</div>
+                <div class="kval">@FmtMoney(_data.TotalDiscount)</div>
+                <div class="kfoot"><span>@DiscountPct()% of revenue</span></div>
+            </div>
+        </section>
+
+        <section class="grid">
+            <div class="panel">
+                <h2>Revenue trend</h2>
+                <div class="phint">Daily net revenue (accounting currency) over the period</div>
+                <div class="chartbox"><canvas id="salesTrendChart"></canvas></div>
+            </div>
+            <div class="panel">
+                <h2>Revenue by hour</h2>
+                <div class="phint">When the day's sales happen · traffic &amp; staffing signal</div>
+                <div class="chartbox"><canvas id="salesHourChart"></canvas></div>
+            </div>
+        </section>
+
+        <section class="grid">
+            <div class="panel">
+                <h2>Revenue by category</h2>
+                <div class="phint">Share of revenue across the top product categories</div>
+                <div class="chartbox"><canvas id="salesCatChart"></canvas></div>
+            </div>
+            <div class="panel">
+                <h2>Payment mix</h2>
+                <div class="phint">Orders by payment method</div>
+                <div class="chartbox"><canvas id="salesPayChart"></canvas></div>
+            </div>
+        </section>
+
+        <section class="grid">
+            <div class="panel">
+                <h2>Revenue by store</h2>
+                <div class="phint">Top @_data.ByStore.Count stores by net revenue</div>
+                <div style="margin-top:6px">
+                    @if (_data.ByStore.Count == 0)
+                    {
+                        <div class="empty">No sales in the selected period.</div>
+                    }
+                    else
+                    {
+                        var maxStore = Math.Max(1, _data.ByStore.Max(s => s.Revenue));
+                        @foreach (var s in _data.ByStore)
+                        {
+                            <div class="region-row">
+                                <div class="rname" title="@s.Name">@s.Name</div>
+                                <div class="rbar"><div class="rfill" style="width:@(((s.Revenue / maxStore) * 100).ToString("0.0", EnUs))%"></div></div>
+                                <div class="rval">@FmtMoney(s.Revenue)</div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+            <div class="panel">
+                <h2>Top items</h2>
+                <div class="phint">Best sellers by revenue · top @_data.TopItems.Count</div>
+                <div class="vrow vhead"><div>Item</div><div class="vnum">Units</div><div class="vnum">Revenue</div></div>
+                <div class="item-scroll">
+                    @foreach (var it in _data.TopItems)
+                    {
+                        <div class="vrow">
+                            <div class="vname" title="@it.Description">
+                                @(string.IsNullOrWhiteSpace(it.Description) ? it.ItemNo : it.Description)
+                                <span class="sku">@it.ItemNo</span>
+                            </div>
+                            <div class="vnum">@FmtNum(it.Units)</div>
+                            <div class="vnum">@FmtMoney(it.Revenue)</div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </section>
+
+        <footer>Figures aggregated live from ClickHouse <span class="mono">sales_line</span> / <span class="mono">sales_header_details</span>@(_data.DataSourceName is { Length: > 0 } n ? $" · source: {n}" : "") · accounting currency.</footer>
+    }
+</div>
+
+@code {
+    private static readonly CultureInfo EnUs = CultureInfo.GetCultureInfo("en-US");
+
+    private SalesOverviewResponse _data = new();
+    private int _days = 30;
+    private DateTime _from = DateTime.Today.AddDays(-29);
+    private DateTime _to = DateTime.Today;
+    private bool _loading = true;
+    private bool _chartsDrawn;
+
+    private IJSObjectReference? _module;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _stateContainer.OnChange += OnCompanyChanged;
+        await LoadAsync();
+    }
+
+    private async void OnCompanyChanged() => await InvokeAsync(LoadAsync);
+
+    private async Task<string?> GetCompanyIdAsync()
+    {
+        for (var i = 0; i < 50 && _stateContainer.Company is null; i++)
+            await Task.Delay(100);
+        return _stateContainer.Company?.Id;
+    }
+
+    private async Task SetDays(int days)
+    {
+        if (_days == days) return;
+        _days = days;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var companyId = await GetCompanyIdAsync();
+        if (string.IsNullOrEmpty(companyId)) return;
+
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var req = new HttpRequestMessage(HttpMethod.Get, $"api/dashboards/sales-overview?days={_days}");
+            req.Headers.Add("X-Company-ID", companyId);
+            var resp = await Http.SendAsync(req);
+            if (resp.IsSuccessStatusCode)
+            {
+                var data = await resp.Content.ReadFromJsonAsync<SalesOverviewResponse>();
+                if (data != null)
+                {
+                    _data = data;
+                    _from = data.FromDate;
+                    _to = data.ToDate;
+                    _chartsDrawn = false;
+                }
+            }
+            else
+            {
+                Console.WriteLine($"Sales overview fetch failed ({(int)resp.StatusCode}): {await resp.Content.ReadAsStringAsync()}");
+            }
+        }
+        catch (Exception ex) { Console.WriteLine(ex.Message); }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+            _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/sales-overview.js");
+        if (_module is null || _loading || !_data.Configured || _chartsDrawn) return;
+
+        _chartsDrawn = true;
+
+        await _module.InvokeVoidAsync("renderTrendChart", "salesTrendChart",
+            _data.Trend.Select(p => FormatDay(p.Day)).ToArray(),
+            _data.Trend.Select(p => p.Revenue).ToArray());
+
+        await _module.InvokeVoidAsync("renderHourChart", "salesHourChart",
+            _data.ByHour.Select(p => $"{p.Hour:00}:00").ToArray(),
+            _data.ByHour.Select(p => p.Revenue).ToArray());
+
+        await _module.InvokeVoidAsync("renderDoughnut", "salesCatChart",
+            _data.ByCategory.Select(c => c.Name).ToArray(),
+            _data.ByCategory.Select(c => c.Revenue).ToArray(), true);
+
+        await _module.InvokeVoidAsync("renderDoughnut", "salesPayChart",
+            _data.ByPayment.Select(p => p.Method).ToArray(),
+            _data.ByPayment.Select(p => (double)p.Orders).ToArray(), false);
+    }
+
+    private static string FormatDay(string isoDay)
+        => DateTime.TryParse(isoDay, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d)
+            ? d.ToString("MMM d", EnUs) : isoDay;
+
+    private string DiscountPct()
+        => _data.TotalRevenue > 0
+            ? (_data.TotalDiscount / _data.TotalRevenue * 100).ToString("0.0", EnUs) : "0.0";
+
+    private static MarkupString DeltaBadge(double current, double prev)
+    {
+        double pct = prev > 0 ? (current - prev) / prev * 100 : (current > 0 ? 100 : 0);
+        var cls = pct >= 0 ? "pos" : "neg";
+        var arrow = pct >= 0 ? "▲" : "▼";
+        return new MarkupString($"<span class=\"delta {cls}\">{arrow} {Math.Abs(pct).ToString("0.0", EnUs)}%</span>");
+    }
+
+    private static string FmtMoney(double n) => "$" + Math.Round(n).ToString("#,##0", EnUs);
+
+    private static string FmtNum(double n) => Math.Round(n).ToString("#,##0", EnUs);
+
+    public async ValueTask DisposeAsync()
+    {
+        _stateContainer.OnChange -= OnCompanyChanged;
+        if (_module is not null)
+        {
+            try
+            {
+                await _module.InvokeVoidAsync("destroy", "salesTrendChart");
+                await _module.InvokeVoidAsync("destroy", "salesHourChart");
+                await _module.InvokeVoidAsync("destroy", "salesCatChart");
+                await _module.InvokeVoidAsync("destroy", "salesPayChart");
+                await _module.DisposeAsync();
+            }
+            catch { /* circuit already gone */ }
+        }
+    }
+}
