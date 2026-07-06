@@ -27,9 +27,19 @@ namespace Application.Shared.Services.Data;
 public interface IIngestionService
 {
     Task<List<IngestionSourceDto>> GetSourcesAsync(string companyId, string datasetId, CancellationToken ct = default);
+
+    /// <summary>All ingestion sources for the company across every dataset (the ingestion page lists these
+    /// up front; the dataset is only a client-side filter).</summary>
+    Task<List<IngestionSourceDto>> GetAllSourcesAsync(string companyId, CancellationToken ct = default);
+
     Task<IngestionSourceDto?> GetSourceAsync(string companyId, string id, CancellationToken ct = default);
     Task<IngestionSourceDto> CreateAsync(string companyId, string datasetId, string? userId, SaveIngestionSourceRequest request, CancellationToken ct = default);
     Task<IngestionSourceDto?> UpdateAsync(string companyId, string id, SaveIngestionSourceRequest request, CancellationToken ct = default);
+
+    /// <summary>Pauses (<paramref name="enabled"/>=false) or resumes a source by toggling its scheduled
+    /// flag. Returns the updated DTO (or null if not found). The caller reflects the change in Hangfire.</summary>
+    Task<IngestionSourceDto?> SetEnabledAsync(string companyId, string id, bool enabled, CancellationToken ct = default);
+
     Task<bool> DeleteAsync(string companyId, string id, CancellationToken ct = default);
     Task<List<IngestionRunDto>> GetRunsAsync(string companyId, string sourceId, int limit = 20, CancellationToken ct = default);
 
@@ -101,6 +111,15 @@ public class IngestionService : IIngestionService
         return sources.Select(ToDto).ToList();
     }
 
+    public async Task<List<IngestionSourceDto>> GetAllSourcesAsync(string companyId, CancellationToken ct = default)
+    {
+        var sources = await _db.IngestionSource
+            .Where(s => s.CompanyId == companyId)
+            .OrderByDescending(s => s.CreatedAt)
+            .ToListAsync(ct);
+        return sources.Select(ToDto).ToList();
+    }
+
     public async Task<IngestionSourceDto?> GetSourceAsync(string companyId, string id, CancellationToken ct = default)
     {
         var source = await _db.IngestionSource.FirstOrDefaultAsync(s => s.Id == id && s.CompanyId == companyId, ct);
@@ -128,6 +147,17 @@ public class IngestionService : IIngestionService
         if (source == null) return null;
 
         ApplyRequest(source, request, isCreate: false);
+        source.ModifiedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return ToDto(source);
+    }
+
+    public async Task<IngestionSourceDto?> SetEnabledAsync(string companyId, string id, bool enabled, CancellationToken ct = default)
+    {
+        var source = await _db.IngestionSource.FirstOrDefaultAsync(s => s.Id == id && s.CompanyId == companyId, ct);
+        if (source == null) return null;
+
+        source.IsEnabled = enabled;
         source.ModifiedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
         return ToDto(source);

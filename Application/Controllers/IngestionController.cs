@@ -7,6 +7,7 @@ using Application.Shared.Authorization;
 using Application.Shared.Models.Data;
 using Application.Shared.Services.Data;
 using Hangfire;
+using Hangfire.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -36,6 +37,20 @@ public class IngestionController : ControllerBase
         _configuration = configuration;
     }
 
+    // GET: api/ingestion  — every source across the company's datasets (the page shows these up front;
+    // the dataset picker is only a filter). Absolute route so it isn't nested under a dataset id.
+    [HttpGet("~/api/ingestion")]
+    public async Task<ActionResult<IEnumerable<IngestionSourceDto>>> GetAllSources()
+    {
+        var (companyId, _, error) = ReadHeaders();
+        if (error != null) return BadRequest(error);
+        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+
+        var all = await _ingestionService.GetAllSourcesAsync(companyId, HttpContext.RequestAborted);
+        EnrichWithHangfire(all);
+        return Ok(all);
+    }
+
     // GET: api/datasets/{datasetId}/ingestion
     [HttpGet]
     public async Task<ActionResult<IEnumerable<IngestionSourceDto>>> GetSources(string datasetId)
@@ -45,7 +60,9 @@ public class IngestionController : ControllerBase
         if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
         if (!await DatasetAccessible(datasetId, userId)) return NotFound($"Dataset '{datasetId}' not found.");
 
-        return Ok(await _ingestionService.GetSourcesAsync(companyId, datasetId, HttpContext.RequestAborted));
+        var list = await _ingestionService.GetSourcesAsync(companyId, datasetId, HttpContext.RequestAborted);
+        EnrichWithHangfire(list);
+        return Ok(list);
     }
 
     // GET: api/datasets/{datasetId}/ingestion/{id}
@@ -188,6 +205,113 @@ public class IngestionController : ControllerBase
 
         var cleared = await _ingestionService.FailRunningRunsForSourceAsync(companyId, id, HttpContext.RequestAborted);
         return Ok(new { cleared });
+    }
+
+    // POST: api/datasets/{datasetId}/ingestion/{id}/pause  — stop running on schedule.
+    [HttpPost("{id}/pause")]
+    public async Task<ActionResult<IngestionSourceDto>> Pause(string datasetId, string id)
+        => await SetEnabled(id, false);
+
+    // POST: api/datasets/{datasetId}/ingestion/{id}/resume  — resume running on schedule.
+    [HttpPost("{id}/resume")]
+    public async Task<ActionResult<IngestionSourceDto>> Resume(string datasetId, string id)
+        => await SetEnabled(id, true);
+
+    private async Task<ActionResult<IngestionSourceDto>> SetEnabled(string id, bool enabled)
+    {
+        var (companyId, _, error) = ReadHeaders();
+        if (error != null) return BadRequest(error);
+        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+
+        var updated = await _ingestionService.SetEnabledAsync(companyId, id, enabled, HttpContext.RequestAborted);
+        if (updated == null) return NotFound();
+
+        // Reflect the change in Hangfire right away (the registrar job also reconciles periodically).
+        TryReconcileRecurring(updated);
+        EnrichWithHangfire(new[] { updated });
+        return Ok(updated);
+    }
+
+    // ---- Hangfire recurring-job helpers (mirror Application.Scheduler's IngestionRegistrarJob) ----
+
+    private const string RecurringPrefix = "ingest-";
+
+    private bool HangfireConfigured => _serviceProvider.GetService<IBackgroundJobClient>() != null;
+
+    /// <summary>Populates <see cref="IngestionSourceDto.Status"/> / <see cref="IngestionSourceDto.NextRunAt"/>
+    /// from the live Hangfire recurring-job state. No-ops (leaves an enabled/disabled fallback) when
+    /// Hangfire isn't configured in the web app.</summary>
+    private void EnrichWithHangfire(IReadOnlyCollection<IngestionSourceDto> dtos)
+    {
+        if (dtos.Count == 0) return;
+
+        Dictionary<string, RecurringJobDto>? recurring = null;
+        if (HangfireConfigured)
+        {
+            try
+            {
+                using var connection = JobStorage.Current.GetConnection();
+                recurring = connection.GetRecurringJobs()
+                    .Where(r => r.Id.StartsWith(RecurringPrefix, StringComparison.Ordinal))
+                    .ToDictionary(r => r.Id, r => r, StringComparer.Ordinal);
+            }
+            catch { recurring = null; }
+        }
+
+        var scheduleKnown = recurring != null;
+        foreach (var d in dtos)
+        {
+            var scheduled = false;
+            if (recurring != null && recurring.TryGetValue(RecurringPrefix + d.Id, out var rj))
+            {
+                scheduled = true;
+                d.NextRunAt = rj.NextExecution;
+            }
+            d.Status = ComputeStatus(d, scheduleKnown, scheduled);
+        }
+    }
+
+    private static string ComputeStatus(IngestionSourceDto d, bool scheduleKnown, bool scheduled)
+    {
+        if (!d.IsEnabled) return "Paused";
+        if (d.LastRunStatus is "Running" or "Queued") return "Running";
+        if (scheduleKnown && !scheduled) return "Pending"; // enabled but not registered yet
+        if (d.LastRunStatus == "Failed") return "Error";
+        return "Active";
+    }
+
+    private void TryReconcileRecurring(IngestionSourceDto s)
+    {
+        if (!HangfireConfigured) return;
+        var jobId = RecurringPrefix + s.Id;
+        try
+        {
+            if (!s.IsEnabled)
+            {
+                RecurringJob.RemoveIfExists(jobId);
+                return;
+            }
+            RecurringJob.AddOrUpdate<Application.Shared.Services.Data.IngestionJob>(
+                recurringJobId: jobId,
+                methodCall: job => job.RunAsync(s.Id, null, null, CancellationToken.None),
+                cronExpression: s.CronExpression,
+                timeZone: ResolveTimeZone(s.TimeZone));
+        }
+        catch
+        {
+            // A bad cron or transient storage error shouldn't fail the request — the registrar reconciles.
+        }
+    }
+
+    private static TimeZoneInfo? ResolveTimeZone(string? id)
+    {
+        if (string.IsNullOrWhiteSpace(id)) id = "Asia/Beirut";
+        try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
+        catch
+        {
+            try { return TimeZoneInfo.FindSystemTimeZoneById("Middle East Standard Time"); }
+            catch { return null; }
+        }
     }
 
     private (string companyId, string userId, string? error) ReadHeaders()

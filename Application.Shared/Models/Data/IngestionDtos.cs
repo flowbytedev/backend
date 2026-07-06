@@ -77,6 +77,16 @@ public class IngestionSourceDto
     public int? LastRunRows { get; set; }
     public DateTime CreatedAt { get; set; }
     public string? CreatedBy { get; set; }
+
+    // Live schedule state derived from Hangfire (populated by the list endpoints only):
+    //   Active   — enabled and registered as a recurring job.
+    //   Pending  — enabled but not yet registered (scheduler down or reconcile pending).
+    //   Running  — a run is currently in progress/queued.
+    //   Error    — enabled + scheduled but the last run failed.
+    //   Paused   — disabled (no recurring job).
+    public string Status { get; set; } = "Paused";
+    // Next scheduled fire time from the Hangfire recurring job, when known.
+    public DateTime? NextRunAt { get; set; }
 }
 
 /// <summary>Create/update payload for an ingestion source. Secret is write-only (plaintext in, encrypted at rest).</summary>

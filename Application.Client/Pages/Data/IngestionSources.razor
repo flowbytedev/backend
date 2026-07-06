@@ -36,15 +36,72 @@ else
         }
     </div>
 
-    <div class="ds-field" style="max-width:420px">
-        <label class="ds-label">Dataset</label>
-        <select class="ds-select" value="@selectedDatasetId" @onchange="OnDatasetChanged">
-            <option value="">— Choose a dataset —</option>
-            @foreach (var ds in datasets)
+    <div class="ig-picker">
+        <div class="ig-combo">
+            <button type="button" class="ig-combo-btn @(datasetMenuOpen ? "ig-combo-btn-open" : "")" @onclick="ToggleDatasetMenu">
+                @{
+                    var sel = string.IsNullOrEmpty(selectedDatasetId) ? null : datasets.FirstOrDefault(d => d.Id == selectedDatasetId);
+                }
+                <span class="ig-combo-lead">
+                    @if (sel is null)
+                    {
+                        <span class="ig-combo-avatar ig-combo-avatar-all">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+                        </span>
+                        <span class="ig-combo-text">
+                            <span class="ig-combo-name">All datasets</span>
+                            <span class="ig-combo-sub">@((sources?.Count ?? 0)) source@((sources?.Count ?? 0) == 1 ? "" : "s") across @datasets.Count dataset@(datasets.Count == 1 ? "" : "s")</span>
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="ig-combo-avatar">@Initials(sel.Name)</span>
+                        <span class="ig-combo-text">
+                            <span class="ig-combo-name">@sel.Name</span>
+                            <span class="ig-combo-sub">@(string.IsNullOrWhiteSpace(sel.Description) ? "No description" : sel.Description)</span>
+                        </span>
+                    }
+                </span>
+                <svg class="ig-combo-caret" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+
+            @if (datasetMenuOpen)
             {
-                <option value="@ds.Id">@ds.Name</option>
+                <div class="ig-combo-backdrop" @onclick="() => datasetMenuOpen = false"></div>
+                <div class="ig-combo-menu">
+                    <div class="ig-combo-menu-head">Filter by dataset</div>
+                    <button type="button" class="ig-combo-item @(string.IsNullOrEmpty(selectedDatasetId) ? "ig-combo-item-on" : "")" @onclick='() => SelectDataset("")'>
+                        <span class="ig-combo-avatar ig-combo-avatar-all">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+                        </span>
+                        <span class="ig-combo-text">
+                            <span class="ig-combo-name">All datasets</span>
+                            <span class="ig-combo-sub">Show every source</span>
+                        </span>
+                        <span class="ig-combo-count">@(sources?.Count ?? 0)</span>
+                    </button>
+                    @foreach (var d in datasets)
+                    {
+                        var cnt = SourceCount(d.Id);
+                        <button type="button" class="ig-combo-item @(selectedDatasetId == d.Id ? "ig-combo-item-on" : "")" @onclick="() => SelectDataset(d.Id)">
+                            <span class="ig-combo-avatar">@Initials(d.Name)</span>
+                            <span class="ig-combo-text">
+                                <span class="ig-combo-name">
+                                    @d.Name
+                                    <span class="ig-combo-tag @(d.SourceType == Application.Shared.Enums.DatasetSourceType.External ? "ig-tag-ext" : "ig-tag-loc")">@(d.SourceType == Application.Shared.Enums.DatasetSourceType.External ? "External" : "Local")</span>
+                                </span>
+                                <span class="ig-combo-sub">@(string.IsNullOrWhiteSpace(d.Description) ? "No description" : d.Description)</span>
+                            </span>
+                            <span class="ig-combo-count @(cnt == 0 ? "ig-combo-count-zero" : "")">@cnt</span>
+                        </button>
+                    }
+                </div>
             }
-        </select>
+        </div>
+        @if (!string.IsNullOrEmpty(selectedDatasetId))
+        {
+            <button class="btn btn-ghost ig-clear" @onclick='() => SelectDataset("")' title="Clear filter">Clear filter</button>
+        }
     </div>
 
     @if (showForm)
@@ -218,35 +275,38 @@ else
         </div>
     }
 
-    @if (!string.IsNullOrEmpty(selectedDatasetId))
-    {
-        <div class="ds-card" style="margin-top:1rem">
-            @if (isLoadingSources)
-            {
-                <div class="ds-loading"><div class="ds-spinner"></div><span>Loading sources…</span></div>
-            }
-            else if (sources?.Any() == true)
-            {
-                <div class="ds-table-wrap">
-                    <table class="ds-table">
-                        <thead>
-                            <tr>
-                                <th class="ds-th">Name</th>
-                                <th class="ds-th">Type</th>
-                                <th class="ds-th">Target</th>
-                                <th class="ds-th">Mode</th>
-                                <th class="ds-th">Schedule</th>
-                                <th class="ds-th">Last run</th>
-                                <th class="ds-th ds-th-actions">Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var s in sources)
-                            {
+    <div class="ds-card" style="margin-top:1rem">
+        @if (isLoadingSources)
+        {
+            <div class="ds-loading"><div class="ds-spinner"></div><span>Loading sources…</span></div>
+        }
+        else if (FilteredSources.Any())
+        {
+            <div class="ds-table-wrap">
+                <table class="ds-table">
+                    <thead>
+                        <tr>
+                            <th class="ds-th">Name</th>
+                            <th class="ds-th">Status</th>
+                            <th class="ds-th">Dataset</th>
+                            <th class="ds-th">Type</th>
+                            <th class="ds-th">Target</th>
+                            <th class="ds-th">Mode</th>
+                            <th class="ds-th">Schedule</th>
+                            <th class="ds-th">Last run</th>
+                            <th class="ds-th ds-th-actions">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in FilteredSources)
+                        {
                                 <tr class="ds-tr">
                                     <td class="ds-td ds-td-name">
                                         <span class="ds-dataset-name">@s.Name</span>
-                                        @if (!s.IsEnabled) { <span style="margin-left:0.4rem;font-size:0.7rem;color:#b45309">(disabled)</span> }
+                                    </td>
+                                    <td class="ds-td">@StatusBadge(s)</td>
+                                    <td class="ds-td">
+                                        <button class="ig-dslink" title="Filter to this dataset" @onclick="() => SelectDataset(s.DatasetId)">@DatasetName(s.DatasetId)</button>
                                     </td>
                                     <td class="ds-td">@KindLabel(s.SourceKind)</td>
                                     <td class="ds-td"><code style="font-size:0.75rem">@s.TargetTable</code></td>
@@ -257,12 +317,21 @@ else
                                         <div class="ds-actions">
                                             @if (canEdit)
                                             {
-                                                <button class="btn-icon" title="Run now (inline)" @onclick="() => RunNow(s)" disabled="@(runningId == s.Id)">
+                                                <button class="btn-icon" title="Run now (background job via the scheduler)" @onclick="() => RunBatch(s)" disabled="@(batchQueuingId == s.Id)">
                                                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                                                 </button>
-                                                <button class="btn-icon" title="Run as batch (background job via the scheduler)" @onclick="() => RunBatch(s)" disabled="@(runningId == s.Id || batchQueuingId == s.Id)">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v16h16"/><path d="m5 19 6-6 4 4 6-6"/></svg>
-                                                </button>
+                                                @if (s.IsEnabled)
+                                                {
+                                                    <button class="btn-icon" title="Pause schedule" @onclick="() => Pause(s)" disabled="@(togglingId == s.Id)">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+                                                    </button>
+                                                }
+                                                else
+                                                {
+                                                    <button class="btn-icon btn-icon-resume" title="Resume schedule" @onclick="() => Resume(s)" disabled="@(togglingId == s.Id)">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg>
+                                                    </button>
+                                                }
                                                 <button class="btn-icon" title="Edit" @onclick="() => StartEdit(s)">
                                                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
                                                 </button>
@@ -282,7 +351,7 @@ else
                                 @if (expandedRunsId == s.Id)
                                 {
                                     <tr class="ds-tr">
-                                        <td class="ds-td" colspan="7">
+                                        <td class="ds-td" colspan="9">
                                             @if (runs == null)
                                             {
                                                 <span class="ds-dataset-desc">Loading run history…</span>
@@ -368,11 +437,17 @@ else
                         <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="12 7 12 12 15 14"/></svg>
                     </div>
                     <h3 class="ds-empty-title">No ingestion sources</h3>
-                    <p class="ds-empty-sub">Create a source to pull data on a schedule into this dataset.</p>
+                    @if (!string.IsNullOrEmpty(selectedDatasetId))
+                    {
+                        <p class="ds-empty-sub">This dataset has no scheduled sources yet. Use <strong>New Source</strong> to add one.</p>
+                    }
+                    else
+                    {
+                        <p class="ds-empty-sub">No datasets have scheduled ingestion sources yet. Pick a dataset above, then add a source.</p>
+                    }
                 </div>
             }
         </div>
-    }
 </div>
 }
 
@@ -390,6 +465,79 @@ else
         </div>
     </div>
 }
+
+<style>
+    /* Dataset filter picker */
+    .ig-picker { display: flex; align-items: center; gap: 0.5rem; max-width: 640px; }
+    .ig-combo { position: relative; flex: 1 1 auto; min-width: 0; }
+    .ig-combo-btn {
+        display: flex; align-items: center; gap: 0.75rem; width: 100%;
+        padding: 0.55rem 0.75rem; background: #fff; border: 1px solid #e4e4e7;
+        border-radius: 0.5rem; cursor: pointer; text-align: left; font-family: inherit;
+        transition: border-color 0.12s, box-shadow 0.12s;
+    }
+    .ig-combo-btn:hover { border-color: #d4d4d8; }
+    .ig-combo-btn-open { border-color: #18181b; box-shadow: 0 0 0 2px rgba(24,24,27,0.08); }
+    .ig-combo-lead { display: flex; align-items: center; gap: 0.6rem; min-width: 0; flex: 1; }
+    .ig-combo-caret { color: #a1a1aa; flex-shrink: 0; transition: transform 0.15s; }
+    .ig-combo-btn-open .ig-combo-caret { transform: rotate(180deg); }
+
+    .ig-combo-avatar {
+        display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+        width: 34px; height: 34px; border-radius: 0.5rem; background: #18181b; color: #fff;
+        font-size: 0.72rem; font-weight: 700; letter-spacing: 0.02em;
+    }
+    .ig-combo-avatar-all { background: #eef2ff; color: #4f46e5; }
+    .ig-combo-text { display: flex; flex-direction: column; min-width: 0; gap: 1px; }
+    .ig-combo-name { font-size: 0.875rem; font-weight: 600; color: #18181b; display: flex; align-items: center; gap: 0.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ig-combo-sub { font-size: 0.75rem; color: #a1a1aa; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    .ig-combo-tag { font-size: 0.625rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.05rem 0.4rem; border-radius: 9999px; }
+    .ig-tag-loc { background: #f0fdf4; color: #16a34a; }
+    .ig-tag-ext { background: #eff6ff; color: #2563eb; }
+
+    .ig-combo-backdrop { position: fixed; inset: 0; z-index: 40; }
+    .ig-combo-menu {
+        position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 50;
+        max-height: 380px; overflow-y: auto; padding: 6px;
+        background: #fff; border: 1px solid #e4e4e7; border-radius: 0.625rem;
+        box-shadow: 0 12px 32px -8px rgba(0,0,0,0.18), 0 2px 6px -2px rgba(0,0,0,0.08);
+    }
+    .ig-combo-menu-head { font-size: 0.65rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #a1a1aa; padding: 0.4rem 0.6rem 0.5rem; }
+    .ig-combo-item {
+        display: flex; align-items: center; gap: 0.6rem; width: 100%;
+        padding: 0.5rem 0.6rem; border: none; background: none; cursor: pointer;
+        border-radius: 0.5rem; text-align: left; font-family: inherit; transition: background 0.1s;
+    }
+    .ig-combo-item:hover { background: #f4f4f5; }
+    .ig-combo-item-on { background: #f4f4f5; }
+    .ig-combo-count {
+        margin-left: auto; flex-shrink: 0; min-width: 22px; text-align: center;
+        font-size: 0.72rem; font-weight: 700; color: #3f3f46;
+        background: #f4f4f5; border: 1px solid #e4e4e7; border-radius: 9999px; padding: 0.1rem 0.45rem;
+        font-variant-numeric: tabular-nums;
+    }
+    .ig-combo-count-zero { color: #a1a1aa; }
+    .ig-clear { flex-shrink: 0; white-space: nowrap; }
+
+    /* Dataset link in the table */
+    .ig-dslink { border: none; background: none; padding: 0; font: inherit; color: #2563eb; cursor: pointer; font-size: 0.8125rem; }
+    .ig-dslink:hover { text-decoration: underline; }
+
+    /* Schedule status badge */
+    .ig-status { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.15rem 0.55rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap; }
+    .ig-status-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+    .ig-st-active { color: #16a34a; background: #f0fdf4; }
+    .ig-st-running { color: #2563eb; background: #eff6ff; }
+    .ig-st-running .ig-status-dot { animation: ig-pulse 1.2s ease-in-out infinite; }
+    .ig-st-pending { color: #b45309; background: #fffbeb; }
+    .ig-st-error { color: #dc2626; background: #fef2f2; }
+    .ig-st-paused { color: #71717a; background: #f4f4f5; }
+    @@keyframes ig-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    /* Resume (play) button reads as a positive action */
+    .btn-icon-resume { color: #16a34a; }
+</style>
 
 @code {
     private List<Dataset> datasets = new();
@@ -416,16 +564,38 @@ else
 
     private bool showForm = false;
     private string? editingId;
+    private string? editingDatasetId;
     private bool editingHasSecret;
     private SaveIngestionSourceRequest form = new();
     private IngestionSourceConfig config = new();
     private string keyColumnsText = string.Empty;
     private string headersText = string.Empty;
 
+    private bool datasetMenuOpen = false;
+
     private string? expandedRunsId;
-    private string? runningId;
     private string? reconcilingId;
     private string? batchQueuingId;
+    private string? togglingId;
+
+    // The dataset picker only filters — an empty selection shows every source.
+    private IEnumerable<IngestionSourceDto> FilteredSources =>
+        (sources ?? Enumerable.Empty<IngestionSourceDto>())
+            .Where(s => string.IsNullOrEmpty(selectedDatasetId) || s.DatasetId == selectedDatasetId);
+
+    private int SourceCount(string? datasetId) => sources?.Count(s => s.DatasetId == datasetId) ?? 0;
+
+    private string DatasetName(string? datasetId)
+        => datasets.FirstOrDefault(d => d.Id == datasetId)?.Name ?? "Unknown dataset";
+
+    private static string Initials(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return "?";
+        var parts = name.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 1
+            ? parts[0][..Math.Min(2, parts[0].Length)].ToUpperInvariant()
+            : (parts[0][..1] + parts[1][..1]).ToUpperInvariant();
+    }
 
     [SupplyParameterFromQuery(Name = "c")]
     public string? c { get; set; }
@@ -457,36 +627,42 @@ else
         try { datasets = await _httpClient.GetFromJsonAsync<List<Dataset>>("api/datasets") ?? new(); }
         catch { datasets = new(); }
         isLoading = false;
+        await LoadAllSources();
         _ = _activityLog.LogAsync(companyId, "ingestion.page_open", "ingestion", route: "/data/ingestion");
     }
 
-    private async Task OnDatasetChanged(ChangeEventArgs e)
+    private void ToggleDatasetMenu() => datasetMenuOpen = !datasetMenuOpen;
+
+    // The dataset picker is only a filter now — selecting one narrows the list (and enables "New Source").
+    private async Task SelectDataset(string id)
     {
-        selectedDatasetId = e.Value?.ToString() ?? string.Empty;
+        datasetMenuOpen = false;
+        selectedDatasetId = id ?? string.Empty;
         showForm = false;
         expandedRunsId = null;
-        sources = null;
         datasetTables = new();
         if (string.IsNullOrEmpty(selectedDatasetId)) return;
 
-        await LoadSources();
+        // Load the target-table suggestions for the create form.
         try { datasetTables = await _httpClient.GetFromJsonAsync<List<string>>($"api/datasets/{selectedDatasetId}/tables") ?? new(); }
         catch { datasetTables = new(); }
     }
 
-    private async Task LoadSources()
+    // Loads every source across the company's datasets; the dataset picker filters this client-side.
+    private async Task LoadAllSources()
     {
         try
         {
             isLoadingSources = true;
-            sources = await _httpClient.GetFromJsonAsync<List<IngestionSourceDto>>($"api/datasets/{selectedDatasetId}/ingestion") ?? new();
+            StateHasChanged();
+            sources = await _httpClient.GetFromJsonAsync<List<IngestionSourceDto>>("api/ingestion") ?? new();
         }
         catch (Exception ex)
         {
             _toastService.ShowError($"Failed to load sources: {ex.Message}");
             sources = new();
         }
-        finally { isLoadingSources = false; }
+        finally { isLoadingSources = false; StateHasChanged(); }
     }
 
     private void StartCreate()
@@ -503,6 +679,7 @@ else
     private void StartEdit(IngestionSourceDto s)
     {
         editingId = s.Id;
+        editingDatasetId = s.DatasetId;
         editingHasSecret = s.HasSecret;
         form = new SaveIngestionSourceRequest
         {
@@ -550,15 +727,17 @@ else
         try
         {
             isSaving = true;
+            // Create targets the currently-filtered dataset; edit keeps the source's own dataset.
+            var datasetForSave = editingId == null ? selectedDatasetId : editingDatasetId;
             HttpResponseMessage response = editingId == null
-                ? await _httpClient.PostAsJsonAsync($"api/datasets/{selectedDatasetId}/ingestion", form)
-                : await _httpClient.PutAsJsonAsync($"api/datasets/{selectedDatasetId}/ingestion/{editingId}", form);
+                ? await _httpClient.PostAsJsonAsync($"api/datasets/{datasetForSave}/ingestion", form)
+                : await _httpClient.PutAsJsonAsync($"api/datasets/{datasetForSave}/ingestion/{editingId}", form);
 
             if (response.IsSuccessStatusCode)
             {
                 _toastService.ShowSuccess(editingId == null ? "Source created" : "Source updated");
                 showForm = false;
-                await LoadSources();
+                await LoadAllSources();
             }
             else
             {
@@ -570,30 +749,29 @@ else
         finally { isSaving = false; }
     }
 
-    private async Task RunNow(IngestionSourceDto s)
+    private async Task Pause(IngestionSourceDto s) => await SetEnabled(s, false);
+    private async Task Resume(IngestionSourceDto s) => await SetEnabled(s, true);
+
+    private async Task SetEnabled(IngestionSourceDto s, bool enabled)
     {
         try
         {
-            runningId = s.Id;
+            togglingId = s.Id;
             StateHasChanged();
-            var response = await _httpClient.PostAsync($"api/datasets/{selectedDatasetId}/ingestion/{s.Id}/run", null);
+            var verb = enabled ? "resume" : "pause";
+            var response = await _httpClient.PostAsync($"api/datasets/{s.DatasetId}/ingestion/{s.Id}/{verb}", null);
             if (response.IsSuccessStatusCode)
             {
-                var result = await response.Content.ReadFromJsonAsync<ImportResult>();
-                if (result is { Success: true })
-                    _toastService.ShowSuccess($"{s.Name}: {result.RowsInserted} inserted, {result.RowsUpdated} updated, {result.RowsSkipped} skipped");
-                else
-                    _toastService.ShowError($"{s.Name} failed: {result?.Error ?? "unknown error"}");
-                await LoadSources();
-                if (expandedRunsId == s.Id) await LoadRuns(s.Id);
+                _toastService.ShowSuccess(enabled ? $"{s.Name} resumed" : $"{s.Name} paused");
+                await LoadAllSources();
             }
             else
             {
-                _toastService.ShowError($"Run failed: {await response.Content.ReadAsStringAsync()}");
+                _toastService.ShowError($"Failed to {verb}: {await response.Content.ReadAsStringAsync()}");
             }
         }
-        catch (Exception ex) { _toastService.ShowError($"Error running source: {ex.Message}"); }
-        finally { runningId = null; StateHasChanged(); }
+        catch (Exception ex) { _toastService.ShowError($"Error updating schedule: {ex.Message}"); }
+        finally { togglingId = null; StateHasChanged(); }
     }
 
     // Compact display of a long id (run/job) — first 8 chars; the full value is on the cell's title.
@@ -605,7 +783,7 @@ else
         {
             batchQueuingId = s.Id;
             StateHasChanged();
-            var response = await _httpClient.PostAsync($"api/datasets/{selectedDatasetId}/ingestion/{s.Id}/run-batch", null);
+            var response = await _httpClient.PostAsync($"api/datasets/{s.DatasetId}/ingestion/{s.Id}/run-batch", null);
             if (response.IsSuccessStatusCode)
             {
                 _toastService.ShowSuccess($"{s.Name} queued — it will run in the background (requires the scheduler to be running).");
@@ -629,12 +807,12 @@ else
         {
             reconcilingId = s.Id;
             StateHasChanged();
-            var response = await _httpClient.PostAsync($"api/datasets/{selectedDatasetId}/ingestion/{s.Id}/runs/reconcile", null);
+            var response = await _httpClient.PostAsync($"api/datasets/{s.DatasetId}/ingestion/{s.Id}/runs/reconcile", null);
             if (response.IsSuccessStatusCode)
             {
                 _toastService.ShowSuccess("Stuck run(s) marked as failed");
-                await LoadSources();
-                if (expandedRunsId == s.Id) await LoadRuns(s.Id);
+                await LoadAllSources();
+                if (expandedRunsId == s.Id) await LoadRuns(s);
             }
             else
             {
@@ -649,8 +827,8 @@ else
     {
         try
         {
-            var response = await _httpClient.DeleteAsync($"api/datasets/{selectedDatasetId}/ingestion/{s.Id}");
-            if (response.IsSuccessStatusCode) { _toastService.ShowSuccess("Source deleted"); await LoadSources(); }
+            var response = await _httpClient.DeleteAsync($"api/datasets/{s.DatasetId}/ingestion/{s.Id}");
+            if (response.IsSuccessStatusCode) { _toastService.ShowSuccess("Source deleted"); await LoadAllSources(); }
             else _toastService.ShowError($"Failed to delete: {response.StatusCode}");
         }
         catch (Exception ex) { _toastService.ShowError($"Error deleting source: {ex.Message}"); }
@@ -661,12 +839,12 @@ else
         if (expandedRunsId == s.Id) { expandedRunsId = null; return; }
         expandedRunsId = s.Id;
         runs = null;
-        await LoadRuns(s.Id);
+        await LoadRuns(s);
     }
 
-    private async Task LoadRuns(string sourceId)
+    private async Task LoadRuns(IngestionSourceDto s)
     {
-        try { runs = await _httpClient.GetFromJsonAsync<List<IngestionRunDto>>($"api/datasets/{selectedDatasetId}/ingestion/{sourceId}/runs") ?? new(); }
+        try { runs = await _httpClient.GetFromJsonAsync<List<IngestionRunDto>>($"api/datasets/{s.DatasetId}/ingestion/{s.Id}/runs") ?? new(); }
         catch { runs = new(); }
     }
 
@@ -709,6 +887,27 @@ else
             <option value="Parquet">Parquet</option>
             <option value="Excel">Excel</option>
         </select>
+    };
+
+    private RenderFragment StatusBadge(IngestionSourceDto s) => __builder =>
+    {
+        var (cls, label) = s.Status switch
+        {
+            "Active" => ("ig-st-active", "Active"),
+            "Running" => ("ig-st-running", "Running"),
+            "Pending" => ("ig-st-pending", "Pending"),
+            "Error" => ("ig-st-error", "Error"),
+            _ => ("ig-st-paused", "Paused"),
+        };
+        var title = s.Status switch
+        {
+            "Active" => s.NextRunAt.HasValue ? $"Next run {s.NextRunAt.Value.ToLocalTime():MMM dd, HH:mm}" : "Running on schedule",
+            "Pending" => "Enabled, but not yet registered with the scheduler (is it running?)",
+            "Error" => s.LastRunMessage ?? "The last run failed",
+            "Running" => "A run is in progress",
+            _ => "Paused — not running on schedule",
+        };
+        <span class="ig-status @cls" title="@title"><span class="ig-status-dot"></span>@label</span>
     };
 
     private RenderFragment RunBadge(IngestionSourceDto s) => __builder =>
