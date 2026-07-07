@@ -1,13 +1,14 @@
 @implements IAsyncDisposable
 @inject IJSRuntime _js
 
-<div style="height:380px"><canvas id="@_id"></canvas></div>
+<div style="height:@Height"><canvas id="@_id"></canvas></div>
 
 @code {
     [Parameter] public List<Dictionary<string, object?>>? Rows { get; set; }
     [Parameter] public string? ChartType { get; set; } = "bar";
     [Parameter] public string? XColumn { get; set; }
     [Parameter] public List<string>? YColumns { get; set; }
+    [Parameter] public string Height { get; set; } = "380px";
 
     private readonly string _id = "chart-" + Guid.NewGuid().ToString("N");
     private IJSObjectReference? _module;
@@ -16,7 +17,7 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         // Redraw only when the inputs actually change (avoids re-rendering the chart every cycle).
-        var signature = $"{ChartType}|{XColumn}|{string.Join(",", YColumns ?? new())}|{Rows?.Count ?? 0}";
+        var signature = $"{ChartType}|{XColumn}|{string.Join(",", YColumns ?? new())}|{Rows?.Count ?? 0}|{Height}";
         if (signature == _lastSignature) return;
         _lastSignature = signature;
         await Draw();
@@ -45,7 +46,12 @@
 
         var palette = new[] { "#2563eb", "#16a34a", "#d97706", "#dc2626", "#7c3aed", "#0891b2", "#db2777" };
         var labels = Rows.Select(r => r.TryGetValue(XColumn!, out var v) ? v?.ToString() ?? "" : "").ToList();
-        var type = string.IsNullOrEmpty(ChartType) ? "bar" : ChartType;
+
+        // "area" is a line chart with the region filled; pie/doughnut color each slice individually.
+        var requested = (string.IsNullOrEmpty(ChartType) ? "bar" : ChartType).ToLowerInvariant();
+        var isArea = requested == "area";
+        var isSlices = requested is "pie" or "doughnut";
+        var type = isArea ? "line" : requested;
 
         var datasets = new List<object>();
         for (int i = 0; i < YColumns.Count; i++)
@@ -53,8 +59,8 @@
             var col = YColumns[i];
             var data = Rows.Select(r => ToNumber(r.TryGetValue(col, out var v) ? v : null)).ToList();
             var color = palette[i % palette.Length];
-            // Pie charts color each slice; bar/line use one color per series.
-            object bg = type == "pie"
+            // Slice charts color each point; bar/line/area use one color per series.
+            object bg = isSlices
                 ? Rows.Select((_, idx) => palette[idx % palette.Length]).Cast<object>().ToList()
                 : color;
             datasets.Add(new
@@ -64,7 +70,8 @@
                 backgroundColor = bg,
                 borderColor = color,
                 borderWidth = 1,
-                fill = false,
+                fill = isArea,
+                tension = isArea ? 0.3 : 0,
             });
         }
 

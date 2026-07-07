@@ -1,0 +1,252 @@
+@using Application.Shared.Models.Data
+@using Application.Shared.Models.Dashboards
+@inject HttpClient _httpClient
+
+<div class="dw-card">
+    <div class="dw-head">
+        <div class="dw-head-left">
+            @if (ShowDragHandle)
+            {
+                <span class="dw-grip" title="Drag to reorder">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="6" r="1"/><circle cx="15" cy="6" r="1"/><circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="9" cy="18" r="1"/><circle cx="15" cy="18" r="1"/></svg>
+                </span>
+            }
+            <span class="dw-title" title="@Widget.Title">@Widget.Title</span>
+        </div>
+        <div class="dw-actions">
+            <button class="btn-icon" title="Refresh" @onclick="Load" disabled="@_loading">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+            </button>
+            <button class="btn-icon" title="Show SQL" @onclick="() => _showSql = !_showSql">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </button>
+            @if (_result?.Rows.Count > 0)
+            {
+                <button class="btn-icon" title="Expand" @onclick="() => _expanded = true">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>
+                </button>
+            }
+            @if (OnRemove.HasDelegate)
+            {
+                <button class="btn-icon btn-icon-delete" title="Remove widget" @onclick="() => OnRemove.InvokeAsync(Widget.Id)">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                </button>
+            }
+        </div>
+    </div>
+
+    @if (_showSql)
+    {
+        <pre class="dw-sql">@Widget.Sql</pre>
+    }
+
+    <div class="dw-body">
+        @if (_loading)
+        {
+            <div class="dw-msg"><span class="ds-spinner"></span> Loading…</div>
+        }
+        else if (_error != null)
+        {
+            <div class="dw-msg dw-err">@_error</div>
+        }
+        else if (_result == null || _result.Rows.Count == 0)
+        {
+            <div class="dw-msg">No data.</div>
+        }
+        else if (Widget.VizType == "kpi")
+        {
+            <div class="dw-kpi">@KpiValue()</div>
+        }
+        else if (IsChart(Widget.VizType))
+        {
+            <div class="dw-chart">
+                <ResultChart Rows="_result.Rows" ChartType="@Widget.VizType" XColumn="@XColumn()" YColumns="@YColumns()" Height="100%" />
+            </div>
+        }
+        else
+        {
+            <div class="dw-table-wrap">
+                <table class="dw-table">
+                    <thead>
+                        <tr>@foreach (var c in ColumnNames()) { <th>@c</th> }</tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _result.Rows.Take(200))
+                        {
+                            <tr>@foreach (var c in ColumnNames()) { <td>@Display(row, c)</td> }</tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@if (_expanded && _result != null)
+{
+    <div class="dw-modal-backdrop" @onclick="() => _expanded = false">
+        <div class="dw-modal" @onclick:stopPropagation="true">
+            <div class="dw-modal-head">
+                <span class="dw-title" title="@Widget.Title">@Widget.Title</span>
+                @if (Widget.VizType == "table")
+                {
+                    <span class="dw-modal-count">@_result.Rows.Count row@(_result.Rows.Count == 1 ? "" : "s")@(_result.Truncated ? " (truncated)" : "")</span>
+                }
+                <button class="btn-icon" title="Close" @onclick="() => _expanded = false">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+            </div>
+            <div class="dw-modal-body">
+                @if (Widget.VizType == "kpi")
+                {
+                    <div class="dw-kpi dw-kpi-lg">@KpiValue()</div>
+                }
+                else if (IsChart(Widget.VizType))
+                {
+                    <ResultChart Rows="_result.Rows" ChartType="@Widget.VizType" XColumn="@XColumn()" YColumns="@YColumns()" Height="70vh" />
+                }
+                else
+                {
+                    <table class="dw-table">
+                        <thead>
+                            <tr>@foreach (var c in ColumnNames()) { <th>@c</th> }</tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in _result.Rows)
+                            {
+                                <tr>@foreach (var c in ColumnNames()) { <td>@Display(row, c)</td> }</tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public AiDashboardWidgetDto Widget { get; set; } = new();
+    [Parameter] public string DatasetId { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> OnRemove { get; set; }
+    // Shows a drag grip before the title (the parent card is the actual draggable element).
+    [Parameter] public bool ShowDragHandle { get; set; }
+
+    private SqlQueryResult? _result;
+    private bool _loading;
+    private string? _error;
+    private bool _showSql;
+    private bool _expanded;
+    private string _loadedSignature = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Re-run only when the query/id actually changes.
+        var signature = $"{Widget.Id}|{Widget.Sql}";
+        if (signature == _loadedSignature) return;
+        _loadedSignature = signature;
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        if (string.IsNullOrWhiteSpace(Widget.Sql)) { _result = null; return; }
+        try
+        {
+            _loading = true; _error = null; StateHasChanged();
+            var payload = new { sql = Widget.Sql, maxRows = Widget.Config.Limit ?? 1000 };
+            var response = await _httpClient.PostAsJsonAsync($"api/datasets/{DatasetId}/query/run", payload);
+            if (response.IsSuccessStatusCode)
+            {
+                _result = await response.Content.ReadFromJsonAsync<SqlQueryResult>();
+                if (_result?.Error != null) { _error = _result.Error; _result = null; }
+            }
+            else
+            {
+                _error = $"Query failed ({(int)response.StatusCode}).";
+            }
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _loading = false; StateHasChanged(); }
+    }
+
+    private static bool IsChart(string viz) => viz is "bar" or "line" or "area" or "pie" or "doughnut";
+
+    private List<string> ColumnNames()
+    {
+        if (_result?.Columns?.Any() == true) return _result.Columns.Select(c => c.Name).ToList();
+        return _result?.Rows.FirstOrDefault()?.Keys.ToList() ?? new();
+    }
+
+    // x-axis: the configured field, else the first non-numeric column, else the first column.
+    private string XColumn()
+    {
+        if (!string.IsNullOrWhiteSpace(Widget.Config.XField)) return Widget.Config.XField!;
+        var cols = ColumnNames();
+        var firstText = cols.FirstOrDefault(c => !IsNumericColumn(c));
+        return firstText ?? cols.FirstOrDefault() ?? "";
+    }
+
+    // series: the configured value field, else the first numeric column, else the last column.
+    private List<string> YColumns()
+    {
+        if (!string.IsNullOrWhiteSpace(Widget.Config.ValueField)) return new() { Widget.Config.ValueField! };
+        var cols = ColumnNames();
+        var x = XColumn();
+        var numeric = cols.Where(c => c != x && IsNumericColumn(c)).ToList();
+        if (numeric.Count > 0) return numeric;
+        var rest = cols.Where(c => c != x).ToList();
+        return rest.Count > 0 ? new() { rest.Last() } : new();
+    }
+
+    private bool IsNumericColumn(string col)
+    {
+        var v = _result?.Rows.Select(r => r.TryGetValue(col, out var val) ? val : null).FirstOrDefault(val => val != null);
+        return v is double or decimal or int or long or float
+               || (v != null && double.TryParse(v.ToString(), out _));
+    }
+
+    private string KpiValue()
+    {
+        var col = !string.IsNullOrWhiteSpace(Widget.Config.ValueField) ? Widget.Config.ValueField! : ColumnNames().FirstOrDefault();
+        if (col == null || _result?.Rows.FirstOrDefault() is not { } row) return "—";
+        var raw = row.TryGetValue(col, out var v) ? v : null;
+        if (raw == null) return "—";
+        var fmt = Widget.Config.NumberFormat;
+        if (!string.IsNullOrWhiteSpace(fmt) && double.TryParse(raw.ToString(), out var num))
+        {
+            try { return num.ToString(fmt); } catch { /* fall through */ }
+        }
+        return raw.ToString() ?? "—";
+    }
+
+    private static string Display(Dictionary<string, object?> row, string col)
+        => row.TryGetValue(col, out var v) && v != null ? v.ToString() ?? "" : "";
+}
+
+<style>
+    .dw-card { display:flex; flex-direction:column; background:#fff; border:1px solid #e4e4e7; border-radius:10px; overflow:hidden; height:100%; }
+    .dw-head { display:flex; align-items:center; justify-content:space-between; padding:0.5rem 0.75rem; border-bottom:1px solid #f4f4f5; gap:0.5rem; }
+    .dw-head-left { display:flex; align-items:center; gap:0.4rem; min-width:0; flex:1; }
+    .dw-grip { display:flex; align-items:center; flex-shrink:0; color:#a1a1aa; cursor:grab; }
+    .dw-grip:active { cursor:grabbing; }
+    .dw-title { font-size:0.875rem; font-weight:600; color:#18181b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .dw-actions { display:flex; gap:0.15rem; flex-shrink:0; }
+    .dw-body { padding:0.75rem; flex:1; min-height:0; display:flex; flex-direction:column; }
+    .dw-chart { flex:1; min-height:0; }
+    .dw-msg { color:#71717a; font-size:0.8125rem; display:flex; align-items:center; gap:0.4rem; padding:0.5rem 0; }
+    .dw-err { color:#dc2626; white-space:pre-wrap; }
+    .dw-kpi { flex:1; display:flex; align-items:center; font-size:2.5rem; font-weight:700; color:#18181b; }
+    .dw-kpi-lg { font-size:4rem; text-align:center; padding:3rem 0; }
+    .dw-sql { margin:0; padding:0.6rem 0.75rem; background:#0f172a; color:#e2e8f0; font-family:ui-monospace,Consolas,monospace; font-size:0.75rem; white-space:pre-wrap; overflow:auto; max-height:160px; }
+    .dw-table-wrap { overflow:auto; flex:1; min-height:0; }
+    .dw-table { width:100%; border-collapse:collapse; font-size:0.8125rem; }
+    .dw-table th { text-align:left; color:#71717a; font-weight:600; padding:0.3rem 0.5rem; border-bottom:1px solid #e4e4e7; position:sticky; top:0; background:#fff; }
+    .dw-table td { padding:0.3rem 0.5rem; border-bottom:1px solid #f4f4f5; white-space:nowrap; }
+
+    .dw-modal-backdrop { position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:1000; display:flex; align-items:center; justify-content:center; padding:2rem; }
+    .dw-modal { background:#fff; border-radius:10px; width:min(1100px, 94vw); max-height:88vh; display:flex; flex-direction:column; box-shadow:0 10px 40px rgba(0,0,0,0.2); overflow:hidden; }
+    .dw-modal-head { display:flex; align-items:center; gap:0.75rem; padding:0.75rem 1rem; border-bottom:1px solid #e4e4e7; }
+    .dw-modal-head .dw-title { flex:1; }
+    .dw-modal-count { font-size:0.75rem; color:#71717a; white-space:nowrap; }
+    .dw-modal-body { overflow:auto; padding:0.5rem 1rem 1rem; }
+</style>

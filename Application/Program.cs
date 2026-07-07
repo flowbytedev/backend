@@ -225,6 +225,10 @@ builder.Services.AddScoped<ICommentService, CommentService>();
 builder.Services.AddScoped<IUserPreferencesService, UserPreferencesService>();
 builder.Services.AddScoped<IUserSearchService, UserSearchService>();
 
+// Conversational dashboard builder (AI): dashboard/widget CRUD + the planner agent.
+builder.Services.AddScoped<Application.Shared.Services.Data.IAiDashboardService, Application.Shared.Services.Data.AiDashboardService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.IDashboardAgentService, Application.Shared.Services.Data.DashboardAgentService>();
+
 // Metrics Services
 builder.Services.AddScoped<IMetricService, MetricService>();
 builder.Services.AddScoped<IMetricTargetService, MetricTargetService>();

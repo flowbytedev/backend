@@ -1,0 +1,393 @@
+@page "/data/ai-dashboard"
+@using System.Net.Http.Json
+@using Application.Shared.Models.Data
+@using Application.Shared.Models.Dashboards
+@inject HttpClient _httpClient
+@inject IToastService _toastService
+@inject AuthenticationStateProvider _authenticationStateProvider
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize(Policy = PolicyNames.DatasetsAccess)]
+
+<PageTitle>AI Dashboard Builder</PageTitle>
+
+@if (!canView && !isLoading)
+{
+    <div class="flex flex-col items-center justify-center h-64 text-gray-500 gap-2">
+        <p class="text-sm font-semibold text-gray-700">Access Denied</p>
+        <p class="text-xs text-gray-400">You don't have permission to view datasets.</p>
+    </div>
+}
+else
+{
+<div class="ad-page">
+    <div class="ds-header">
+        <div>
+            <h1 class="ds-title">AI Dashboard Builder</h1>
+            <p class="ds-subtitle">Pick a dataset and build a dashboard by chatting — each message adds or edits a widget.</p>
+        </div>
+    </div>
+
+    <div class="ad-toolbar">
+        <div class="ad-field">
+            <label class="ds-label">Dataset</label>
+            <select class="ds-select" value="@selectedDatasetId" @onchange="OnDatasetChanged">
+                <option value="">— Select a dataset —</option>
+                @foreach (var d in datasets)
+                {
+                    <option value="@d.Id">@d.Name</option>
+                }
+            </select>
+        </div>
+
+        @if (!string.IsNullOrEmpty(selectedDatasetId))
+        {
+            <div class="ad-field">
+                <label class="ds-label">Dashboard</label>
+                <select class="ds-select" value="@(currentDashboard?.Id ?? "")" @onchange="OnDashboardChanged">
+                    <option value="">— New dashboard —</option>
+                    @foreach (var db in dashboards)
+                    {
+                        <option value="@db.Id">@db.Name</option>
+                    }
+                </select>
+            </div>
+
+            @if (currentDashboard == null)
+            {
+                <div class="ad-field">
+                    <label class="ds-label">Name</label>
+                    <input class="ds-input" @bind="newDashboardName" placeholder="e.g. Sales overview" />
+                </div>
+                <button class="btn btn-default ad-btn" @onclick="CreateDashboard" disabled="@isBusy">Create</button>
+            }
+            else
+            {
+                <button class="btn btn-outline ad-btn" @onclick="DeleteDashboard" disabled="@isBusy" title="Delete this dashboard">Delete</button>
+            }
+        }
+    </div>
+
+    @if (string.IsNullOrEmpty(selectedDatasetId))
+    {
+        <div class="ds-empty">
+            <h3 class="ds-empty-title">Choose a dataset to begin</h3>
+            <p class="ds-empty-sub">Dashboards are built from a single dataset's tables.</p>
+        </div>
+    }
+    else if (currentDashboard == null)
+    {
+        <div class="ds-empty">
+            <h3 class="ds-empty-title">Create a dashboard</h3>
+            <p class="ds-empty-sub">Name it above and hit Create, or open an existing one.</p>
+        </div>
+    }
+    else
+    {
+        <div class="ad-canvas">
+            @if (currentDashboard.Widgets.Count == 0)
+            {
+                <div class="ds-empty" style="margin:2rem auto">
+                    <h3 class="ds-empty-title">Empty dashboard</h3>
+                    <p class="ds-empty-sub">Ask for a chart, table or KPI in the chat to add your first widget.</p>
+                </div>
+            }
+            else
+            {
+                <div class="ad-grid">
+                    @for (var i = 0; i < currentDashboard.Widgets.Count; i++)
+                    {
+                        var index = i;
+                        var w = currentDashboard.Widgets[index];
+                        <div class="ad-widget-wrap @(_dragOverIndex == index && _dragIndex != index ? "ad-drag-over" : "") @(_dragIndex == index ? "ad-dragging" : "")"
+                             style="grid-row: span @(RowSpan(w.VizType));"
+                             @key="w.Id"
+                             draggable="true"
+                             @ondragstart="() => OnDragStart(index)"
+                             @ondragend="OnDragEnd"
+                             @ondragenter="() => OnDragEnter(index)"
+                             @ondragover:preventDefault="true"
+                             @ondrop="() => OnDrop(index)"
+                             @ondrop:preventDefault="true">
+                            <DashboardWidget Widget="w" DatasetId="@selectedDatasetId" OnRemove="RemoveWidget" ShowDragHandle="true" />
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@* Floating chat widget, docked bottom-right, available whenever a dashboard is open. *@
+@if (currentDashboard != null)
+{
+    <div class="ad-chat-dock">
+        <div class="ad-chat-float @(_chatOpen ? "" : "ad-hidden")">
+            <div class="ad-chat-float-head">
+                <span class="ad-chat-float-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    Build with AI
+                </span>
+                <button class="btn-icon" title="Minimize" @onclick="() => _chatOpen = false">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+                </button>
+            </div>
+            <div class="ad-chat-float-body">
+                <DashboardChatPanel @ref="chatPanel" DatasetId="@selectedDatasetId" DashboardId="@currentDashboard.Id"
+                                    OnDashboardUpdated="OnDashboardUpdated" />
+            </div>
+        </div>
+        @if (!_chatOpen)
+        {
+            <button class="ad-chat-fab" title="Build with AI" @onclick="() => _chatOpen = true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </button>
+        }
+    </div>
+}
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "c")]
+    public string? c { get; set; }
+
+    private string? companyId;
+    private bool isLoading = true;
+    private bool isBusy = false;
+    private bool canView;
+    private bool canEdit;
+
+    private List<Dataset> datasets = new();
+    private string selectedDatasetId = string.Empty;
+
+    private List<AiDashboardDto> dashboards = new();
+    private AiDashboardDto? currentDashboard;
+    private string newDashboardName = string.Empty;
+
+    private DashboardChatPanel? chatPanel;
+    private bool _chatOpen = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        companyId = c;
+        if (string.IsNullOrEmpty(companyId))
+        {
+            _toastService.ShowWarning("Company ID is required");
+            isLoading = false;
+            return;
+        }
+
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        canView = authState.User.HasCompanyRole(companyId, "VIEW_DATA");
+        canEdit = authState.User.HasCompanyRole(companyId, "EDIT_DATA");
+        if (!canView) { isLoading = false; return; }
+
+        _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+        _httpClient.DefaultRequestHeaders.Add("X-Company-Id", companyId);
+        var userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrEmpty(userId))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("UserId");
+            _httpClient.DefaultRequestHeaders.Add("UserId", userId);
+        }
+
+        try { datasets = await _httpClient.GetFromJsonAsync<List<Dataset>>("api/datasets") ?? new(); }
+        catch { datasets = new(); }
+        isLoading = false;
+    }
+
+    private async Task OnDatasetChanged(ChangeEventArgs e)
+    {
+        selectedDatasetId = e.Value?.ToString() ?? string.Empty;
+        currentDashboard = null;
+        dashboards = new();
+        chatPanel?.Reset();
+        if (string.IsNullOrEmpty(selectedDatasetId)) return;
+        await LoadDashboards();
+        // Convenience: open the most recent dashboard if one exists.
+        if (dashboards.Count > 0) await OpenDashboard(dashboards[0].Id);
+    }
+
+    private async Task LoadDashboards()
+    {
+        try { dashboards = await _httpClient.GetFromJsonAsync<List<AiDashboardDto>>($"api/datasets/{selectedDatasetId}/ai-dashboards") ?? new(); }
+        catch { dashboards = new(); }
+    }
+
+    private async Task OnDashboardChanged(ChangeEventArgs e)
+    {
+        var id = e.Value?.ToString() ?? "";
+        if (string.IsNullOrEmpty(id)) { currentDashboard = null; chatPanel?.Reset(); return; }
+        await OpenDashboard(id);
+    }
+
+    private async Task OpenDashboard(string id)
+    {
+        try
+        {
+            currentDashboard = await _httpClient.GetFromJsonAsync<AiDashboardDto>($"api/datasets/{selectedDatasetId}/ai-dashboards/{id}");
+            chatPanel?.Reset();
+        }
+        catch (Exception ex) { _toastService.ShowError($"Failed to open dashboard: {ex.Message}"); }
+    }
+
+    private async Task CreateDashboard()
+    {
+        try
+        {
+            isBusy = true;
+            var payload = new { name = string.IsNullOrWhiteSpace(newDashboardName) ? "Untitled dashboard" : newDashboardName.Trim() };
+            var response = await _httpClient.PostAsJsonAsync($"api/datasets/{selectedDatasetId}/ai-dashboards", payload);
+            if (response.IsSuccessStatusCode)
+            {
+                var created = await response.Content.ReadFromJsonAsync<AiDashboardDto>();
+                newDashboardName = string.Empty;
+                await LoadDashboards();
+                if (created != null) currentDashboard = created;
+                chatPanel?.Reset();
+            }
+            else { _toastService.ShowError($"Failed to create dashboard ({(int)response.StatusCode})."); }
+        }
+        catch (Exception ex) { _toastService.ShowError($"Error creating dashboard: {ex.Message}"); }
+        finally { isBusy = false; }
+    }
+
+    private async Task DeleteDashboard()
+    {
+        if (currentDashboard == null) return;
+        try
+        {
+            isBusy = true;
+            var response = await _httpClient.DeleteAsync($"api/datasets/{selectedDatasetId}/ai-dashboards/{currentDashboard.Id}");
+            if (response.IsSuccessStatusCode)
+            {
+                _toastService.ShowSuccess("Dashboard deleted");
+                currentDashboard = null;
+                await LoadDashboards();
+            }
+            else { _toastService.ShowError("Failed to delete dashboard"); }
+        }
+        catch (Exception ex) { _toastService.ShowError($"Error deleting dashboard: {ex.Message}"); }
+        finally { isBusy = false; }
+    }
+
+    private void OnDashboardUpdated(AiDashboardDto updated)
+    {
+        currentDashboard = updated;
+        // Keep the dashboard list's name in sync if it changed.
+        var idx = dashboards.FindIndex(d => d.Id == updated.Id);
+        if (idx >= 0) dashboards[idx] = updated;
+        StateHasChanged();
+    }
+
+    // How many grid rows a widget spans, by type — KPIs are short, charts/tables are taller.
+    // With a 170px row unit + 1rem gap: 1 → ~170px, 2 → ~356px.
+    private static int RowSpan(string vizType) => vizType == "kpi" ? 1 : 2;
+
+    // ---- drag & drop reordering ----
+    private int? _dragIndex;
+    private int? _dragOverIndex;
+
+    private void OnDragStart(int index) => _dragIndex = index;
+
+    private void OnDragEnter(int index)
+    {
+        // Only re-render when the hovered target actually changes, so the DOM isn't churned
+        // on every dragenter (which can interrupt the native drag operation).
+        if (_dragOverIndex != index) _dragOverIndex = index;
+    }
+
+    // Fires on the source when the drag ends. Acts as a fallback commit in case the drop event
+    // didn't fire on the target (native drop is finicky) — uses the last-hovered target index.
+    private async Task OnDragEnd() => await Commit(_dragOverIndex);
+
+    private async Task OnDrop(int target) => await Commit(target);
+
+    private async Task Commit(int? target)
+    {
+        var from = _dragIndex;
+        _dragIndex = null;
+        _dragOverIndex = null;
+
+        if (currentDashboard == null || from == null || target == null) { StateHasChanged(); return; }
+
+        var list = currentDashboard.Widgets;
+        var to = target.Value;
+        if (from < 0 || from >= list.Count || to < 0 || to >= list.Count || from == to) { StateHasChanged(); return; }
+
+        var item = list[from.Value];
+        list.RemoveAt(from.Value);
+        list.Insert(to, item);
+        StateHasChanged();
+        await PersistOrder();
+    }
+
+    private async Task PersistOrder()
+    {
+        if (currentDashboard == null) return;
+        var orderedIds = currentDashboard.Widgets.Select(w => w.Id).ToList();
+        var url = $"api/datasets/{selectedDatasetId}/ai-dashboards/{currentDashboard.Id}/reorder";
+        try
+        {
+            var response = await _httpClient.PutAsJsonAsync(url, orderedIds);
+            if (response.IsSuccessStatusCode)
+            {
+                _toastService.ShowSuccess("Widget order saved");
+            }
+            else
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _toastService.ShowError($"Save order failed: {(int)response.StatusCode} {response.ReasonPhrase} — {body}");
+                await OpenDashboard(currentDashboard.Id); // resync with the server on failure
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Error saving order: {ex.Message}");
+        }
+    }
+
+    private async Task RemoveWidget(string widgetId)
+    {
+        if (currentDashboard == null) return;
+        try
+        {
+            var response = await _httpClient.DeleteAsync(
+                $"api/datasets/{selectedDatasetId}/ai-dashboards/{currentDashboard.Id}/widgets/{widgetId}");
+            if (response.IsSuccessStatusCode)
+                await OpenDashboard(currentDashboard.Id);
+            else
+                _toastService.ShowError("Failed to remove widget");
+        }
+        catch (Exception ex) { _toastService.ShowError($"Error removing widget: {ex.Message}"); }
+    }
+}
+
+<style>
+    .ad-page { display:flex; flex-direction:column; height:100%; min-height:0; }
+    .ad-toolbar { display:flex; align-items:flex-end; gap:0.75rem; flex-wrap:wrap; margin:0.5rem 0 1rem; }
+    .ad-field { display:flex; flex-direction:column; gap:0.25rem; min-width:200px; }
+    .ad-btn { flex-shrink:0; }
+    .ad-canvas { flex:1; min-width:0; overflow-y:auto; max-height:calc(100vh - 200px); }
+
+    /* Floating chat dock (bottom-right) */
+    .ad-chat-dock { position:fixed; right:24px; bottom:24px; z-index:900; }
+    .ad-chat-fab { width:56px; height:56px; border-radius:50%; background:#18181b; color:#fff; border:none;
+        box-shadow:0 6px 20px rgba(0,0,0,0.28); cursor:pointer; display:flex; align-items:center; justify-content:center; }
+    .ad-chat-fab:hover { background:#27272a; }
+    .ad-chat-float { display:flex; flex-direction:column; overflow:hidden;
+        width:min(380px, calc(100vw - 32px)); height:min(520px, calc(100vh - 140px));
+        background:#fff; border:1px solid #e4e4e7; border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,0.22); }
+    .ad-chat-float.ad-hidden { display:none; }
+    .ad-chat-float-head { display:flex; align-items:center; justify-content:space-between; gap:0.5rem;
+        padding:0.6rem 0.85rem; border-bottom:1px solid #e4e4e7; background:#fafafa; }
+    .ad-chat-float-title { display:flex; align-items:center; gap:0.4rem; font-size:0.9rem; font-weight:600; color:#18181b; }
+    .ad-chat-float-body { flex:1; min-height:0; }
+    /* Flexible tiled grid (Qlik Sense-style): a fine row unit + per-widget row spans, so short tiles
+       (KPIs) stay small and taller tiles (charts/tables) span more rows. Auto-placement wraps forward,
+       so a later short tile fills the space under an earlier one instead of leaving a ragged gap. */
+    .ad-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); grid-auto-rows:170px; gap:1rem; }
+
+    .ad-widget-wrap { position:relative; height:100%; border-radius:10px; transition:outline-color 0.1s; }
+    .ad-widget-wrap.ad-dragging { opacity:0.5; }
+    .ad-widget-wrap.ad-drag-over { outline:2px dashed #2563eb; outline-offset:3px; }
+</style>

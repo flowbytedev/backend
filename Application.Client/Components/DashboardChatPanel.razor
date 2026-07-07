@@ -1,0 +1,105 @@
+@using Application.Shared.Models.Dashboards
+@inject HttpClient _httpClient
+
+<div class="dcp">
+    <div class="dcp-messages">
+        @if (_messages.Count == 0)
+        {
+            <div class="dcp-empty">
+                <p class="dcp-empty-title">Build with words</p>
+                <p class="dcp-empty-sub">Try: “show total sales by region as a bar chart”, then “add a KPI of total sales”.</p>
+            </div>
+        }
+        @foreach (var m in _messages)
+        {
+            <div class="dcp-msg @(m.IsUser ? "dcp-user" : "dcp-assistant")">@m.Text</div>
+        }
+        @if (_sending)
+        {
+            <div class="dcp-msg dcp-assistant dcp-thinking"><span class="ds-spinner"></span> Thinking…</div>
+        }
+    </div>
+
+    <div class="dcp-input">
+        <textarea class="ds-input" rows="2" placeholder="Describe a chart, KPI or change…"
+                  @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDown" disabled="@(_sending || string.IsNullOrEmpty(DashboardId))"></textarea>
+        <button class="btn btn-default" @onclick="Send" disabled="@(_sending || string.IsNullOrWhiteSpace(_draft) || string.IsNullOrEmpty(DashboardId))">
+            Send
+        </button>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string DatasetId { get; set; } = string.Empty;
+    [Parameter] public string? DashboardId { get; set; }
+    [Parameter] public EventCallback<AiDashboardDto> OnDashboardUpdated { get; set; }
+
+    private readonly List<ChatLine> _messages = new();
+    private string _draft = string.Empty;
+    private bool _sending;
+
+    private record ChatLine(string Text, bool IsUser);
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            await Send();
+        }
+    }
+
+    private async Task Send()
+    {
+        var message = _draft?.Trim();
+        if (string.IsNullOrWhiteSpace(message) || string.IsNullOrEmpty(DashboardId) || _sending) return;
+
+        _messages.Add(new ChatLine(message, true));
+        _draft = string.Empty;
+        _sending = true;
+        StateHasChanged();
+
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync(
+                $"api/datasets/{DatasetId}/ai-dashboards/{DashboardId}/chat", new { message });
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<DashboardChatResponse>();
+                if (result != null)
+                {
+                    _messages.Add(new ChatLine(string.IsNullOrWhiteSpace(result.Reply) ? "Done." : result.Reply, false));
+                    await OnDashboardUpdated.InvokeAsync(result.Dashboard);
+                }
+            }
+            else
+            {
+                _messages.Add(new ChatLine($"Sorry — that request failed ({(int)response.StatusCode}).", false));
+            }
+        }
+        catch (Exception ex)
+        {
+            _messages.Add(new ChatLine($"Error: {ex.Message}", false));
+        }
+        finally
+        {
+            _sending = false;
+            StateHasChanged();
+        }
+    }
+
+    public void Reset() { _messages.Clear(); _draft = string.Empty; StateHasChanged(); }
+}
+
+<style>
+    .dcp { display:flex; flex-direction:column; height:100%; min-height:0; }
+    .dcp-messages { flex:1; overflow-y:auto; padding:0.75rem; display:flex; flex-direction:column; gap:0.5rem; }
+    .dcp-empty { color:#71717a; text-align:center; margin:auto 0; }
+    .dcp-empty-title { font-size:0.9rem; font-weight:600; color:#3f3f46; margin:0 0 0.25rem; }
+    .dcp-empty-sub { font-size:0.8125rem; margin:0; }
+    .dcp-msg { padding:0.5rem 0.7rem; border-radius:10px; font-size:0.8125rem; line-height:1.45; max-width:92%; white-space:pre-wrap; }
+    .dcp-user { align-self:flex-end; background:#18181b; color:#fff; border-bottom-right-radius:3px; }
+    .dcp-assistant { align-self:flex-start; background:#f4f4f5; color:#27272a; border-bottom-left-radius:3px; }
+    .dcp-thinking { display:flex; align-items:center; gap:0.4rem; color:#71717a; }
+    .dcp-input { border-top:1px solid #e4e4e7; padding:0.6rem; display:flex; gap:0.5rem; align-items:flex-end; }
+    .dcp-input .ds-input { flex:1; resize:none; }
+</style>
