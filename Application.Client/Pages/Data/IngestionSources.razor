@@ -2,6 +2,7 @@
 @using System.Net.Http.Json
 @using Application.Shared.Models
 @using Application.Shared.Models.Data
+@using Application.Shared.Services.Data
 @inject HttpClient _httpClient
 @inject IToastService _toastService
 @inject AuthenticationStateProvider _authenticationStateProvider
@@ -35,6 +36,12 @@ else
             </button>
         }
     </div>
+
+    @* Floating AI Assist widget, docked bottom-right — same placement/behavior as the AI Dashboard Builder's chat. *@
+    @if (canEdit && !string.IsNullOrEmpty(selectedDatasetId))
+    {
+        <IngestionAssistChat DatasetId="@selectedDatasetId" OnUseConfig="ApplyDraft" />
+    }
 
     <div class="ig-picker">
         <div class="ig-combo">
@@ -674,6 +681,37 @@ else
         keyColumnsText = string.Empty;
         headersText = string.Empty;
         showForm = true;
+    }
+
+    // Loads an AI-proposed draft into the normal create form so the user reviews every field (and enters
+    // the secret) before saving through the existing create endpoint. Never persists directly.
+    private void ApplyDraft(IngestionDraft draft)
+    {
+        editingId = null;
+        editingHasSecret = false;
+        form = new SaveIngestionSourceRequest
+        {
+            Name = draft.Name ?? string.Empty,
+            Description = draft.Description,
+            TargetTable = draft.TargetTable ?? string.Empty,
+            SourceKind = string.IsNullOrWhiteSpace(draft.SourceKind) ? "ExternalDatabase" : draft.SourceKind,
+            SourceEntityId = draft.SourceEntityId,
+            ImportMode = string.IsNullOrWhiteSpace(draft.ImportMode) ? "Append" : draft.ImportMode,
+            CreateIfNotExists = draft.CreateIfNotExists,
+            IncrementalColumn = draft.IncrementalColumn,
+            CronExpression = string.IsNullOrWhiteSpace(draft.CronExpression) ? "0 * * * *" : draft.CronExpression,
+            TimeZone = draft.TimeZone,
+            IsEnabled = draft.IsEnabled,
+            Secret = null,
+        };
+        config = draft.Config ?? new IngestionSourceConfig();
+        if (string.IsNullOrWhiteSpace(config.Method)) config.Method = "GET";
+        if (string.IsNullOrWhiteSpace(config.AuthType)) config.AuthType = "none";
+        keyColumnsText = string.Join(", ", draft.KeyColumns ?? new());
+        headersText = config.Headers == null ? "" : string.Join("\n", config.Headers.Select(h => $"{h.Key}: {h.Value}"));
+
+        showForm = true;
+        _toastService.ShowInfo("Draft loaded — review the fields and enter any secret before saving.");
     }
 
     private void StartEdit(IngestionSourceDto s)

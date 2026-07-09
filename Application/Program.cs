@@ -229,6 +229,10 @@ builder.Services.AddScoped<IUserSearchService, UserSearchService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.IAiDashboardService, Application.Shared.Services.Data.AiDashboardService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.IDashboardAgentService, Application.Shared.Services.Data.DashboardAgentService>();
 
+// Semantic layer (AI dataset documentation): per-column doc CRUD + the AI generator.
+builder.Services.AddScoped<Application.Shared.Services.Data.IDatasetDocService, Application.Shared.Services.Data.DatasetDocService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.IColumnDocGenerationService, Application.Shared.Services.Data.ColumnDocGenerationService>();
+
 // Metrics Services
 builder.Services.AddScoped<IMetricService, MetricService>();
 builder.Services.AddScoped<IMetricTargetService, MetricTargetService>();
@@ -357,6 +361,9 @@ builder.Services.AddScoped<ISavedQueryService, SavedQueryService>();
 
 // Scheduled/automated ingestion — executor shared with the scheduler ("Run now" runs it inline here).
 builder.Services.AddScoped<IIngestionService, IngestionService>();
+
+// AI-assisted ingestion: conversational planner that drafts an ingestion source config (never persists).
+builder.Services.AddScoped<Application.Shared.Services.Data.IIngestionAgentService, Application.Shared.Services.Data.IngestionAgentService>();
 
 // Hangfire CLIENT only (no server): lets "Run as batch" enqueue an ingestion job into the same storage
 // the Application.Scheduler process reads from, so it runs there instead of inline in this web request.

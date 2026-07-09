@@ -78,6 +78,7 @@ public class DashboardAgentService : IDashboardAgentService
     private readonly IDatasetService _datasetService;
     private readonly IDuckdbService _duckdbService;
     private readonly IDatabaseTableService _databaseTableService;
+    private readonly IDatasetDocService _docService;
     private readonly ILogger<DashboardAgentService> _logger;
 
     public DashboardAgentService(
@@ -85,6 +86,7 @@ public class DashboardAgentService : IDashboardAgentService
         IDatasetService datasetService,
         IDuckdbService duckdbService,
         IDatabaseTableService databaseTableService,
+        IDatasetDocService docService,
         ILogger<DashboardAgentService> logger)
     {
         _config = config.Value;
@@ -92,6 +94,7 @@ public class DashboardAgentService : IDashboardAgentService
         _datasetService = datasetService;
         _duckdbService = duckdbService;
         _databaseTableService = databaseTableService;
+        _docService = docService;
         _logger = logger;
     }
 
@@ -249,24 +252,47 @@ public class DashboardAgentService : IDashboardAgentService
         if (dataset.SourceType == DatasetSourceType.External && !string.IsNullOrWhiteSpace(dataset.SourceEntityId))
             await AppendExternalSchemaAsync(sb, dataset, companyId, ct);
         else
-            await AppendLocalSchemaAsync(sb, dataset, ct);
+            await AppendLocalSchemaAsync(sb, dataset, companyId, ct);
 
         var schema = sb.ToString();
         SchemaCache[dataset.Id!] = (DateTime.UtcNow, schema);
         return schema;
     }
 
-    private async Task AppendLocalSchemaAsync(StringBuilder sb, Dataset dataset, CancellationToken ct)
+    private async Task AppendLocalSchemaAsync(StringBuilder sb, Dataset dataset, string companyId, CancellationToken ct)
     {
         var tables = (await _duckdbService.GetTablesAsync(dataset.Id!)).Take(MaxSchemaTables).ToList();
         foreach (var table in tables)
         {
             var columns = await _duckdbService.GetTableColumnsAsync(dataset.Id!, table);
+
+            // Enrich with any saved semantic-layer docs so the model understands cryptic column names.
+            Dictionary<string, ColumnDocDto> docs;
+            try
+            {
+                var tableDoc = await _docService.GetTableDocsAsync(companyId, dataset.Id!, table, ct);
+                docs = tableDoc.Columns.ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
+            }
+            catch { docs = new(); }
+
             sb.AppendLine($"Table \"{table}\":");
             foreach (var c in columns)
-                sb.AppendLine($"  - {c.Name} ({c.DataType})");
+            {
+                var note = docs.TryGetValue(c.Name, out var d) ? DescribeDoc(d) : null;
+                sb.AppendLine(note == null ? $"  - {c.Name} ({c.DataType})" : $"  - {c.Name} ({c.DataType}) — {note}");
+            }
             sb.AppendLine();
         }
+    }
+
+    // Compact one-line hint from a column's doc: description first, then semantic type/unit if present.
+    private static string? DescribeDoc(ColumnDocDto d)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(d.Description)) parts.Add(d.Description!.Trim());
+        var typeUnit = string.Join(" ", new[] { d.SemanticType, d.Unit }.Where(s => !string.IsNullOrWhiteSpace(s)));
+        if (!string.IsNullOrWhiteSpace(typeUnit)) parts.Add($"[{typeUnit.Trim()}]");
+        return parts.Count == 0 ? null : string.Join(" ", parts);
     }
 
     private async Task AppendExternalSchemaAsync(StringBuilder sb, Dataset dataset, string companyId, CancellationToken ct)

@@ -564,15 +564,25 @@ public class DatabaseTableService : IDatabaseTableService
         await connection.OpenAsync(ct);
         await ApplyReadOnlySetupAsync(connection, c, ct);
 
+        // The batch key may be a single column or a comma-separated composite (e.g. company_id,item_no,
+        // variant_code). Keyset paging orders by the full key and advances with a lexicographic '>' over
+        // all parts, so a composite key is safe even when no single column is unique — as long as the
+        // columns together are unique.
+        var keyColumns = keyColumn
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        if (keyColumns.Count == 0)
+            return await ReadToTempCsvAsync(c, baseQuery, destCsvPath, ct, commandTimeoutSeconds, rowProgress);
+
         await using var writer = new StreamWriter(destCsvPath, false, new UTF8Encoding(false));
         var timeout = commandTimeoutSeconds ?? DefaultReadCommandTimeoutSeconds;
         var totalRows = 0;
         var headerWritten = false;
-        string? lastKeyLiteral = null;
+        List<string>? lastKeyLiterals = null;
 
         while (true)
         {
-            var pageSql = BuildKeysetPageSql(c.DatabaseType, baseQuery, keyColumn, batchSize, lastKeyLiteral);
+            var pageSql = BuildKeysetPageSql(c.DatabaseType, baseQuery, keyColumns, batchSize, lastKeyLiterals);
 
             await using var command = connection.CreateCommand();
             command.CommandText = pageSql;
@@ -585,13 +595,18 @@ public class DatabaseTableService : IDatabaseTableService
                 headerWritten = true;
             }
 
-            var keyOrdinal = FindOrdinal(reader, keyColumn);
-            if (keyOrdinal < 0)
-                throw new InvalidOperationException($"Batch key column '{keyColumn}' was not found in the source result. It must be one of the selected columns.");
+            // Resolve each key column to its ordinal in the result (must be among the selected columns).
+            var keyOrdinals = new int[keyColumns.Count];
+            for (int k = 0; k < keyColumns.Count; k++)
+            {
+                keyOrdinals[k] = FindOrdinal(reader, keyColumns[k]);
+                if (keyOrdinals[k] < 0)
+                    throw new InvalidOperationException($"Batch key column '{keyColumns[k]}' was not found in the source result. It must be one of the selected columns.");
+            }
 
             var fieldCount = reader.FieldCount;
             var pageRows = 0;
-            object? lastKeyValue = null;
+            object?[]? lastKeyValues = null;
             while (await reader.ReadAsync(ct))
             {
                 for (int i = 0; i < fieldCount; i++)
@@ -601,7 +616,18 @@ public class DatabaseTableService : IDatabaseTableService
                         await writer.WriteAsync(CsvEscape(FormatCsvValue(reader.GetValue(i))));
                 }
                 await writer.WriteAsync('\n');
-                if (!reader.IsDBNull(keyOrdinal)) lastKeyValue = reader.GetValue(keyOrdinal);
+
+                // Remember this row's key values as the cursor for the next page. A null in any key part
+                // means we can't form a reliable cursor from this row, so keep the last fully-valued one.
+                var keyValues = new object?[keyColumns.Count];
+                var anyNull = false;
+                for (int k = 0; k < keyColumns.Count; k++)
+                {
+                    if (reader.IsDBNull(keyOrdinals[k])) { anyNull = true; break; }
+                    keyValues[k] = reader.GetValue(keyOrdinals[k]);
+                }
+                if (!anyNull) lastKeyValues = keyValues;
+
                 pageRows++;
                 totalRows++;
             }
@@ -609,9 +635,9 @@ public class DatabaseTableService : IDatabaseTableService
             rowProgress?.Report(totalRows);
 
             // Last (smaller) page, or we can't advance the keyset cursor → done.
-            if (pageRows < batchSize || lastKeyValue == null)
+            if (pageRows < batchSize || lastKeyValues == null)
                 break;
-            lastKeyLiteral = KeyLiteral(lastKeyValue);
+            lastKeyLiterals = lastKeyValues.Select(v => KeyLiteral(v!)).ToList();
         }
 
         return totalRows;
@@ -754,14 +780,33 @@ public class DatabaseTableService : IDatabaseTableService
         return -1;
     }
 
-    // Builds one ordered keyset page over an arbitrary base query. Strict '>' on the key means the key
-    // should be unique; a non-unique key risks skipping rows that share the boundary value.
-    private static string BuildKeysetPageSql(DataSourceType type, string baseQuery, string keyColumn, int batchSize, string? lastKeyLiteral)
+    // Builds one ordered keyset page over an arbitrary base query. Orders by the full (possibly composite)
+    // key and, after the first page, filters to rows strictly greater than the previous page's last key
+    // using a lexicographic comparison expanded into OR/AND terms — portable across SQL Server (which has
+    // no row-value comparison) as well as Postgres/MySQL/DuckDB. Strict '>' on the whole key means the key
+    // must be unique together; a non-unique composite still risks skipping rows sharing the boundary key.
+    private static string BuildKeysetPageSql(DataSourceType type, string baseQuery, IReadOnlyList<string> keyColumns, int batchSize, IReadOnlyList<string>? lastKeyLiterals)
     {
-        var col = QuoteIdentifier(type, keyColumn);
+        var cols = keyColumns.Select(k => QuoteIdentifier(type, k)).ToList();
         var inner = baseQuery.TrimEnd().TrimEnd(';');
-        var where = lastKeyLiteral == null ? string.Empty : $" WHERE _src.{col} > {lastKeyLiteral}";
-        var order = $" ORDER BY _src.{col} ASC";
+        var order = " ORDER BY " + string.Join(", ", cols.Select(c => $"_src.{c} ASC"));
+
+        var where = string.Empty;
+        if (lastKeyLiterals != null && lastKeyLiterals.Count == cols.Count)
+        {
+            // (c1 > v1) OR (c1 = v1 AND c2 > v2) OR (c1 = v1 AND c2 = v2 AND c3 > v3) ...
+            var terms = new List<string>();
+            for (int i = 0; i < cols.Count; i++)
+            {
+                var parts = new List<string>();
+                for (int j = 0; j < i; j++)
+                    parts.Add($"_src.{cols[j]} = {lastKeyLiterals[j]}");
+                parts.Add($"_src.{cols[i]} > {lastKeyLiterals[i]}");
+                terms.Add(parts.Count == 1 ? parts[0] : "(" + string.Join(" AND ", parts) + ")");
+            }
+            where = " WHERE " + string.Join(" OR ", terms);
+        }
+
         return type switch
         {
             DataSourceType.SQLServer or DataSourceType.PostgreSQL =>

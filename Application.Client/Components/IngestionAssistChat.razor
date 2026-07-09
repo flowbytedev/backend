@@ -1,0 +1,243 @@
+@using System.Net.Http.Json
+@using Application.Shared.Services.Data
+@inject HttpClient _httpClient
+
+    <div class="iac-dock">
+        <div class="iac-float @(_minimized ? "iac-hidden" : "")">
+            <div class="iac-float-head">
+                <span class="iac-float-title">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.9L19 9.8l-4.1 3.2L16 18l-4-3-4 3 1.1-5L5 9.8l5.1-1.9z"/></svg>
+                    AI Assist — new ingestion job
+                </span>
+                <div class="iac-float-actions">
+                    <button class="btn-icon" title="New conversation" @onclick="Reset">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>
+                    </button>
+                    <button class="btn-icon" title="Minimize" @onclick="Minimize">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="iac-float-body">
+                <div class="iac-chat">
+                    <div class="iac-messages">
+                        @if (_messages.Count == 0)
+                        {
+                            <div class="iac-empty">
+                                <p class="iac-empty-title">Try describing it in plain English</p>
+                                <p class="iac-empty-sub">e.g. “Pull the sales.orders table from the ERP database every night at 2am, only new rows since last run”.</p>
+                            </div>
+                        }
+                        @foreach (var m in _messages)
+                        {
+                            <div class="iac-msg @(m.IsUser ? "iac-user" : "iac-assistant")">@m.Text</div>
+                        }
+                        @if (_sending)
+                        {
+                            <div class="iac-msg iac-assistant iac-thinking"><span class="ds-spinner"></span> Thinking…</div>
+                        }
+                    </div>
+                    <div class="iac-input">
+                        <textarea class="ds-input" rows="2" placeholder="Describe the data to ingest…"
+                                  @bind="_draftText" @bind:event="oninput" @onkeydown="OnKeyDown" disabled="@_sending"></textarea>
+                        <button class="btn btn-default" @onclick="Send" disabled="@(_sending || string.IsNullOrWhiteSpace(_draftText))">Send</button>
+                    </div>
+                </div>
+
+                <div class="iac-preview">
+                    <div class="iac-preview-head">Draft</div>
+                    @if (_draft is null)
+                    {
+                        <p class="iac-preview-empty">No draft yet — send a message to get started.</p>
+                    }
+                    else
+                    {
+                        <dl class="iac-fields">
+                            <dt>Name</dt><dd>@Show(_draft.Name)</dd>
+                            <dt>Target table</dt><dd>@Show(_draft.TargetTable)</dd>
+                            <dt>Source kind</dt><dd>@Show(_draft.SourceKind)</dd>
+                            <dt>Source DB id</dt><dd>@Show(_draft.SourceEntityId)</dd>
+                            @if (!string.IsNullOrWhiteSpace(_draft.Config?.Query))
+                            {
+                                <dt>Query</dt><dd class="iac-mono">@_draft.Config!.Query</dd>
+                            }
+                            else
+                            {
+                                <dt>Source table</dt><dd>@Show(Join(_draft.Config?.Schema, _draft.Config?.Table))</dd>
+                            }
+                            <dt>Import mode</dt><dd>@Show(_draft.ImportMode)</dd>
+                            @if (_draft.KeyColumns is { Count: > 0 })
+                            {
+                                <dt>Key columns</dt><dd>@string.Join(", ", _draft.KeyColumns)</dd>
+                            }
+                            <dt>Incremental</dt><dd>@Show(_draft.IncrementalColumn)</dd>
+                            <dt>Schedule</dt><dd>@Show(_draft.CronExpression) @(string.IsNullOrWhiteSpace(_draft.TimeZone) ? "" : $"({_draft.TimeZone})")</dd>
+                        </dl>
+
+                        @if (_missingInfo.Count > 0)
+                        {
+                            <div class="iac-missing">
+                                <div class="iac-missing-head">Before saving</div>
+                                <ul>@foreach (var mi in _missingInfo){ <li>@mi</li> }</ul>
+                            </div>
+                        }
+
+                        <button class="btn btn-primary iac-use" @onclick="Use" disabled="@_sending">Use this config →</button>
+                        <p class="iac-use-hint">Loads these values into the create form. You review everything and enter the password before saving.</p>
+                    }
+                </div>
+            </div>
+        </div>
+
+        @if (_minimized)
+        {
+            <button class="iac-fab" title="AI Assist" @onclick="Expand">
+                <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.9L19 9.8l-4.1 3.2L16 18l-4-3-4 3 1.1-5L5 9.8l5.1-1.9z"/></svg>
+            </button>
+        }
+    </div>
+
+@code {
+    [Parameter] public string DatasetId { get; set; } = string.Empty;
+    [Parameter] public EventCallback<IngestionDraft> OnUseConfig { get; set; }
+
+    private readonly List<ChatLine> _messages = new();
+    private readonly List<IngestionChatTurn> _history = new();
+    private List<string> _missingInfo = new();
+    private string _draftText = string.Empty;
+    private bool _sending;
+    // Starts minimized — a corner FAB, like the AI Dashboard Builder's chat — rather than popping open.
+    private bool _minimized = true;
+    private IngestionDraft? _draft;
+    private string? _lastDatasetId;
+
+    private record ChatLine(string Text, bool IsUser);
+
+    // Switching datasets means a different schema/tables to ground on — start the conversation over so
+    // it doesn't mix context from the previous dataset.
+    protected override void OnParametersSet()
+    {
+        if (_lastDatasetId != null && _lastDatasetId != DatasetId)
+            Reset();
+        _lastDatasetId = DatasetId;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !e.ShiftKey) await Send();
+    }
+
+    private async Task Send()
+    {
+        var message = _draftText?.Trim();
+        if (string.IsNullOrWhiteSpace(message) || _sending) return;
+
+        _messages.Add(new ChatLine(message, true));
+        _draftText = string.Empty;
+        _sending = true;
+        StateHasChanged();
+
+        try
+        {
+            var body = new IngestionAgentRequest
+            {
+                Message = message,
+                Conversation = new List<IngestionChatTurn>(_history),
+                CurrentDraft = _draft,
+            };
+            var response = await _httpClient.PostAsJsonAsync($"api/datasets/{DatasetId}/ingestion/ai-assist", body);
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<IngestionAgentResult>();
+                if (result != null)
+                {
+                    var reply = string.IsNullOrWhiteSpace(result.Reply) ? "Done." : result.Reply;
+                    _messages.Add(new ChatLine(reply, false));
+                    _history.Add(new IngestionChatTurn { Role = "user", Content = message });
+                    _history.Add(new IngestionChatTurn { Role = "assistant", Content = reply });
+                    if (result.Draft != null) _draft = result.Draft;
+                    _missingInfo = result.MissingInfo ?? new();
+                }
+            }
+            else
+            {
+                _messages.Add(new ChatLine($"Sorry — that request failed ({(int)response.StatusCode}).", false));
+            }
+        }
+        catch (Exception ex)
+        {
+            _messages.Add(new ChatLine($"Error: {ex.Message}", false));
+        }
+        finally
+        {
+            _sending = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Use()
+    {
+        if (_draft == null) return;
+        await OnUseConfig.InvokeAsync(_draft);
+        // The draft now lives in the create form — collapse back to the corner FAB so it doesn't sit
+        // over the form the user is about to fill in.
+        Minimize();
+    }
+
+    private void Minimize() { _minimized = true; StateHasChanged(); }
+    private void Expand() { _minimized = false; StateHasChanged(); }
+
+    private void Reset()
+    {
+        _messages.Clear();
+        _history.Clear();
+        _missingInfo = new();
+        _draft = null;
+        _draftText = string.Empty;
+        StateHasChanged();
+    }
+
+    private static string Show(string? v) => string.IsNullOrWhiteSpace(v) ? "—" : v;
+    private static string? Join(string? schema, string? table)
+        => string.IsNullOrWhiteSpace(table) ? null : (string.IsNullOrWhiteSpace(schema) ? table : $"{schema}.{table}");
+}
+
+<style>
+    .iac-dock { position:fixed; right:24px; bottom:24px; z-index:900; }
+    .iac-fab { width:56px; height:56px; border-radius:50%; background:#18181b; color:#fff; border:none;
+        box-shadow:0 6px 20px rgba(0,0,0,0.28); cursor:pointer; display:flex; align-items:center; justify-content:center; }
+    .iac-fab:hover { background:#27272a; }
+    .iac-float { display:flex; flex-direction:column; overflow:hidden;
+        width:min(760px, calc(100vw - 32px)); height:min(600px, calc(100vh - 140px));
+        background:#fff; border:1px solid #e4e4e7; border-radius:12px; box-shadow:0 12px 40px rgba(0,0,0,0.22); }
+    .iac-float.iac-hidden { display:none; }
+    .iac-float-head { display:flex; align-items:center; justify-content:space-between; gap:0.5rem;
+        padding:0.6rem 0.85rem; border-bottom:1px solid #e4e4e7; background:#fafafa; }
+    .iac-float-title { display:flex; align-items:center; gap:0.4rem; font-size:0.9rem; font-weight:600; color:#18181b; }
+    .iac-float-actions { display:flex; align-items:center; gap:0.15rem; flex-shrink:0; }
+    .iac-float-body { flex:1; display:grid; grid-template-columns: 1fr 320px; min-height:0; }
+    .iac-chat { display:flex; flex-direction:column; min-height:0; border-right:1px solid #e4e4e7; }
+    .iac-messages { flex:1; overflow-y:auto; padding:0.85rem; display:flex; flex-direction:column; gap:0.5rem; }
+    .iac-empty { color:#71717a; text-align:center; margin:auto 0; }
+    .iac-empty-title { font-size:0.9rem; font-weight:600; color:#3f3f46; margin:0 0 0.25rem; }
+    .iac-empty-sub { font-size:0.8125rem; margin:0; }
+    .iac-msg { padding:0.5rem 0.7rem; border-radius:10px; font-size:0.8125rem; line-height:1.45; max-width:92%; white-space:pre-wrap; }
+    .iac-user { align-self:flex-end; background:#18181b; color:#fff; border-bottom-right-radius:3px; }
+    .iac-assistant { align-self:flex-start; background:#f4f4f5; color:#27272a; border-bottom-left-radius:3px; }
+    .iac-thinking { display:flex; align-items:center; gap:0.4rem; color:#71717a; }
+    .iac-input { border-top:1px solid #e4e4e7; padding:0.6rem; display:flex; gap:0.5rem; align-items:flex-end; }
+    .iac-input .ds-input { flex:1; resize:none; }
+    .iac-preview { padding:0.85rem 1rem; overflow-y:auto; background:#fafafa; display:flex; flex-direction:column; }
+    .iac-preview-head { font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#71717a; margin-bottom:0.6rem; }
+    .iac-preview-empty { font-size:0.8125rem; color:#a1a1aa; }
+    .iac-fields { display:grid; grid-template-columns:auto 1fr; gap:0.3rem 0.6rem; margin:0; font-size:0.8125rem; }
+    .iac-fields dt { color:#71717a; }
+    .iac-fields dd { margin:0; color:#27272a; word-break:break-word; }
+    .iac-mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:0.75rem; white-space:pre-wrap; }
+    .iac-missing { margin-top:0.75rem; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:0.5rem 0.7rem; }
+    .iac-missing-head { font-size:0.75rem; font-weight:700; color:#92400e; margin-bottom:0.25rem; }
+    .iac-missing ul { margin:0; padding-left:1.1rem; font-size:0.8125rem; color:#78350f; }
+    .iac-use { margin-top:0.9rem; }
+    .iac-use-hint { font-size:0.75rem; color:#a1a1aa; margin:0.4rem 0 0; }
+</style>

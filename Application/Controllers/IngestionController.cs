@@ -26,13 +26,15 @@ public class IngestionController : ControllerBase
 {
     private readonly IIngestionService _ingestionService;
     private readonly IDatasetService _datasetService;
+    private readonly IIngestionAgentService _agent;
     private readonly IServiceProvider _serviceProvider;
     private readonly IConfiguration _configuration;
 
-    public IngestionController(IIngestionService ingestionService, IDatasetService datasetService, IServiceProvider serviceProvider, IConfiguration configuration)
+    public IngestionController(IIngestionService ingestionService, IDatasetService datasetService, IIngestionAgentService agent, IServiceProvider serviceProvider, IConfiguration configuration)
     {
         _ingestionService = ingestionService;
         _datasetService = datasetService;
+        _agent = agent;
         _serviceProvider = serviceProvider;
         _configuration = configuration;
     }
@@ -116,6 +118,25 @@ public class IngestionController : ControllerBase
         return await _ingestionService.DeleteAsync(companyId, id, HttpContext.RequestAborted)
             ? NoContent()
             : NotFound();
+    }
+
+    // POST: api/datasets/{datasetId}/ingestion/ai-assist  — conversational drafting of an ingestion
+    // source config. Plans ONLY (never persists); the user reviews the returned draft in the create
+    // form and saves via POST above. EDIT_DATA, since it feeds a create flow.
+    [HttpPost("ai-assist")]
+    public async Task<ActionResult<IngestionAgentResult>> AiAssist(string datasetId, [FromBody] IngestionAgentRequest request)
+    {
+        var (companyId, userId, error) = ReadHeaders();
+        if (error != null) return BadRequest(error);
+        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (request == null || string.IsNullOrWhiteSpace(request.Message)) return BadRequest("Message is required");
+        if (!await DatasetAccessible(datasetId, userId)) return NotFound($"Dataset '{datasetId}' not found.");
+
+        // Trust the route/header for scope, never the client body.
+        request.DatasetId = datasetId;
+        request.CompanyId = companyId;
+
+        return Ok(await _agent.PlanAsync(request, HttpContext.RequestAborted));
     }
 
     // GET: api/datasets/{datasetId}/ingestion/{id}/runs

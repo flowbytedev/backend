@@ -103,6 +103,9 @@ namespace Application.Shared.Data
         public DbSet<AiDashboard> AiDashboard { get; set; }
         public DbSet<AiDashboardWidget> AiDashboardWidget { get; set; }
 
+        // Semantic layer: AI-generated + human-edited per-column documentation for dataset tables.
+        public DbSet<DatasetColumnDoc> DatasetColumnDoc { get; set; }
+
         // METRICS
         public DbSet<Metric> Metrics { get; set; }
 

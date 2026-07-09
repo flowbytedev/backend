@@ -1,0 +1,314 @@
+@page "/data/docs"
+@using System.Net.Http.Json
+@using Application.Shared.Models
+@using Application.Shared.Models.Data
+@inject HttpClient _httpClient
+@inject IToastService _toastService
+@inject AuthenticationStateProvider _authenticationStateProvider
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize(Policy = PolicyNames.DatasetsAccess)]
+
+<PageTitle>Data Documentation</PageTitle>
+
+@if (!canView && !isLoading)
+{
+    <div class="flex flex-col items-center justify-center h-64 text-gray-500 gap-2">
+        <p class="text-sm font-semibold text-gray-700">Access Denied</p>
+        <p class="text-xs text-gray-400">You don't have permission to view dataset documentation.</p>
+    </div>
+}
+else
+{
+<div class="dd-page">
+    <div class="dd-header">
+        <div>
+            <h1 class="dd-title">Data Documentation</h1>
+            <p class="dd-subtitle">Describe your columns — what each one means, its type/unit, and whether it holds personal data. Generate a first draft with AI, then edit.</p>
+        </div>
+        @if (canEdit && !string.IsNullOrEmpty(selectedTable))
+        {
+            <div class="dd-actions">
+                <button class="btn btn-secondary" @onclick="Generate" disabled="@(generating || saving)">
+                    @if (generating)
+                    {
+                        <span class="ds-spinner"></span> <span>Generating…</span>
+                    }
+                    else
+                    {
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.9 4.9L19 9.8l-4.1 3.2L16 18l-4-3-4 3 1.1-5L5 9.8l5.1-1.9z"/></svg>
+                        <span>Generate with AI</span>
+                    }
+                </button>
+                <button class="btn btn-primary" @onclick="Save" disabled="@(saving || generating)">
+                    @if (saving) { <span class="ds-spinner"></span> <span>Saving…</span> } else { <span>Save</span> }
+                </button>
+            </div>
+        }
+    </div>
+
+    <div class="dd-pickers">
+        <label class="dd-field">
+            <span class="dd-label">Dataset</span>
+            <select class="ds-input" value="@selectedDatasetId" @onchange="OnDatasetChanged">
+                <option value="">Select a dataset…</option>
+                @foreach (var d in datasets)
+                {
+                    <option value="@d.Id">@d.Name</option>
+                }
+            </select>
+        </label>
+        <label class="dd-field">
+            <span class="dd-label">Table</span>
+            <select class="ds-input" value="@selectedTable" @onchange="OnTableChanged" disabled="@(string.IsNullOrEmpty(selectedDatasetId))">
+                <option value="">Select a table…</option>
+                @foreach (var t in tables)
+                {
+                    <option value="@t">@t</option>
+                }
+            </select>
+        </label>
+    </div>
+
+    @if (loadingDocs)
+    {
+        <div class="dd-loading"><span class="ds-spinner"></span> Loading columns…</div>
+    }
+    else if (doc != null && doc.Columns.Count > 0)
+    {
+        <div class="dd-table-wrap">
+            <table class="dd-table">
+                <thead>
+                    <tr>
+                        <th>Column</th>
+                        <th>Type</th>
+                        <th>Display name</th>
+                        <th>Description</th>
+                        <th>Semantic type</th>
+                        <th>Unit</th>
+                        <th class="dd-pii">PII</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var col in doc.Columns)
+                    {
+                        <tr>
+                            <td class="dd-colname">
+                                @col.ColumnName
+                                @if (col.IsAiGenerated) { <span class="dd-badge" title="AI-generated — review and edit">AI</span> }
+                            </td>
+                            <td class="dd-type">@col.DataType</td>
+                            <td><input class="ds-input dd-in" @bind="col.DisplayName" disabled="@(!canEdit)" /></td>
+                            <td><input class="ds-input dd-in" @bind="col.Description" disabled="@(!canEdit)" /></td>
+                            <td><input class="ds-input dd-in dd-narrow" @bind="col.SemanticType" disabled="@(!canEdit)" /></td>
+                            <td><input class="ds-input dd-in dd-narrow" @bind="col.Unit" disabled="@(!canEdit)" /></td>
+                            <td class="dd-pii">
+                                <input type="checkbox" @bind="col.IsPii" disabled="@(!canEdit)" />
+                                @if (col.IsPii)
+                                {
+                                    <input class="ds-input dd-in dd-narrow" placeholder="type" @bind="col.PiiType" disabled="@(!canEdit)" />
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(selectedTable))
+    {
+        <div class="dd-empty">This table has no columns to document.</div>
+    }
+    else
+    {
+        <div class="dd-empty">Pick a dataset and table to view and document its columns.</div>
+    }
+</div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "c")]
+    public string? c { get; set; }
+
+    // Optional deep-link from the Tables page: preselect dataset + table and load docs immediately.
+    [SupplyParameterFromQuery(Name = "d")]
+    public string? d { get; set; }
+
+    [SupplyParameterFromQuery(Name = "t")]
+    public string? t { get; set; }
+
+    private string? companyId;
+    private bool isLoading = true;
+    private bool canView, canEdit;
+
+    private List<Dataset> datasets = new();
+    private List<string> tables = new();
+    private string selectedDatasetId = string.Empty;
+    private string selectedTable = string.Empty;
+
+    private TableDocDto? doc;
+    private bool loadingDocs, generating, saving;
+
+    protected override async Task OnInitializedAsync()
+    {
+        companyId = c;
+        if (string.IsNullOrEmpty(companyId))
+        {
+            _toastService.ShowWarning("Company ID is required");
+            isLoading = false;
+            return;
+        }
+
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        canView = authState.User.HasCompanyRole(companyId, "VIEW_DATA");
+        canEdit = authState.User.HasCompanyRole(companyId, "EDIT_DATA");
+        if (!canView) { isLoading = false; return; }
+
+        _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+        _httpClient.DefaultRequestHeaders.Add("X-Company-Id", companyId);
+        var userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrEmpty(userId))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("UserId");
+            _httpClient.DefaultRequestHeaders.Add("UserId", userId);
+        }
+
+        try { datasets = await _httpClient.GetFromJsonAsync<List<Dataset>>("api/datasets") ?? new(); }
+        catch { datasets = new(); }
+        isLoading = false;
+
+        // Deep link from the Tables page: preselect the dataset + table and load docs right away.
+        if (!string.IsNullOrEmpty(d) && datasets.Any(ds => ds.Id == d))
+        {
+            selectedDatasetId = d;
+            try { tables = await _httpClient.GetFromJsonAsync<List<string>>($"api/datasets/{selectedDatasetId}/tables") ?? new(); }
+            catch { tables = new(); }
+
+            if (!string.IsNullOrEmpty(t) && tables.Contains(t))
+            {
+                selectedTable = t;
+                await LoadDocs();
+            }
+        }
+    }
+
+    private async Task OnDatasetChanged(ChangeEventArgs e)
+    {
+        selectedDatasetId = e.Value?.ToString() ?? string.Empty;
+        selectedTable = string.Empty;
+        tables = new();
+        doc = null;
+        if (string.IsNullOrEmpty(selectedDatasetId)) return;
+
+        try { tables = await _httpClient.GetFromJsonAsync<List<string>>($"api/datasets/{selectedDatasetId}/tables") ?? new(); }
+        catch { tables = new(); }
+    }
+
+    private async Task OnTableChanged(ChangeEventArgs e)
+    {
+        selectedTable = e.Value?.ToString() ?? string.Empty;
+        doc = null;
+        if (string.IsNullOrEmpty(selectedTable)) return;
+        await LoadDocs();
+    }
+
+    private async Task LoadDocs()
+    {
+        loadingDocs = true;
+        StateHasChanged();
+        try
+        {
+            doc = await _httpClient.GetFromJsonAsync<TableDocDto>($"api/datasets/{selectedDatasetId}/tables/{Uri.EscapeDataString(selectedTable)}/docs");
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Failed to load columns: {ex.Message}");
+            doc = null;
+        }
+        finally { loadingDocs = false; StateHasChanged(); }
+    }
+
+    private async Task Generate()
+    {
+        if (string.IsNullOrEmpty(selectedTable)) return;
+        generating = true;
+        StateHasChanged();
+        try
+        {
+            var response = await _httpClient.PostAsync($"api/datasets/{selectedDatasetId}/tables/{Uri.EscapeDataString(selectedTable)}/docs/generate", null);
+            if (response.IsSuccessStatusCode)
+            {
+                doc = await response.Content.ReadFromJsonAsync<TableDocDto>();
+                _toastService.ShowSuccess("AI documentation generated — review and save.");
+            }
+            else
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _toastService.ShowError($"Generation failed ({(int)response.StatusCode}): {body}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Generation error: {ex.Message}");
+        }
+        finally { generating = false; StateHasChanged(); }
+    }
+
+    private async Task Save()
+    {
+        if (doc == null) return;
+        saving = true;
+        StateHasChanged();
+        try
+        {
+            var edits = doc.Columns.Select(c => new SaveColumnDocRequest
+            {
+                ColumnName = c.ColumnName,
+                DisplayName = c.DisplayName,
+                Description = c.Description,
+                SemanticType = c.SemanticType,
+                Unit = c.Unit,
+                IsPii = c.IsPii,
+                PiiType = c.PiiType,
+            }).ToList();
+
+            var response = await _httpClient.PutAsJsonAsync($"api/datasets/{selectedDatasetId}/tables/{Uri.EscapeDataString(selectedTable)}/docs", edits);
+            if (response.IsSuccessStatusCode)
+            {
+                doc = await response.Content.ReadFromJsonAsync<TableDocDto>();
+                _toastService.ShowSuccess("Documentation saved.");
+            }
+            else
+            {
+                _toastService.ShowError($"Save failed ({(int)response.StatusCode}).");
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Save error: {ex.Message}");
+        }
+        finally { saving = false; StateHasChanged(); }
+    }
+}
+
+<style>
+    .dd-page { padding: 1.25rem 1.5rem; }
+    .dd-header { display:flex; align-items:flex-start; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+    .dd-title { margin:0; font-size:1.25rem; font-weight:700; color:#18181b; }
+    .dd-subtitle { margin:0.2rem 0 0; font-size:0.85rem; color:#71717a; max-width:60ch; }
+    .dd-actions { display:flex; gap:0.5rem; flex-shrink:0; }
+    .dd-pickers { display:flex; gap:1rem; margin-bottom:1rem; flex-wrap:wrap; }
+    .dd-field { display:flex; flex-direction:column; gap:0.25rem; min-width:240px; }
+    .dd-label { font-size:0.75rem; font-weight:600; color:#52525b; }
+    .dd-loading, .dd-empty { padding:2rem; text-align:center; color:#71717a; font-size:0.875rem; }
+    .dd-table-wrap { overflow:auto; border:1px solid #e4e4e7; border-radius:10px; }
+    .dd-table { width:100%; border-collapse:collapse; font-size:0.8125rem; }
+    .dd-table thead th { text-align:left; padding:0.55rem 0.6rem; background:#fafafa; border-bottom:1px solid #e4e4e7; font-weight:600; color:#52525b; white-space:nowrap; }
+    .dd-table tbody td { padding:0.35rem 0.6rem; border-bottom:1px solid #f4f4f5; vertical-align:top; }
+    .dd-colname { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-weight:600; color:#27272a; white-space:nowrap; }
+    .dd-type { color:#71717a; white-space:nowrap; }
+    .dd-badge { display:inline-block; margin-left:0.35rem; font-size:0.65rem; font-weight:700; color:#3730a3; background:#e0e7ff; border-radius:4px; padding:0.05rem 0.3rem; vertical-align:middle; }
+    .dd-in { width:100%; min-width:120px; }
+    .dd-narrow { min-width:90px; }
+    .dd-pii { white-space:nowrap; }
+    .dd-pii input[type=checkbox] { margin-right:0.35rem; }
+</style>
