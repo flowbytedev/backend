@@ -1,4 +1,5 @@
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@using Application.Shared.Models.Notebooks
 @implements IAsyncDisposable
 @inject NavigationManager _navigation
 @inject StateContainer _stateContainer
@@ -427,6 +428,7 @@
         "dataset" or "datasets" => "Dataset",
         "entity" or "entities" => "Entity",
         "incident" or "incidents" => "Incident",
+        "notebook" or "notebooks" => "Notebook",
         _ => null
     };
 
@@ -488,6 +490,7 @@
                 "Incident" => (await _incidentService.GetIncidentsAsync(company)).Select(i => new ResourceItem(
                     "Incident", i.Id, string.IsNullOrWhiteSpace(i.Title) ? "(untitled incident)" : i.Title,
                     $"{i.Severity} · {i.Status}", "rose")).ToList(),
+                "Notebook" => await LoadNotebooks(company),
                 _ => new List<ResourceItem>()
             };
             kindCache[kind] = items;
@@ -520,6 +523,23 @@
             d.Description ?? "", "blue")).ToList();
     }
 
+    private async Task<List<ResourceItem>> LoadNotebooks(string company)
+    {
+        _http.DefaultRequestHeaders.Remove("X-Company-Id");
+        _http.DefaultRequestHeaders.Add("X-Company-Id", company);
+        var userId = user?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrEmpty(userId))
+        {
+            _http.DefaultRequestHeaders.Remove("UserId");
+            _http.DefaultRequestHeaders.Add("UserId", userId);
+        }
+        var notebooks = await _http.GetFromJsonAsync<List<QueryNotebookDto>>("api/query-notebooks") ?? new();
+        return notebooks.Select(nb => new ResourceItem(
+            "Notebook", nb.Id, string.IsNullOrWhiteSpace(nb.Name) ? "(untitled notebook)" : nb.Name,
+            $"{nb.CellCount} cell{(nb.CellCount == 1 ? "" : "s")}" + (string.IsNullOrWhiteSpace(nb.Description) ? "" : $" · {nb.Description}"),
+            "blue")).ToList();
+    }
+
     private void NavigateResource(ResourceItem item)
     {
         open = false;
@@ -530,6 +550,7 @@
             "Dataset" => $"data/tables?c={CompanyId}&d={item.Id}",
             "Entity" => $"status/entities/{item.Id}{CompanyQuery}",
             "Incident" => $"status/incidents/{item.Id}{CompanyQuery}",
+            "Notebook" => $"data/notebook?c={CompanyId}&n={item.Id}",
             _ => "/"
         };
         _navigation.NavigateTo(href);
@@ -540,6 +561,7 @@
         "Dataset" => HasAnyRole(new[] { "VIEW_DATA" }),
         "Entity" => HasAnyRole(new[] { "STATUS_READ", "INCIDENTS" }),
         "Incident" => HasAnyRole(new[] { "STATUS_READ", "INCIDENTS" }),
+        "Notebook" => HasAnyRole(new[] { "VIEW_DATA" }),
         _ => false
     };
 
@@ -594,6 +616,7 @@
         new("Dataset", "datasets", "Datasets", "Browse and open a dataset", "blue"),
         new("Entity", "entities", "Entities", "Open a monitored asset", "violet"),
         new("Incident", "incidents", "Incidents", "Open a reported incident", "rose"),
+        new("Notebook", "notebooks", "Notebooks", "Open a query notebook", "blue"),
     };
 
     private static string KindLabel(string kind) => kind switch
@@ -601,6 +624,7 @@
         "Dataset" => "Datasets",
         "Entity" => "Entities",
         "Incident" => "Incidents",
+        "Notebook" => "Notebooks",
         _ => kind
     };
 
@@ -613,6 +637,7 @@
         new("Create Dataset", "data/datasets/create", "Define a new dataset", "Data", "blue", new[] { "EDIT_DATA" }),
         new("Import Data", "data/import", "Upload files and import data", "Data", "blue", new[] { "EDIT_DATA" }),
         new("Query Workbench", "data/query", "Run ad-hoc SQL queries", "Data", "blue", new[] { "VIEW_DATA" }),
+        new("Query Notebooks", "data/notebook", "Chain SQL cells and materialize results", "Data", "blue", new[] { "VIEW_DATA" }),
         new("View Data", "data/view", "Inspect stored data and tables", "Data", "blue", new[] { "VIEW_DATA" }),
         new("Tables", "data/tables", "Manage database tables", "Data", "blue", new[] { "VIEW_DATA" }),
         new("Ingestion Sources", "data/ingestion", "Configure data ingestion pipelines", "Data", "blue", new[] { "EDIT_DATA" }),
@@ -654,6 +679,7 @@
         "Dataset" => "<svg fill='none' stroke='currentColor' stroke-width='2' viewBox='0 0 24 24'><ellipse cx='12' cy='5' rx='9' ry='3'/><path d='M21 12c0 1.66-4 3-9 3s-9-1.34-9-3'/><path d='M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5'/></svg>",
         "Entity" => "<svg fill='none' stroke='currentColor' stroke-width='2' viewBox='0 0 24 24'><rect x='2' y='2' width='9' height='9'/><rect x='13' y='2' width='9' height='9'/><rect x='13' y='13' width='9' height='9'/><rect x='2' y='13' width='9' height='9'/></svg>",
         "Incident" => "<svg fill='none' stroke='currentColor' stroke-width='2' viewBox='0 0 24 24'><path d='M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z'/><line x1='12' y1='9' x2='12' y2='13'/><line x1='12' y1='17' x2='12.01' y2='17'/></svg>",
+        "Notebook" => "<svg fill='none' stroke='currentColor' stroke-width='2' viewBox='0 0 24 24'><path d='M4 19.5A2.5 2.5 0 0 1 6.5 17H20'/><path d='M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z'/><line x1='9' y1='7' x2='15' y2='7'/><line x1='9' y1='11' x2='15' y2='11'/></svg>",
         _ => "<svg fill='none' stroke='currentColor' stroke-width='2' viewBox='0 0 24 24'><circle cx='12' cy='12' r='9'/></svg>",
     };
 }
