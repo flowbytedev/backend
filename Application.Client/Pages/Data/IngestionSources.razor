@@ -143,6 +143,7 @@ else
                         <option value="Rest">REST API</option>
                         <option value="Blob">Azure Blob</option>
                         <option value="Sftp">SFTP</option>
+                        <option value="SqlQuery">SQL Query (this dataset)</option>
                     </select>
                 </div>
                 <div class="ds-field" style="margin-bottom:0">
@@ -228,8 +229,16 @@ else
                     </div>
                     <div class="ds-field" style="margin-top:0.5rem;margin-bottom:0"><label class="ds-label">File format</label>@FileFormatSelect()</div>
                 }
+                else if (form.SourceKind == "SqlQuery")
+                {
+                    <div class="ds-field" style="margin-bottom:0">
+                        <label class="ds-label">SQL query</label>
+                        <textarea class="ds-input" rows="4" @bind="config.Query" placeholder="SELECT * FROM some_other_table"></textarea>
+                        <span class="ds-hint">Re-runs this query against this dataset's own tables on the schedule below and refreshes the target table. No external connection involved.</span>
+                    </div>
+                }
 
-                @if (form.SourceKind != "ExternalDatabase")
+                @if (form.SourceKind != "ExternalDatabase" && form.SourceKind != "SqlQuery")
                 {
                     <div class="ds-field" style="margin-top:0.5rem;margin-bottom:0">
                         <label class="ds-label">
@@ -912,6 +921,7 @@ else
         "Rest" => "REST API",
         "Blob" => "Blob",
         "Sftp" => "SFTP",
+        "SqlQuery" => "SQL Query",
         _ => kind
     };
 

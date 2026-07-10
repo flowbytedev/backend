@@ -9,7 +9,11 @@ public enum IngestionSourceKind
     ExternalDatabase,
     Rest,
     Blob,
-    Sftp
+    Sftp,
+    // Re-runs a SELECT against the dataset's own DuckDB tables on a schedule (e.g. a Query Notebook
+    // cell's query), refreshing a target table in place. No fetch/temp file — see
+    // IDuckdbService.RunQueryIntoTableAsync.
+    SqlQuery
 }
 
 /// <summary>

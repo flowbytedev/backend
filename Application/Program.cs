@@ -224,6 +224,7 @@ builder.Services.AddScoped<IDuckdbService, DuckdbService>();
 builder.Services.AddScoped<ICommentService, CommentService>();
 builder.Services.AddScoped<IUserPreferencesService, UserPreferencesService>();
 builder.Services.AddScoped<IUserSearchService, UserSearchService>();
+builder.Services.AddScoped<Application.Shared.Services.IWhatsNewService, Application.Shared.Services.WhatsNewService>();
 
 // Conversational dashboard builder (AI): dashboard/widget CRUD + the planner agent.
 builder.Services.AddScoped<Application.Shared.Services.Data.IAiDashboardService, Application.Shared.Services.Data.AiDashboardService>();
@@ -316,6 +317,19 @@ builder.Services.AddHttpClient(Application.Services.Data.CommentMentionNotificat
     client.BaseAddress = new Uri(opts.ApiBaseUri);
     client.Timeout = TimeSpan.FromSeconds(60);
 });
+
+// Table-moved notification emails (same Resend microservice).
+builder.Services.Configure<Application.Shared.Options.TableMovedEmailOptions>(
+    builder.Configuration.GetSection("TableMovedEmail"));
+builder.Services.AddScoped<Application.Shared.Services.Data.ITableMovedNotificationService, Application.Services.Data.TableMovedNotificationService>();
+builder.Services.AddHttpClient(Application.Services.Data.TableMovedNotificationService.HttpClientName, (sp, client) =>
+{
+    var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Application.Shared.Options.TableMovedEmailOptions>>().Value;
+    if (string.IsNullOrWhiteSpace(opts.ApiBaseUri)) return;
+    client.BaseAddress = new Uri(opts.ApiBaseUri);
+    client.Timeout = TimeSpan.FromSeconds(60);
+});
+builder.Services.AddScoped<Application.Shared.Services.Data.IDatasetTableMoveService, Application.Shared.Services.Data.DatasetTableMoveService>();
 
 // Server Management (credentials + remote service start/stop)
 // Keys must persist OUTSIDE the app folder so redeploys don't wipe them — losing the key ring

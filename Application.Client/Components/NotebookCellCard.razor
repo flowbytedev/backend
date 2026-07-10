@@ -3,9 +3,11 @@
 @using System.Text.RegularExpressions
 @using Application.Shared.Enums
 @using Application.Shared.Models
+@using Application.Shared.Models.Data
 @using Application.Shared.Models.Notebooks
 @inject HttpClient _httpClient
 @inject IToastService _toastService
+@inject NavigationManager _navigationManager
 
 <div class="nc-card">
     <div class="nc-head">
@@ -147,6 +149,22 @@
                 {
                     <div class="nc-status">
                         <span>@_result.RowsReturned row@(_result.RowsReturned == 1 ? "" : "s")@(_result.Truncated ? " (truncated)" : "") · @_result.ElapsedMs ms</span>
+                        @if (!string.IsNullOrEmpty(_result.MaterializedObjectName))
+                        {
+                            <span style="display:flex;align-items:center;gap:0.25rem;flex-shrink:0">
+                                <button type="button" class="nc-open-table" @onclick="OpenTableView" title="Open this result as a table">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
+                                    Open in Table View
+                                </button>
+                                @if (!IsExternalDataset || _snapshotMode)
+                                {
+                                    <button type="button" class="nc-open-table" @onclick="OpenCreateIngestionJob" title="Schedule this query to keep refreshing the table">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                        Create Ingestion Job
+                                    </button>
+                                }
+                            </span>
+                        }
                     </div>
                     @if (_result.Rows.Count > 0)
                     {
@@ -266,9 +284,69 @@
     </div>
 }
 
+@if (_showCreateIngestion)
+{
+    <div class="ds-modal-backdrop" @onclick="() => _showCreateIngestion = false">
+        <div class="ds-modal" @onclick:stopPropagation="true">
+            <div class="ds-modal-header">
+                <h2 class="ds-modal-title">Create Ingestion Job</h2>
+                <button class="ds-modal-close" @onclick="() => _showCreateIngestion = false" aria-label="Close">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                </button>
+            </div>
+            <div class="ds-modal-body">
+                <div class="ds-field">
+                    <label class="ds-label">Target table</label>
+                    <input class="ds-input" value="@_ingestionTargetTable" disabled />
+                    <span class="ds-hint">This job keeps this cell's own materialized table refreshed on a schedule.</span>
+                </div>
+                <div class="ds-field">
+                    <label class="ds-label">Job name</label>
+                    <input class="ds-input" @bind="_ingestionName" />
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+                    <div class="ds-field" style="margin-bottom:0">
+                        <label class="ds-label">Mode</label>
+                        <select class="ds-select" @bind="_ingestionMode">
+                            <option value="Replace">Replace</option>
+                            <option value="Append">Append</option>
+                            <option value="Upsert">Upsert</option>
+                        </select>
+                    </div>
+                    <div class="ds-field" style="margin-bottom:0">
+                        <label class="ds-label">Schedule (cron)</label>
+                        <input class="ds-input" @bind="_ingestionCron" placeholder="0 * * * *" />
+                    </div>
+                </div>
+                @if (_ingestionMode == "Upsert")
+                {
+                    <div class="ds-field" style="margin-top:0.5rem">
+                        <label class="ds-label">Key column(s) <span style="color:#71717a;font-weight:400">(comma-separated)</span></label>
+                        <input class="ds-input" @bind="_ingestionKeyColumnsText" placeholder="id" />
+                    </div>
+                }
+                <label style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem;font-size:0.875rem;cursor:pointer">
+                    <input type="checkbox" class="ds-checkbox" @bind="_ingestionEnabled" /> Enabled (run on schedule)
+                </label>
+                <span class="ds-hint" style="display:block;margin-top:0.5rem">
+                    This job re-runs the cell's current query on its own — editing the cell's SQL later won't update it.
+                </span>
+                <div class="ds-modal-footer">
+                    <button type="button" class="btn btn-default" style="flex:1" @onclick="CreateIngestionJobSubmit" disabled="@_creatingIngestion">
+                        @if (_creatingIngestion) { <span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px"></span><span>Creating...</span> }
+                        else { <span>Create Job</span> }
+                    </button>
+                    <button type="button" class="btn btn-outline" style="flex:1" @onclick="() => _showCreateIngestion = false">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [Parameter] public NotebookCellDto Cell { get; set; } = new();
     [Parameter] public string NotebookId { get; set; } = string.Empty;
+    [Parameter] public string? CompanyId { get; set; }
     [Parameter] public List<Dataset> Datasets { get; set; } = new();
     [Parameter] public List<NotebookCellDto> AvailableReferences { get; set; } = new();
     [Parameter] public bool ShowDragHandle { get; set; }
@@ -304,6 +382,16 @@
 
     private NotebookCellRunResult? _result;
     private string? _runError;
+
+    // Create Ingestion Job dialog
+    private bool _showCreateIngestion;
+    private string _ingestionTargetTable = string.Empty;
+    private string _ingestionName = string.Empty;
+    private string _ingestionMode = "Replace";
+    private string _ingestionKeyColumnsText = string.Empty;
+    private string _ingestionCron = "0 * * * *";
+    private bool _ingestionEnabled = true;
+    private bool _creatingIngestion;
 
     private string _chartType = "bar";
     private string _chartX = string.Empty;
@@ -548,6 +636,86 @@
     private static string Display(Dictionary<string, object?> row, string col)
         => row.TryGetValue(col, out var v) && v != null ? v.ToString() ?? "" : "";
 
+    // The cell's result is a real DuckDB table once materialized — jump straight to the standard table
+    // view (same page ListTable's "View" action opens) instead of only browsing it inline here.
+    private void OpenTableView()
+    {
+        var table = _result?.MaterializedObjectName ?? Cell.LastMaterializedObject;
+        if (string.IsNullOrEmpty(_datasetId) || string.IsNullOrEmpty(table)) return;
+        _navigationManager.NavigateTo($"/data/view?c={CompanyId}&DatasetId={_datasetId}&TableName={Uri.EscapeDataString(table)}");
+    }
+
+    private void OpenCreateIngestionJob()
+    {
+        var table = _result?.MaterializedObjectName ?? Cell.LastMaterializedObject;
+        if (string.IsNullOrEmpty(table)) return;
+
+        _ingestionTargetTable = table;
+        _ingestionName = _name;
+        _ingestionMode = "Replace";
+        _ingestionKeyColumnsText = string.Empty;
+        _ingestionCron = "0 * * * *";
+        _ingestionEnabled = true;
+        _showCreateIngestion = true;
+    }
+
+    private async Task CreateIngestionJobSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(_ingestionName))
+        {
+            _toastService.ShowWarning("Give the job a name.");
+            return;
+        }
+        if (string.IsNullOrWhiteSpace(_datasetId) || string.IsNullOrEmpty(_ingestionTargetTable))
+        {
+            _toastService.ShowWarning("This cell hasn't materialized a table yet — run it first.");
+            return;
+        }
+
+        try
+        {
+            _creatingIngestion = true;
+            StateHasChanged();
+
+            var keyColumns = _ingestionKeyColumnsText
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+
+            var request = new SaveIngestionSourceRequest
+            {
+                Name = _ingestionName.Trim(),
+                TargetTable = _ingestionTargetTable,
+                SourceKind = "SqlQuery",
+                Config = new IngestionSourceConfig { Query = _sql },
+                ImportMode = _ingestionMode,
+                KeyColumns = keyColumns,
+                CreateIfNotExists = true,
+                CronExpression = string.IsNullOrWhiteSpace(_ingestionCron) ? "0 * * * *" : _ingestionCron,
+                IsEnabled = _ingestionEnabled
+            };
+
+            var response = await _httpClient.PostAsJsonAsync($"api/datasets/{_datasetId}/ingestion", request);
+            if (response.IsSuccessStatusCode)
+            {
+                _toastService.ShowSuccess($"Ingestion job '{_ingestionName}' created.");
+                _showCreateIngestion = false;
+            }
+            else
+            {
+                _toastService.ShowError($"Failed to create ingestion job: {await response.Content.ReadAsStringAsync()}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Error creating ingestion job: {ex.Message}");
+        }
+        finally
+        {
+            _creatingIngestion = false;
+            StateHasChanged();
+        }
+    }
+
     // Minimal, SAFE Markdown-subset renderer: HTML-encode the raw text FIRST, then layer a handful of
     // inline/block transforms on top of the already-escaped text — so no literal HTML the user types can
     // ever reach the page (matches CommentsSidebar's HtmlEncode-then-transform pattern). Supports #/##/###
@@ -680,7 +848,12 @@
     .nc-refs-label { color:#71717a; font-weight:600; }
     .nc-ref-chip { display:flex; align-items:center; gap:0.25rem; background:#f4f4f5; border-radius:9999px; padding:0.15rem 0.55rem; cursor:pointer; }
     .nc-hint { font-size:0.75rem; color:#a1a1aa; margin:0; }
-    .nc-status { font-size:0.75rem; color:#71717a; margin:0; }
+    .nc-status { display:flex; align-items:center; justify-content:space-between; gap:0.5rem; font-size:0.75rem; color:#71717a; margin:0; }
+    .nc-open-table {
+        display:flex; align-items:center; gap:0.3rem; flex-shrink:0; background:none; border:none;
+        color:#2563eb; font-size:0.75rem; font-weight:500; cursor:pointer; padding:0.15rem 0.4rem; border-radius:6px;
+    }
+    .nc-open-table:hover { background:#eff6ff; }
     .nc-err { background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; border-radius:6px; padding:0.5rem 0.65rem; font-size:0.8125rem; font-family:ui-monospace,Consolas,monospace; white-space:pre-wrap; }
     .nc-table-wrap { overflow:auto; max-height:320px; border:1px solid #f4f4f5; border-radius:6px; }
     .nc-table { width:100%; border-collapse:collapse; font-size:0.8125rem; }

@@ -379,19 +379,26 @@ public class DuckdbService : IDuckdbService
         {
             var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
 
-            // Query to get all tables from the database
-            var tablesQuery = @$"SELECT table_name, table_schema,
-                                FROM information_schema.tables 
+            // Escape embedded quotes — this table name comes straight from the request route.
+            var safeTableName = tableName.Replace("'", "''");
+
+            // Query for exactly the requested table — this previously had its table_name filter commented
+            // out (plus a stray trailing comma before FROM), so it always returned every table in the
+            // dataset and FirstOrDefault() silently picked the alphabetically-first one instead of the
+            // one actually requested.
+            var tablesQuery = @$"SELECT table_name, table_schema
+                                FROM information_schema.tables
                                 WHERE table_schema NOT IN ('information_schema')
-                                  AND table_catalog = '{datasetId}' -- name of the database (datasetId) 
-                                  --AND table_name = {tableName}
+                                  AND table_catalog = '{datasetId}' -- name of the database (datasetId)
+                                  AND table_name = '{safeTableName}'
                                 ORDER BY table_name;";
 
             var tables = await ExecuteQueryAsync(duckdbFilePath, tablesQuery, reader => new
             {
                 TableName = reader.GetString(0),
                 SchemaName = reader.GetString(1) // Assuming you want to include schema name as well
-            });            var table = tables.FirstOrDefault();
+            });
+            var table = tables.FirstOrDefault();
             
             if (table == null)
                 throw new InvalidOperationException($"Table '{tableName}' not found in dataset '{datasetId}'.");
@@ -441,7 +448,7 @@ public class DuckdbService : IDuckdbService
 
     public async Task<bool> DeleteTableAsync(string datasetId, string tableName)
     {
-        
+
         try
         {
 
@@ -460,6 +467,82 @@ public class DuckdbService : IDuckdbService
         {
             throw new InvalidOperationException($"Failed to delete table '{tableName}': {ex.Message}", ex);
         }
+    }
+
+    // Moves a table's data from one dataset's DuckDB file to another's, preserving column types exactly
+    // (a native DuckDB-to-DuckDB copy via ATTACH, not a CSV round-trip which would infer types from content).
+    public async Task<MoveTableResult> MoveTableAsync(string sourceDatasetId, string tableName, string targetDatasetId, CancellationToken ct = default)
+    {
+        var result = new MoveTableResult();
+        var sourceDbPath = $"{_option.DuckdbFilePath}/{sourceDatasetId}.duckdb";
+        var targetDbPath = $"{_option.DuckdbFilePath}/{targetDatasetId}.duckdb";
+
+        if (!File.Exists(sourceDbPath))
+        {
+            result.Error = "Source dataset database not found.";
+            return result;
+        }
+        if (!File.Exists(targetDbPath))
+        {
+            result.Error = "Destination dataset database not found.";
+            return result;
+        }
+
+        try
+        {
+            using var connection = new DuckDBConnection($"DataSource={sourceDbPath}");
+            await connection.OpenAsync(ct);
+
+            if (!await TableExistsAsync(connection, tableName, ct))
+            {
+                result.Error = $"Table \"{tableName}\" was not found in the source dataset.";
+                return result;
+            }
+
+            var attachedPath = targetDbPath.Replace("\\", "\\\\").Replace("'", "''");
+            await ExecAsync(connection, $"ATTACH '{attachedPath}' AS move_target", ct);
+
+            try
+            {
+                if (await TableExistsInCatalogAsync(connection, "move_target", tableName, ct))
+                {
+                    result.Error = $"A table named \"{tableName}\" already exists in the destination dataset.";
+                    return result;
+                }
+
+                // DuckDB can't hold a single transaction open across two attached databases ("a single
+                // transaction can only write to a single attached database"), so these run as separate
+                // autocommitted statements. Ordered CREATE-then-DROP so a failure between them leaves the
+                // table duplicated (recoverable), never lost.
+                await ExecAsync(connection, $"CREATE TABLE move_target.{Q(tableName)} AS SELECT * FROM {Q(tableName)}", ct);
+                await ExecAsync(connection, $"DROP TABLE {Q(tableName)}", ct);
+
+                result.Success = true;
+            }
+            finally
+            {
+                try { await ExecAsync(connection, "DETACH move_target", ct); } catch { /* best-effort cleanup */ }
+            }
+
+            await connection.CloseAsync();
+        }
+        catch (Exception ex)
+        {
+            result.Error = ex.Message;
+        }
+
+        return result;
+    }
+
+    private static async Task<bool> TableExistsInCatalogAsync(DuckDBConnection connection, string catalogName, string tableName, CancellationToken ct)
+    {
+        using var cmd = connection.CreateCommand();
+        // information_schema spans every attached catalog on this connection — it isn't itself
+        // catalog-qualifiable (there's no "catalog.information_schema.tables"), so filter by table_catalog.
+        cmd.CommandText = $"SELECT COUNT(*) FROM information_schema.tables WHERE table_catalog = '{catalogName.Replace("'", "''")}' AND table_name = '{tableName.Replace("'", "''")}'";
+        var value = await cmd.ExecuteScalarAsync(ct);
+        var normalized = NormalizeValue(value);
+        return normalized != null && Convert.ToInt64(normalized) > 0;
     }
 
 
@@ -948,6 +1031,100 @@ public class DuckdbService : IDuckdbService
         {
             stopwatch.Stop();
             result.ElapsedMs = stopwatch.ElapsedMilliseconds;
+        }
+
+        return result;
+    }
+
+    // Re-runs a SELECT against the dataset's own DuckDB tables and refreshes a target table in place
+    // (the SqlQuery ingestion kind — e.g. a scheduled Query Notebook cell). Source and target are the
+    // same file/connection, so no ATTACH and no cross-database transaction limitation applies here.
+    public async Task<ImportResult> RunQueryIntoTableAsync(string datasetId, string tableName, string sql, ImportMode mode, List<string> keyColumns, bool createIfMissing, CancellationToken ct = default)
+    {
+        var result = new ImportResult();
+
+        if (ClassifyStatement(sql) != SqlKind.Read)
+        {
+            result.Error = "Only a single SELECT query can be used as an ingestion source.";
+            return result;
+        }
+
+        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        if (!File.Exists(duckdbFilePath))
+        {
+            result.Error = "Dataset database not found.";
+            return result;
+        }
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(QueryTimeoutSeconds));
+
+            using var connection = new DuckDBConnection($"DataSource={duckdbFilePath}");
+            await connection.OpenAsync(cts.Token);
+
+            var exists = await TableExistsAsync(connection, tableName, cts.Token);
+            if (!exists && !createIfMissing)
+            {
+                result.Error = $"Target table \"{tableName}\" does not exist.";
+                return result;
+            }
+
+            var inner = sql.TrimEnd().TrimEnd(';');
+
+            if (!exists || mode == ImportMode.Replace)
+            {
+                // One statement handles both "create" and "full refresh" — no separate create path.
+                await ExecAsync(connection, $"CREATE OR REPLACE TABLE {Q(tableName)} AS {inner}", cts.Token);
+                result.RowsInserted = (int)await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {Q(tableName)}", cts.Token);
+            }
+            else if (mode == ImportMode.Upsert)
+            {
+                if (keyColumns.Count == 0)
+                {
+                    result.Error = "Upsert requires at least one key column.";
+                    return result;
+                }
+
+                var keyList = string.Join(", ", keyColumns.Select(Q));
+                await ExecAsync(connection, "BEGIN TRANSACTION", cts.Token);
+                try
+                {
+                    var updated = (int)await ScalarLongAsync(connection,
+                        $"SELECT COUNT(*) FROM {Q(tableName)} WHERE ({keyList}) IN (SELECT {keyList} FROM ({inner}) AS q)", cts.Token);
+                    await ExecAsync(connection, $"DELETE FROM {Q(tableName)} WHERE ({keyList}) IN (SELECT {keyList} FROM ({inner}) AS q)", cts.Token);
+                    await ExecAsync(connection, $"INSERT INTO {Q(tableName)} SELECT * FROM ({inner}) AS q", cts.Token);
+                    await ExecAsync(connection, "COMMIT", cts.Token);
+
+                    var total = (int)await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM ({inner}) AS q", cts.Token);
+                    result.RowsUpdated = updated;
+                    result.RowsInserted = Math.Max(0, total - updated);
+                }
+                catch
+                {
+                    try { await ExecAsync(connection, "ROLLBACK", cts.Token); } catch { /* best-effort */ }
+                    throw;
+                }
+            }
+            else // Append
+            {
+                var before = (int)await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {Q(tableName)}", cts.Token);
+                await ExecAsync(connection, $"INSERT INTO {Q(tableName)} SELECT * FROM ({inner}) AS q", cts.Token);
+                var after = (int)await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {Q(tableName)}", cts.Token);
+                result.RowsInserted = after - before;
+            }
+
+            await connection.CloseAsync();
+            result.Success = true;
+        }
+        catch (OperationCanceledException)
+        {
+            result.Error = $"The query exceeded the {QueryTimeoutSeconds}s time limit.";
+        }
+        catch (Exception ex)
+        {
+            result.Error = ex.Message;
         }
 
         return result;

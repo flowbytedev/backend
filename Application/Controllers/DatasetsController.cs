@@ -29,6 +29,7 @@ public class DatasetsController : ControllerBase
     private readonly IIngestionService _ingestionService;
     private readonly Application.Shared.Services.Org.IUserService _userService;
     private readonly IDatasetSharingService _sharingService;
+    private readonly IDatasetTableMoveService _tableMoveService;
 
     public DatasetsController(
         IDatasetService datasetService,
@@ -37,7 +38,8 @@ public class DatasetsController : ControllerBase
         Application.Shared.Services.IDatabaseTableService databaseTableService,
         IIngestionService ingestionService,
         Application.Shared.Services.Org.IUserService userService,
-        IDatasetSharingService sharingService)
+        IDatasetSharingService sharingService,
+        IDatasetTableMoveService tableMoveService)
     {
         _datasetService = datasetService;
         _duckdbService = duckdbService;
@@ -46,6 +48,7 @@ public class DatasetsController : ControllerBase
         _ingestionService = ingestionService;
         _userService = userService;
         _sharingService = sharingService;
+        _tableMoveService = tableMoveService;
     }
 
     // GET: api/Datasets/{companyId}
@@ -569,6 +572,48 @@ public class DatasetsController : ControllerBase
 
         return NoContent();
 
+    }
+
+    // POST: api/Datasets/{datasetId}/tables/{tableName}/move — move a table's data to another dataset,
+    // re-pointing any table-scoped sharing and notifying affected users by email.
+    [HttpPost("{datasetId}/tables/{tableName}/move")]
+    public async Task<ActionResult<MoveTableOutcome>> MoveTable(string datasetId, string tableName, [FromBody] MoveTableRequest request)
+    {
+        var userId = Request.Headers["UserId"].ToString();
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest("User ID is required in headers");
+
+        var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
+        if (!User.HasCompanyRole(companyId, "EDIT_DATA"))
+            return Forbid();
+
+        if (string.IsNullOrWhiteSpace(datasetId))
+            return BadRequest("Dataset ID is required");
+
+        if (string.IsNullOrWhiteSpace(tableName))
+            return BadRequest("Table name is required");
+
+        if (string.IsNullOrWhiteSpace(request?.TargetDatasetId))
+            return BadRequest("Target dataset ID is required");
+
+        if (!await DatasetExists(datasetId, userId))
+            return NotFound($"Dataset with ID '{datasetId}' not found.");
+
+        if (!await IsTableAllowedAsync(datasetId, userId, tableName))
+            return Forbid();
+
+        // The destination must also belong to this company and be reachable by the user.
+        if (!await DatasetExists(request.TargetDatasetId, userId))
+            return NotFound($"Dataset with ID '{request.TargetDatasetId}' not found.");
+
+        var movedBy = await _userService.GetUser(userId);
+        var movedByName = movedBy?.UserName ?? movedBy?.Email ?? "Someone";
+
+        var outcome = await _tableMoveService.MoveTableAsync(companyId, datasetId, tableName, request.TargetDatasetId, userId, movedByName, HttpContext.RequestAborted);
+        if (!outcome.Success)
+            return BadRequest(outcome.Error);
+
+        return Ok(outcome);
     }
 
     // GET: api/Datasets/{datasetId}/tables/{tableName}/download

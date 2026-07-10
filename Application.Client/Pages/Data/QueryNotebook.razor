@@ -216,7 +216,7 @@ else
                          @ondragover:preventDefault="true"
                          @ondrop="() => OnDrop(index)"
                          @ondrop:preventDefault="true">
-                        <NotebookCellCard Cell="cell" NotebookId="@currentNotebook.Id" Datasets="datasets"
+                        <NotebookCellCard Cell="cell" NotebookId="@currentNotebook.Id" CompanyId="@companyId" Datasets="datasets"
                                           AvailableReferences="PriorSqlCells(index)"
                                           ShowDragHandle="true"
                                           ExternalResult="@ResultFor(cell.Id)"

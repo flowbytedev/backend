@@ -87,8 +87,14 @@
     /* Table card */
     .rsd-table-card { background: white; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; }
     .rsd-table-header { display: flex; align-items: center; justify-content: space-between;
-        padding: 14px 20px; border-bottom: 1px solid #e5e7eb; }
+        padding: 14px 20px; border-bottom: 1px solid #e5e7eb; gap: 12px; }
     .rsd-table-title { font-size: 14px; font-weight: 600; color: #111827; }
+    .rsd-table-header-actions { display: flex; align-items: center; gap: 10px; }
+    .rsd-search { display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px;
+        border: 1px solid #e5e7eb; border-radius: 7px; background: white; color: #9ca3af; }
+    .rsd-search:focus-within { border-color: #6366f1; color: #6366f1; }
+    .rsd-search-input { border: none; outline: none; font-size: 13px; color: #111827; width: 170px; background: transparent; }
+    .rsd-search-input::placeholder { color: #9ca3af; }
 
     /* Column settings */
     .rsd-col-settings { padding: 12px 20px; border-bottom: 1px solid #e5e7eb; background: #f9fafb; }
@@ -106,6 +112,9 @@
     .rsd-table thead th { background: #f9fafb; padding: 10px 16px; text-align: left;
         font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
         color: #6b7280; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+    .rsd-th-sortable { cursor: pointer; user-select: none; }
+    .rsd-th-sortable:hover { color: #374151; }
+    .rsd-sort-ind { display: inline-block; margin-left: 4px; font-size: 8px; color: #6366f1; }
     .rsd-table tbody tr { border-bottom: 1px solid #f3f4f6; }
     .rsd-table tbody tr:last-child { border-bottom: none; }
     .rsd-table tbody tr:hover { background: #f9fafb; }
@@ -268,10 +277,16 @@
                 <div class="rsd-table-card">
                     <div class="rsd-table-header">
                         <span class="rsd-table-title">Store Performance Details</span>
-                        <button class="rsd-btn rsd-btn-outline" @onclick="ToggleColumnSettings">
-                            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18"/></svg>
-                            Columns
-                        </button>
+                        <div class="rsd-table-header-actions">
+                            <div class="rsd-search">
+                                <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                <input type="text" class="rsd-search-input" placeholder="Filter rows…" value="@filterText" @oninput="@((ChangeEventArgs e) => filterText = e.Value?.ToString() ?? string.Empty)" />
+                            </div>
+                            <button class="rsd-btn rsd-btn-outline" @onclick="ToggleColumnSettings">
+                                <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18M15 3v18"/></svg>
+                                Columns
+                            </button>
+                        </div>
                     </div>
 
                     @if (showColumnSettings)
@@ -293,25 +308,25 @@
 
                     <div class="rsd-table-wrap">
                         @{
-                            var gridItems = GetGridItems().ToList();
+                            var gridItems = GetFilteredAndSortedItems().ToList();
                         }
                         @if (!gridItems.Any())
                         {
-                            <div class="rsd-table-empty">No data available.</div>
+                            <div class="rsd-table-empty">@(string.IsNullOrWhiteSpace(filterText) ? "No data available." : "No rows match your filter.")</div>
                         }
                         else
                         {
                             <table class="rsd-table">
                                 <thead>
                                     <tr>
-                                        @if (currentGrouping == DashboardGrouping.Store && columnSettings.ShowScheme) { <th>Scheme</th> }
-                                        @if (currentGrouping == DashboardGrouping.Store && columnSettings.ShowStoreCode) { <th>Store Code</th> }
-                                        @if ((currentGrouping == DashboardGrouping.Division || currentGrouping == DashboardGrouping.DivisionCategory) && columnSettings.ShowDivision) { <th>Division</th> }
-                                        @if ((currentGrouping == DashboardGrouping.Category || currentGrouping == DashboardGrouping.DivisionCategory) && columnSettings.ShowCategory) { <th>Category</th> }
-                                        @if (columnSettings.ShowTotalSales) { <th>Total Sales</th> }
-                                        @if (columnSettings.ShowTotalTransactions) { <th>Total Transactions</th> }
-                                        @if (columnSettings.ShowAverageBasket) { <th>Avg Basket</th> }
-                                        @if (columnSettings.ShowLastUpdated) { <th>Last Updated</th> }
+                                        @if (currentGrouping == DashboardGrouping.Store && columnSettings.ShowScheme) { <th class="rsd-th-sortable" @onclick='() => SetSort("Scheme")'>Scheme<span class="rsd-sort-ind">@SortIndicator("Scheme")</span></th> }
+                                        @if (currentGrouping == DashboardGrouping.Store && columnSettings.ShowStoreCode) { <th class="rsd-th-sortable" @onclick='() => SetSort("StoreCode")'>Store Code<span class="rsd-sort-ind">@SortIndicator("StoreCode")</span></th> }
+                                        @if ((currentGrouping == DashboardGrouping.Division || currentGrouping == DashboardGrouping.DivisionCategory) && columnSettings.ShowDivision) { <th class="rsd-th-sortable" @onclick='() => SetSort("DivisionName")'>Division<span class="rsd-sort-ind">@SortIndicator("DivisionName")</span></th> }
+                                        @if ((currentGrouping == DashboardGrouping.Category || currentGrouping == DashboardGrouping.DivisionCategory) && columnSettings.ShowCategory) { <th class="rsd-th-sortable" @onclick='() => SetSort("CategoryName")'>Category<span class="rsd-sort-ind">@SortIndicator("CategoryName")</span></th> }
+                                        @if (columnSettings.ShowTotalSales) { <th class="rsd-th-sortable" @onclick='() => SetSort("TotalSales")'>Total Sales<span class="rsd-sort-ind">@SortIndicator("TotalSales")</span></th> }
+                                        @if (columnSettings.ShowTotalTransactions) { <th class="rsd-th-sortable" @onclick='() => SetSort("TotalTransactions")'>Total Transactions<span class="rsd-sort-ind">@SortIndicator("TotalTransactions")</span></th> }
+                                        @if (columnSettings.ShowAverageBasket) { <th class="rsd-th-sortable" @onclick='() => SetSort("AverageBasket")'>Avg Basket<span class="rsd-sort-ind">@SortIndicator("AverageBasket")</span></th> }
+                                        @if (columnSettings.ShowLastUpdated) { <th class="rsd-th-sortable" @onclick='() => SetSort("LastUpdated")'>Last Updated<span class="rsd-sort-ind">@SortIndicator("LastUpdated")</span></th> }
                                         @if (currentGrouping == DashboardGrouping.Store) { <th></th> }
                                     </tr>
                                 </thead>

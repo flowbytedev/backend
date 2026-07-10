@@ -308,13 +308,25 @@ public class IngestionService : IIngestionService
                 ? new List<string>()
                 : source.KeyColumns.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
-            log.WriteLine($"Fetching from {source.SourceKind}…");
+            var kind = Enum.TryParse<IngestionSourceKind>(source.SourceKind, ignoreCase: true, out var sourceKind) ? sourceKind : IngestionSourceKind.ExternalDatabase;
 
-            // Preferred path for a batched ClickHouse source: import each fetched page straight into the dataset,
-            // so we never buffer the whole result. Returns null when it doesn't apply (then fall back to the
-            // fetch-to-temp-file-then-import path used by all other sources / non-batched fetches).
-            result = await TryRunBatchedDatabaseImportAsync(source, config, mode, keys, log, ct)
-                     ?? await FetchToTempThenImportAsync(source, config, mode, keys, fetchProgress, log, p => tempPath = p, ct);
+            if (kind == IngestionSourceKind.SqlQuery)
+            {
+                // Source and target are the dataset's own DuckDB file — re-run the query directly,
+                // no fetch/temp file/CSV round-trip.
+                log.WriteLine("Running query against this dataset…");
+                result = await _duckdb.RunQueryIntoTableAsync(source.DatasetId, source.TargetTable, config.Query ?? string.Empty, mode, keys, source.CreateIfNotExists, ct);
+            }
+            else
+            {
+                log.WriteLine($"Fetching from {source.SourceKind}…");
+
+                // Preferred path for a batched ClickHouse source: import each fetched page straight into the dataset,
+                // so we never buffer the whole result. Returns null when it doesn't apply (then fall back to the
+                // fetch-to-temp-file-then-import path used by all other sources / non-batched fetches).
+                result = await TryRunBatchedDatabaseImportAsync(source, config, mode, keys, log, ct)
+                         ?? await FetchToTempThenImportAsync(source, config, mode, keys, fetchProgress, log, p => tempPath = p, ct);
+            }
 
             progress?.SetProgress(90);
 

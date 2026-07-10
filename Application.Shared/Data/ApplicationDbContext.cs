@@ -3,6 +3,7 @@ using Application.Shared.Models.Dashboards;
 using Application.Shared.Models.Data;
 using Application.Shared.Models.Notebooks;
 using Application.Shared.Models.User;
+using Application.Shared.Models.WhatsNew;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
@@ -110,6 +111,10 @@ namespace Application.Shared.Data
         // MotherDuck-style SQL notebooks: ordered cells (SQL/Markdown), each cell picking its own dataset.
         public DbSet<QueryNotebook> QueryNotebook { get; set; }
         public DbSet<QueryNotebookCell> QueryNotebookCell { get; set; }
+
+        // "What's New" feature-announcement feed + per-user last-seen tracking.
+        public DbSet<WhatsNewItem> WhatsNewItem { get; set; }
+        public DbSet<WhatsNewSeen> WhatsNewSeen { get; set; }
 
         // METRICS
         public DbSet<Metric> Metrics { get; set; }

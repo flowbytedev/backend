@@ -34,6 +34,10 @@ public interface IDuckdbService
     Task<Table> GetTableAsync(string datasetId, string tableName);
     Task<Table> CreateTableAsync(Table table);
     Task<bool> DeleteTableAsync(string datasetId, string tableName);
+
+    // Moves a table's data from one dataset's DuckDB file to another's, preserving column types exactly
+    // (native DuckDB ATTACH-based copy, not a CSV round-trip). Errors are returned via MoveTableResult.Error.
+    Task<MoveTableResult> MoveTableAsync(string sourceDatasetId, string tableName, string targetDatasetId, System.Threading.CancellationToken ct = default);
     Task<bool> ImportCsvDataAsync(string datasetId, string tableName, Stream csvStream);
     Task<bool> ImportCsvDataAsync(string companyId, string datasetId, string tableName, Stream csvStream, bool createDataset = false, bool createTable = false);
 
@@ -58,6 +62,10 @@ public interface IDuckdbService
 
     // Write-back: materialize a SELECT query as a new table or view in the dataset.
     Task<SqlQueryResult> CreateObjectFromQueryAsync(string datasetId, string objectName, string sql, bool asView, System.Threading.CancellationToken ct = default);
+
+    // Re-runs a SELECT against the dataset's own DuckDB tables and refreshes a target table in place
+    // (the SqlQuery ingestion kind). Errors are returned via ImportResult.Error, never thrown.
+    Task<ImportResult> RunQueryIntoTableAsync(string datasetId, string tableName, string sql, ImportMode mode, List<string> keyColumns, bool createIfMissing, System.Threading.CancellationToken ct = default);
 
     // Stage a file into a temporary table and validate it against the target table's schema
     // (type-cast checks, missing/extra columns, preview rows) without committing anything.

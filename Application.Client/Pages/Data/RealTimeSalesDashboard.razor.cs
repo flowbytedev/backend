@@ -53,6 +53,10 @@ public partial class RealTimeSalesDashboard : IAsyncDisposable
     private List<SalesDashboardData> categoryData = new();
     private List<SalesDashboardData> divisionCategoryData = new();
 
+    private string filterText = string.Empty;
+    private string sortColumn = "TotalSales";
+    private bool sortAscending = false;
+
     private SalesDashboardData? selectedStore;
     private SalesDashboardData? selectedDivisionSummary;
     private SalesDashboardData? selectedCategorySummary;
@@ -292,6 +296,58 @@ public partial class RealTimeSalesDashboard : IAsyncDisposable
             _ => Enumerable.Empty<SalesDashboardData>()
         };
     }
+
+    private IEnumerable<SalesDashboardData> GetFilteredAndSortedItems()
+    {
+        var items = GetGridItems();
+
+        if (!string.IsNullOrWhiteSpace(filterText))
+        {
+            var term = filterText.Trim();
+            items = items.Where(row =>
+                MatchesFilter(row.Scheme, term) ||
+                MatchesFilter(row.StoreCode, term) ||
+                MatchesFilter(row.DivisionName, term) ||
+                MatchesFilter(row.CategoryName, term));
+        }
+
+        return SortItems(items);
+    }
+
+    private static bool MatchesFilter(string? value, string term) =>
+        !string.IsNullOrEmpty(value) && value.Contains(term, StringComparison.OrdinalIgnoreCase);
+
+    private IEnumerable<SalesDashboardData> SortItems(IEnumerable<SalesDashboardData> items) =>
+        sortColumn switch
+        {
+            "Scheme" => Order(items, d => d.Scheme),
+            "StoreCode" => Order(items, d => d.StoreCode),
+            "DivisionName" => Order(items, d => d.DivisionName),
+            "CategoryName" => Order(items, d => d.CategoryName),
+            "TotalTransactions" => Order(items, d => currentGrouping == DashboardGrouping.Store ? d.TotalStoreTransactions : d.TotalTransactions),
+            "AverageBasket" => Order(items, d => d.AverageBasket),
+            "LastUpdated" => Order(items, d => d.LastUpdated),
+            _ => Order(items, d => d.TotalSales)
+        };
+
+    private IOrderedEnumerable<SalesDashboardData> Order<TKey>(IEnumerable<SalesDashboardData> items, Func<SalesDashboardData, TKey> keySelector) =>
+        sortAscending ? items.OrderBy(keySelector) : items.OrderByDescending(keySelector);
+
+    private void SetSort(string column)
+    {
+        if (sortColumn == column)
+        {
+            sortAscending = !sortAscending;
+        }
+        else
+        {
+            sortColumn = column;
+            sortAscending = true;
+        }
+    }
+
+    private string SortIndicator(string column) =>
+        sortColumn != column ? "" : (sortAscending ? "▲" : "▼");
 
     private void HandleGroupingChanged(ChangeEventArgs args)
     {
