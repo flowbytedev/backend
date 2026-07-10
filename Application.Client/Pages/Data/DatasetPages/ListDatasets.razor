@@ -86,7 +86,8 @@ else
                     <tbody>
                         @foreach (var dataset in pagedItems)
                         {
-                            <tr class="ds-tr">
+                            <tr class="ds-tr ds-tr-clickable" @onclick="() => OpenDataset(dataset)"
+                                @oncontextmenu="e => OnRowContextMenu(e, dataset)" @oncontextmenu:preventDefault="true">
                                 <td class="ds-td ds-td-name">
                                     <span class="ds-dataset-name">@dataset.Name</span>
                                 </td>
@@ -111,6 +112,7 @@ else
                                     {
                                         <a href="@($"/status/entities/{dataset.SourceEntityId}?c={companyId}")"
                                            title="@(SourceInfo(dataset.SourceEntityId)?.Name ?? "Open entity details")"
+                                           @onclick:stopPropagation="true"
                                            style="font-size:0.75rem;color:#2563eb;font-family:ui-monospace,Consolas,monospace;text-decoration:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block">
                                             @dataset.SourceEntityId
                                         </a>
@@ -142,7 +144,7 @@ else
                                     @if ((st?.SharedWith ?? 0) > 0)
                                     {
                                         <button type="button" title="@($"Shared with {st!.SharedWith} {(st.SharedWith == 1 ? "person" : "people")} — click to manage")"
-                                                @onclick="() => OpenSharedWith(dataset)"
+                                                @onclick="() => OpenSharedWith(dataset)" @onclick:stopPropagation="true"
                                                 style="display:inline-flex;align-items:center;gap:0.25rem;font-size:0.75rem;font-weight:500;color:#4f46e5;background:none;border:none;cursor:pointer;padding:0">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
                                             <span>@st.SharedWith</span>
@@ -151,7 +153,7 @@ else
                                     else { <span style="font-size:0.75rem;color:#a1a1aa">Private</span> }
                                 </td>
                                 <td class="ds-td ds-td-date">@dataset.CreatedAt.ToString("MMM dd, yyyy")</td>
-                                <td class="ds-td ds-td-actions-cell">
+                                <td class="ds-td ds-td-actions-cell" @onclick:stopPropagation="true">
                                     <div class="ds-actions">
                                         <button class="btn-icon btn-icon-open" title="Open dataset" @onclick="() => OpenDataset(dataset)">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
@@ -175,6 +177,34 @@ else
                     </tbody>
                 </table>
             </div>
+
+            @if (contextMenuDataset != null)
+            {
+                var ds = contextMenuDataset;
+                <div class="ctx-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault="true"></div>
+                <div class="ctx-menu" style="left:@(contextMenuX)px; top:@(contextMenuY)px;">
+                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); OpenDataset(ds); }">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
+                        Open dataset
+                    </button>
+                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); ShareDataset(ds); }">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
+                        Share dataset
+                    </button>
+                    @if (canEdit)
+                    {
+                        <div class="ctx-sep"></div>
+                        <button class="ctx-item" @onclick="() => { CloseContextMenu(); EditDataset(ds); }">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                            Edit dataset
+                        </button>
+                        <button class="ctx-item ctx-item-danger" @onclick="() => { CloseContextMenu(); _ = DeleteDataset(ds); }">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                            Delete dataset
+                        </button>
+                    }
+                </div>
+            }
 
             @if (totalPages > 1)
             {
@@ -554,6 +584,20 @@ else
     private void PrevPage() { if (currentPage > 0) { currentPage--; ApplyFilterAndSort(); } }
     private void NextPage() { if (currentPage < totalPages - 1) { currentPage++; ApplyFilterAndSort(); } }
     private void GoToPage(int page) { currentPage = page; ApplyFilterAndSort(); }
+
+    // ---- Right-click context menu (mirrors the row's own action buttons) ----
+    private Dataset? contextMenuDataset;
+    private double contextMenuX;
+    private double contextMenuY;
+
+    private void OnRowContextMenu(MouseEventArgs e, Dataset dataset)
+    {
+        contextMenuDataset = dataset;
+        contextMenuX = e.ClientX;
+        contextMenuY = e.ClientY;
+    }
+
+    private void CloseContextMenu() => contextMenuDataset = null;
 
     private void CreateDataset() => _navigationManager.NavigateTo($"/data/datasets/create?c={companyId}");
     private void OpenDataset(Dataset dataset) => _navigationManager.NavigateTo($"/data/tables?c={companyId}&d={dataset.Id}");

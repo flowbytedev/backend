@@ -54,6 +54,16 @@ else if (string.IsNullOrEmpty(n))
         }
 
         <div class="ds-card">
+            @if (notebooks.Count > 0)
+            {
+                <div class="ds-card-toolbar">
+                    <div class="ds-search-wrap">
+                        <svg class="ds-search-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        <input class="ds-search" type="search" placeholder="Filter notebooks..." @bind="searchTerm" @bind:event="oninput" />
+                    </div>
+                </div>
+            }
+
             @if (isLoading)
             {
                 <div class="ds-loading"><div class="ds-spinner"></div><span>Loading…</span></div>
@@ -75,6 +85,16 @@ else if (string.IsNullOrEmpty(n))
                     }
                 </div>
             }
+            else if (FilteredNotebooks.Count == 0)
+            {
+                <div class="ds-empty">
+                    <div class="ds-empty-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                    </div>
+                    <h3 class="ds-empty-title">No notebooks found</h3>
+                    <p class="ds-empty-sub">No notebooks match "<strong>@searchTerm</strong>". Try a different search.</p>
+                </div>
+            }
             else
             {
                 <div class="ds-table-wrap">
@@ -91,7 +111,7 @@ else if (string.IsNullOrEmpty(n))
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var nb in notebooks)
+                            @foreach (var nb in FilteredNotebooks)
                             {
                                 <tr class="ds-tr" style="cursor:pointer" @onclick="() => Open(nb.Id)">
                                     <td class="ds-td ds-td-name">
@@ -248,8 +268,16 @@ else
 
     private List<Dataset> datasets = new();
     private List<QueryNotebookDto> notebooks = new();
+    private string searchTerm = string.Empty;
     private QueryNotebookDto? currentNotebook;
     private string? _openNotebookId; // last id we actually loaded, so OnParametersSetAsync only reacts to real changes
+
+    // Filters by name/description, contains, case-insensitive — mirrors the datasets/tables list search.
+    private List<QueryNotebookDto> FilteredNotebooks => string.IsNullOrWhiteSpace(searchTerm)
+        ? notebooks
+        : notebooks.Where(nb =>
+            (nb.Name?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) == true) ||
+            (nb.Description?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) == true)).ToList();
 
     private bool showCreateForm;
     private string newName = string.Empty;

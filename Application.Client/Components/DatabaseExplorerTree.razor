@@ -24,6 +24,17 @@
         <span>My Databases</span>
     </div>
 
+    <div class="dbx-filter-wrap">
+        <svg class="dbx-filter-icon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input class="dbx-filter-input" type="search" placeholder="Filter datasets and tables…" value="@_filterText" @oninput="OnFilterChanged" />
+        @if (!string.IsNullOrEmpty(_filterText))
+        {
+            <button type="button" class="dbx-filter-clear" title="Clear" @onclick="ClearFilter">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+        }
+    </div>
+
     @if (_loading)
     {
         <div class="dbx-loading"><span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px"></span></div>
@@ -32,12 +43,18 @@
     {
         <p class="dbx-empty">No datasets yet.</p>
     }
+    else if (FilteredDatasets.Count == 0)
+    {
+        <p class="dbx-empty">No datasets or tables match "@_filterText".</p>
+    }
     else
     {
         <div class="dbx-tree">
-            @foreach (var ds in _datasets)
+            @foreach (var ds in FilteredDatasets)
             {
-                var dsExpanded = IsExpanded(ds.Id!);
+                // While filtering, force children visible even if the user hasn't manually expanded this
+                // node — otherwise a table-name match would be invisible behind a collapsed dataset.
+                var dsExpanded = IsExpanded(ds.Id!) || IsFiltering;
                 var dsMenuKey = "ds:" + ds.Id;
                 <div class="dbx-node">
                     <div class="dbx-row dbx-row-db">
@@ -65,17 +82,17 @@
                     @if (dsExpanded)
                     {
                         <div class="dbx-children">
-                            @if (!_tablesByDataset.TryGetValue(ds.Id!, out var tables))
+                            @if (!_tablesByDataset.TryGetValue(ds.Id!, out var allTables))
                             {
                                 <div class="dbx-loading-inline"><span class="ds-spinner" style="width:12px;height:12px;border-width:1.5px"></span></div>
                             }
-                            else if (tables.Count == 0)
+                            else if (FilteredTables(ds, allTables) is { Count: 0 })
                             {
-                                <p class="dbx-empty-inline">No tables.</p>
+                                <p class="dbx-empty-inline">@(allTables.Count == 0 ? "No tables." : "No matching tables.")</p>
                             }
                             else
                             {
-                                @foreach (var t in tables)
+                                @foreach (var t in FilteredTables(ds, allTables))
                                 {
                                     var tableKey = ds.Id + "|" + t;
                                     var tableExpanded = IsExpanded(tableKey);
@@ -146,6 +163,65 @@
     private readonly Dictionary<string, List<string>> _tablesByDataset = new();
     private readonly Dictionary<string, List<ColumnDocDto>> _columnsByTable = new();
     private string? _openMenuKey;
+    private string _filterText = string.Empty;
+
+    private bool IsFiltering => !string.IsNullOrWhiteSpace(_filterText);
+
+    // Datasets whose name matches, OR that have at least one already-loaded table matching — collapsed
+    // datasets the user hasn't expanded yet are matched on name only (their tables aren't loaded until
+    // filtering kicks off EnsureAllTablesLoadedAsync, at which point they become searchable too).
+    private List<Dataset> FilteredDatasets => IsFiltering
+        ? _datasets.Where(DatasetMatchesFilter).ToList()
+        : _datasets;
+
+    private bool DatasetNameMatches(Dataset ds) => !IsFiltering || (ds.Name?.Contains(_filterText, StringComparison.OrdinalIgnoreCase) ?? false);
+
+    private bool DatasetMatchesFilter(Dataset ds)
+    {
+        if (!IsFiltering) return true;
+        if (DatasetNameMatches(ds)) return true;
+        return !string.IsNullOrEmpty(ds.Id) && _tablesByDataset.TryGetValue(ds.Id, out var tables)
+            && tables.Any(t => t.Contains(_filterText, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // A dataset that matched by NAME shows all its tables; one that only matched via a table name shows
+    // just the matching tables (so an unrelated "org" dataset doesn't dump its entire table list).
+    private List<string> FilteredTables(Dataset ds, List<string> tables)
+    {
+        if (!IsFiltering || DatasetNameMatches(ds)) return tables;
+        return tables.Where(t => t.Contains(_filterText, StringComparison.OrdinalIgnoreCase)).ToList();
+    }
+
+    private async Task OnFilterChanged(ChangeEventArgs e)
+    {
+        _filterText = e.Value?.ToString() ?? string.Empty;
+        if (IsFiltering) await EnsureAllTablesLoadedAsync();
+    }
+
+    private void ClearFilter() => _filterText = string.Empty;
+
+    // Loads tables for every dataset not already cached, in parallel, so table-name filtering works
+    // across the whole list — not just datasets the user has manually expanded. Cheap on repeat
+    // keystrokes since already-cached datasets are skipped.
+    private async Task EnsureAllTablesLoadedAsync()
+    {
+        var toLoad = _datasets.Where(d => !string.IsNullOrEmpty(d.Id) && !_tablesByDataset.ContainsKey(d.Id!)).ToList();
+        if (toLoad.Count == 0) return;
+
+        var fetches = toLoad.Select(async ds =>
+        {
+            var isExternal = ds.SourceType == DatasetSourceType.External;
+            var endpoint = isExternal ? $"api/datasets/{ds.Id}/source-tables" : $"api/datasets/{ds.Id}/tables";
+            List<string> tables;
+            try { tables = await _httpClient.GetFromJsonAsync<List<string>>(endpoint) ?? new(); }
+            catch { tables = new(); }
+            return (Id: ds.Id!, Tables: tables);
+        });
+
+        var results = await Task.WhenAll(fetches);
+        foreach (var (id, tables) in results) _tablesByDataset[id] = tables;
+        StateHasChanged();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -260,10 +336,27 @@
 }
 
 <style>
-    .dbx { display:flex; flex-direction:column; padding:0.75rem 0.6rem; gap:0.5rem; height:100%; overflow-y:auto; }
+    /* No height/overflow here — this now sits inside NavMenu's .nav-sidebar-scroll, which owns scrolling. */
+    .dbx { display:flex; flex-direction:column; padding:0.75rem 0.6rem; gap:0.5rem; flex:1; min-height:0; }
     .dbx-back { display:flex; align-items:center; gap:0.35rem; background:none; border:none; color:#52525b; font-size:0.8125rem; font-weight:500; cursor:pointer; padding:0.35rem 0.4rem; border-radius:6px; text-align:left; }
     .dbx-back:hover { background:#f4f4f5; color:#18181b; }
     .dbx-header { display:flex; align-items:center; gap:0.4rem; font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#71717a; padding:0.3rem 0.4rem; }
+    .dbx-filter-wrap { position:relative; display:flex; align-items:center; margin:0 0.1rem 0.15rem; }
+    .dbx-filter-icon { position:absolute; left:0.55rem; color:#a1a1aa; pointer-events:none; }
+    .dbx-filter-input {
+        width:100%; padding:0.35rem 1.8rem 0.35rem 1.85rem; font-size:0.8125rem; font-family:inherit;
+        background-color:#f4f4f5; border:1px solid transparent; border-radius:8px; outline:none; color:#18181b;
+        transition:background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .dbx-filter-input::-webkit-search-cancel-button { display:none; }
+    .dbx-filter-input::placeholder { color:#a1a1aa; }
+    .dbx-filter-input:hover { background-color:#ececee; }
+    .dbx-filter-input:focus { background-color:#fff; border-color:#c7d2fe; box-shadow:0 0 0 3px rgba(37,99,235,0.12); }
+    .dbx-filter-clear {
+        position:absolute; right:0.35rem; display:flex; align-items:center; justify-content:center;
+        width:18px; height:18px; padding:0; background:none; border:none; border-radius:5px; color:#a1a1aa; cursor:pointer;
+    }
+    .dbx-filter-clear:hover { background:#e4e4e7; color:#3f3f46; }
     .dbx-loading, .dbx-loading-inline { display:flex; padding:0.4rem; }
     .dbx-empty, .dbx-empty-inline { font-size:0.75rem; color:#a1a1aa; padding:0.2rem 0.5rem; margin:0; }
     .dbx-tree { display:flex; flex-direction:column; }

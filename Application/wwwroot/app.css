@@ -418,6 +418,26 @@ code {
 .ds-td-date { color: #71717a; white-space: nowrap; }
 .ds-td-actions-cell { text-align: right; }
 .ds-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.25rem; }
+.ds-tr-clickable { cursor: pointer; }
+
+/* Right-click row context menu (datasets/tables lists) — mirrors the row's own action buttons. */
+.ctx-backdrop { position: fixed; inset: 0; z-index: 900; background: transparent; }
+.ctx-menu {
+    position: fixed; z-index: 901; min-width: 200px; background: #fff; border: 1px solid #e4e4e7;
+    border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.06);
+    padding: 0.3rem; overflow: hidden;
+}
+.ctx-item {
+    display: flex; align-items: center; gap: 0.55rem; width: 100%; text-align: left; background: none;
+    border: none; padding: 0.5rem 0.6rem; border-radius: 6px; font-size: 0.8125rem; color: #27272a;
+    cursor: pointer; white-space: nowrap;
+}
+.ctx-item:hover { background: #f4f4f5; }
+.ctx-item svg { flex-shrink: 0; color: #71717a; }
+.ctx-item-danger { color: #b91c1c; }
+.ctx-item-danger svg { color: #b91c1c; }
+.ctx-item-danger:hover { background: #fef2f2; }
+.ctx-sep { height: 1px; background: #f4f4f5; margin: 0.25rem 0.3rem; }
 
 .ds-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 5rem 0; gap: 0.75rem; color: #71717a; font-size: 0.875rem; }
 .ds-spinner { width: 28px; height: 28px; border: 2px solid #e4e4e7; border-top-color: #18181b; border-radius: 50%; animation: ds-spin 0.7s linear infinite; display: inline-block; }
