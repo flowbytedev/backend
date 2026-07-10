@@ -1,6 +1,7 @@
 using Application.Shared.Models;
 using Application.Shared.Models.Dashboards;
 using Application.Shared.Models.Data;
+using Application.Shared.Models.Notebooks;
 using Application.Shared.Models.User;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Identity;
@@ -105,6 +106,10 @@ namespace Application.Shared.Data
 
         // Semantic layer: AI-generated + human-edited per-column documentation for dataset tables.
         public DbSet<DatasetColumnDoc> DatasetColumnDoc { get; set; }
+
+        // MotherDuck-style SQL notebooks: ordered cells (SQL/Markdown), each cell picking its own dataset.
+        public DbSet<QueryNotebook> QueryNotebook { get; set; }
+        public DbSet<QueryNotebookCell> QueryNotebookCell { get; set; }
 
         // METRICS
         public DbSet<Metric> Metrics { get; set; }

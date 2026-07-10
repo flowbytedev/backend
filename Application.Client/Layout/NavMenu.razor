@@ -132,6 +132,12 @@
 <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
 
 <div class="nav-sidebar">
+    @if (_stateContainer.NotebookExplorerNotebookId != null)
+    {
+        <DatabaseExplorerTree CompanyId="@companyId" />
+    }
+    else
+    {
     <div class="nav-body">
 
         <a class="nav-item @NavClass("")" href="@queryParameter" onclick="document.body.classList.remove('nav-open')">
@@ -154,6 +160,10 @@
                 <a class="nav-item @NavClass("data/query")" href="@($"data/query{queryParameter}")" onclick="document.body.classList.remove('nav-open')">
                     <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
                     Query
+                </a>
+                <a class="nav-item @NavClass("data/notebook")" href="@($"data/notebook{queryParameter}")" onclick="document.body.classList.remove('nav-open')">
+                    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="m9 15 2 2 4-4"/></svg>
+                    Query Notebook
                 </a>
                 <a class="nav-item @NavClass("data/ingestion")" href="@($"data/ingestion{queryParameter}")" onclick="document.body.classList.remove('nav-open')">
                     <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="12 7 12 12 15 14"/><polyline points="21 3 21 8 16 8"/></svg>
@@ -305,6 +315,7 @@
         </AuthorizeView>
 
     </div>
+    }
 
     <div class="nav-footer">
         <AuthorizeView>

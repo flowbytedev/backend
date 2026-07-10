@@ -4,7 +4,7 @@
 @if (_failed)
 {
     <textarea style="width:100%;height:@Height;font-family:ui-monospace,Consolas,monospace;font-size:13px;padding:8px;border:1px solid #e4e4e7;border-radius:6px;box-sizing:border-box"
-              @bind="_fallbackValue" @bind:event="oninput" @bind:after="OnFallbackChanged"
+              @bind="_fallbackValue" @bind:event="oninput" @bind:after="OnFallbackChanged" @onkeydown="OnFallbackKeyDown"
               placeholder="SELECT * FROM ..."></textarea>
 }
 else
@@ -16,6 +16,10 @@ else
     [Parameter] public string? Value { get; set; }
     [Parameter] public EventCallback<string> ValueChanged { get; set; }
     [Parameter] public string Height { get; set; } = "240px";
+    /// <summary>Table (and cell-reference) names to offer as autocomplete suggestions in FROM/JOIN.</summary>
+    [Parameter] public List<string>? Tables { get; set; }
+    /// <summary>Fired on Ctrl+Enter (Cmd+Enter on Mac) inside the editor — the conventional "run" shortcut.</summary>
+    [Parameter] public EventCallback OnRunRequested { get; set; }
 
     private readonly string _id = "monaco-" + Guid.NewGuid().ToString("N");
     private IJSObjectReference? _module;
@@ -24,6 +28,7 @@ else
     private bool _failed;
     private string? _fallbackValue;
     private string? _lastValue;
+    private List<string>? _lastTables;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -36,6 +41,8 @@ else
                 await _module.InvokeVoidAsync("init", _id, _ref, Value ?? "");
                 _initialized = true;
                 _lastValue = Value;
+                _lastTables = Tables;
+                await _module.InvokeVoidAsync("setCompletions", _id, Tables ?? new List<string>());
             }
             catch
             {
@@ -47,12 +54,28 @@ else
             return;
         }
 
+        if (!_initialized || _module == null) return;
+
         // Push externally-driven Value changes (e.g. loading a saved query) into the editor.
-        if (_initialized && _module != null && Value != _lastValue)
+        if (Value != _lastValue)
         {
             _lastValue = Value;
             try { await _module.InvokeVoidAsync("setValue", _id, Value ?? ""); } catch { }
         }
+
+        // Push an updated table list (e.g. the user picked a different dataset) for autocomplete.
+        if (!TablesEqual(Tables, _lastTables))
+        {
+            _lastTables = Tables;
+            try { await _module.InvokeVoidAsync("setCompletions", _id, Tables ?? new List<string>()); } catch { }
+        }
+    }
+
+    private static bool TablesEqual(List<string>? a, List<string>? b)
+    {
+        if (a == null && b == null) return true;
+        if (a == null || b == null) return false;
+        return a.SequenceEqual(b, StringComparer.Ordinal);
     }
 
     [JSInvokable]
@@ -63,11 +86,24 @@ else
         if (ValueChanged.HasDelegate) await ValueChanged.InvokeAsync(value);
     }
 
+    [JSInvokable]
+    public async Task OnRunShortcut()
+    {
+        if (OnRunRequested.HasDelegate) await OnRunRequested.InvokeAsync();
+    }
+
     private async Task OnFallbackChanged()
     {
         Value = _fallbackValue;
         _lastValue = _fallbackValue;
         if (ValueChanged.HasDelegate) await ValueChanged.InvokeAsync(_fallbackValue ?? "");
+    }
+
+    // Same shortcut for the degraded (Monaco-unavailable) plain-textarea fallback.
+    private async Task OnFallbackKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey) && OnRunRequested.HasDelegate)
+            await OnRunRequested.InvokeAsync();
     }
 
     public async ValueTask DisposeAsync()

@@ -1,0 +1,311 @@
+@* MotherDuck-style sidebar explorer: expandable Datasets -> Tables -> Columns (with type glyphs).
+   Rendered by NavMenu INSTEAD of the normal menu while a notebook is open (StateContainer.NotebookExplorerNotebookId).
+   Each dataset/table row has a "..." menu to drop a new cell into the open notebook. *@
+@using System.Net.Http.Json
+@using System.Text.RegularExpressions
+@using Application.Shared.Enums
+@using Application.Shared.Models
+@using Application.Shared.Models.Data
+@using Application.Shared.Models.Notebooks
+@using Application.Shared.Services
+@inject HttpClient _httpClient
+@inject NavigationManager _navigationManager
+@inject StateContainer _stateContainer
+@inject IToastService _toastService
+
+<div class="dbx">
+    <button class="dbx-back" @onclick="Back">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+        Back to menu
+    </button>
+
+    <div class="dbx-header">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h.79a4.5 4.5 0 1 1 0 9Z"/></svg>
+        <span>My Databases</span>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="dbx-loading"><span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px"></span></div>
+    }
+    else if (_datasets.Count == 0)
+    {
+        <p class="dbx-empty">No datasets yet.</p>
+    }
+    else
+    {
+        <div class="dbx-tree">
+            @foreach (var ds in _datasets)
+            {
+                var dsExpanded = IsExpanded(ds.Id!);
+                var dsMenuKey = "ds:" + ds.Id;
+                <div class="dbx-node">
+                    <div class="dbx-row dbx-row-db">
+                        <button type="button" class="dbx-row-main" @onclick="() => ToggleDataset(ds.Id!)">
+                            <svg class="dbx-caret @(dsExpanded ? "dbx-caret-open" : "")" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"/></svg>
+                            <svg class="dbx-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                            <span class="dbx-label" title="@ds.Name">@ds.Name</span>
+                        </button>
+                        <div class="dbx-menu-anchor">
+                            <button type="button" class="dbx-menu-btn" title="More" @onclick="() => ToggleMenu(dsMenuKey)" @onclick:stopPropagation="true">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+                            </button>
+                            @if (_openMenuKey == dsMenuKey)
+                            {
+                                <div class="dbx-menu-backdrop" @onclick="() => _openMenuKey = null"></div>
+                                <div class="dbx-menu" @onclick:stopPropagation="true">
+                                    <button type="button" class="dbx-menu-item" @onclick="() => AddCellForDataset(ds.Id!, ds.Name)">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                                        New cell with this dataset
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    @if (dsExpanded)
+                    {
+                        <div class="dbx-children">
+                            @if (!_tablesByDataset.TryGetValue(ds.Id!, out var tables))
+                            {
+                                <div class="dbx-loading-inline"><span class="ds-spinner" style="width:12px;height:12px;border-width:1.5px"></span></div>
+                            }
+                            else if (tables.Count == 0)
+                            {
+                                <p class="dbx-empty-inline">No tables.</p>
+                            }
+                            else
+                            {
+                                @foreach (var t in tables)
+                                {
+                                    var tableKey = ds.Id + "|" + t;
+                                    var tableExpanded = IsExpanded(tableKey);
+                                    var tblMenuKey = "tbl:" + tableKey;
+                                    <div class="dbx-node">
+                                        <div class="dbx-row dbx-row-table">
+                                            <button type="button" class="dbx-row-main" @onclick="() => ToggleTable(ds.Id!, t)">
+                                                <svg class="dbx-caret @(tableExpanded ? "dbx-caret-open" : "")" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="9 18 15 12 9 6"/></svg>
+                                                <svg class="dbx-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
+                                                <span class="dbx-label" title="@t">@t</span>
+                                            </button>
+                                            <div class="dbx-menu-anchor">
+                                                <button type="button" class="dbx-menu-btn" title="More" @onclick="() => ToggleMenu(tblMenuKey)" @onclick:stopPropagation="true">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="12" cy="5" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="12" cy="19" r="1.6"/></svg>
+                                                </button>
+                                                @if (_openMenuKey == tblMenuKey)
+                                                {
+                                                    <div class="dbx-menu-backdrop" @onclick="() => _openMenuKey = null"></div>
+                                                    <div class="dbx-menu" @onclick:stopPropagation="true">
+                                                        <button type="button" class="dbx-menu-item" @onclick="() => AddCellForTable(ds.Id!, t)">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                                                            New cell: SELECT * FROM @t
+                                                        </button>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </div>
+                                        @if (tableExpanded)
+                                        {
+                                            <div class="dbx-children">
+                                                @if (!_columnsByTable.TryGetValue(tableKey, out var cols))
+                                                {
+                                                    <div class="dbx-loading-inline"><span class="ds-spinner" style="width:12px;height:12px;border-width:1.5px"></span></div>
+                                                }
+                                                else if (cols.Count == 0)
+                                                {
+                                                    <p class="dbx-empty-inline">No columns.</p>
+                                                }
+                                                else
+                                                {
+                                                    @foreach (var c in cols)
+                                                    {
+                                                        <div class="dbx-row dbx-row-col" title="@c.DataType">
+                                                            <span class="dbx-col-icon @IconClass(c.DataType)">@IconGlyph(c.DataType)</span>
+                                                            <span class="dbx-label" title="@c.ColumnName">@c.ColumnName</span>
+                                                        </div>
+                                                    }
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public string? CompanyId { get; set; }
+
+    private List<Dataset> _datasets = new();
+    private bool _loading = true;
+    private readonly HashSet<string> _expanded = new();
+    private readonly Dictionary<string, List<string>> _tablesByDataset = new();
+    private readonly Dictionary<string, List<ColumnDocDto>> _columnsByTable = new();
+    private string? _openMenuKey;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _datasets = await _httpClient.GetFromJsonAsync<List<Dataset>>("api/datasets") ?? new(); }
+        catch { _datasets = new(); }
+        finally { _loading = false; }
+    }
+
+    private bool IsExpanded(string key) => _expanded.Contains(key);
+
+    private async Task ToggleDataset(string datasetId)
+    {
+        if (_expanded.Contains(datasetId)) { _expanded.Remove(datasetId); return; }
+        _expanded.Add(datasetId);
+        if (_tablesByDataset.ContainsKey(datasetId)) return;
+
+        // External datasets are meant to be queried live — browse the source database's real (schema-
+        // qualified) tables here, not the dataset's local DuckDB snapshot.
+        var isExternal = _datasets.FirstOrDefault(d => d.Id == datasetId)?.SourceType == DatasetSourceType.External;
+        var endpoint = isExternal ? $"api/datasets/{datasetId}/source-tables" : $"api/datasets/{datasetId}/tables";
+        try { _tablesByDataset[datasetId] = await _httpClient.GetFromJsonAsync<List<string>>(endpoint) ?? new(); }
+        catch { _tablesByDataset[datasetId] = new(); }
+    }
+
+    private async Task ToggleTable(string datasetId, string tableName)
+    {
+        var key = datasetId + "|" + tableName;
+        if (_expanded.Contains(key)) { _expanded.Remove(key); return; }
+        _expanded.Add(key);
+        if (_columnsByTable.ContainsKey(key)) return;
+        try
+        {
+            var doc = await _httpClient.GetFromJsonAsync<TableDocDto>($"api/datasets/{datasetId}/tables/{Uri.EscapeDataString(tableName)}/docs");
+            _columnsByTable[key] = doc?.Columns ?? new();
+        }
+        catch { _columnsByTable[key] = new(); }
+    }
+
+    private void ToggleMenu(string key) => _openMenuKey = _openMenuKey == key ? null : key;
+
+    // ---- "..." menu actions: drop a new cell into the currently-open notebook ----
+
+    private async Task AddCellForDataset(string datasetId, string? datasetName)
+    {
+        _openMenuKey = null;
+        await CreateCellAsync(datasetId, sql: null, datasetName);
+    }
+
+    private async Task AddCellForTable(string datasetId, string tableName)
+    {
+        _openMenuKey = null;
+        await CreateCellAsync(datasetId, $"SELECT * FROM {QuoteIfNeeded(tableName)} LIMIT 100;", tableName);
+    }
+
+    private async Task CreateCellAsync(string datasetId, string? sql, string? label)
+    {
+        var notebookId = _stateContainer.NotebookExplorerNotebookId;
+        if (string.IsNullOrEmpty(notebookId)) return;
+
+        try
+        {
+            // Match the same "cell_{n}" naming the page's own "+ SQL Cell" button uses — based on the
+            // notebook's current cell count, fetched fresh since this component doesn't hold the cell list.
+            var notebook = await _httpClient.GetFromJsonAsync<QueryNotebookDto>($"api/query-notebooks/{notebookId}");
+            var name = $"cell_{(notebook?.CellCount ?? 0) + 1}";
+
+            var request = new SaveNotebookCellRequest { CellType = "sql", DatasetId = datasetId, Name = name, Sql = sql };
+            var response = await _httpClient.PostAsJsonAsync($"api/query-notebooks/{notebookId}/cells", request);
+            if (response.IsSuccessStatusCode)
+            {
+                _toastService.ShowSuccess(string.IsNullOrEmpty(label) ? "Cell added." : $"Cell added for '{label}'.");
+                _stateContainer.NotifyNotebookCellsChangedExternally();
+            }
+            else
+            {
+                _toastService.ShowError($"Couldn't add cell: {await response.Content.ReadAsStringAsync()}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Couldn't add cell: {ex.Message}");
+        }
+    }
+
+    // Matches the same "quote only if not a plain/dotted identifier" convention used for Monaco's
+    // autocomplete — schema-qualified live-source names like "dbo.Orders" must stay unquoted.
+    private static string QuoteIfNeeded(string name)
+        => Regex.IsMatch(name, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$") ? name : $"\"{name}\"";
+
+    // Small glyph per column type, mirroring MotherDuck's sidebar (# numeric, clock for date/time, ABC text).
+    private static string IconGlyph(string dataType)
+    {
+        var t = (dataType ?? "").ToUpperInvariant();
+        if (t.Contains("BOOL")) return "T/F";
+        if (t.Contains("INT") || t.Contains("DECIMAL") || t.Contains("DOUBLE") || t.Contains("FLOAT") || t.Contains("NUMERIC")) return "#";
+        if (t.Contains("DATE") || t.Contains("TIME")) return "⏱"; // clock
+        if (t.Contains("UUID")) return "ID";
+        if (t.Contains("JSON")) return "{}";
+        return "ABC";
+    }
+
+    private static string IconClass(string dataType)
+    {
+        var t = (dataType ?? "").ToUpperInvariant();
+        if (t.Contains("INT") || t.Contains("DECIMAL") || t.Contains("DOUBLE") || t.Contains("FLOAT") || t.Contains("NUMERIC")) return "dbx-col-num";
+        if (t.Contains("DATE") || t.Contains("TIME")) return "dbx-col-date";
+        if (t.Contains("BOOL")) return "dbx-col-bool";
+        return "dbx-col-text";
+    }
+
+    private void Back() => _navigationManager.NavigateTo(string.IsNullOrEmpty(CompanyId) ? "data/notebook" : $"data/notebook?c={CompanyId}");
+}
+
+<style>
+    .dbx { display:flex; flex-direction:column; padding:0.75rem 0.6rem; gap:0.5rem; height:100%; overflow-y:auto; }
+    .dbx-back { display:flex; align-items:center; gap:0.35rem; background:none; border:none; color:#52525b; font-size:0.8125rem; font-weight:500; cursor:pointer; padding:0.35rem 0.4rem; border-radius:6px; text-align:left; }
+    .dbx-back:hover { background:#f4f4f5; color:#18181b; }
+    .dbx-header { display:flex; align-items:center; gap:0.4rem; font-size:0.75rem; font-weight:700; text-transform:uppercase; letter-spacing:0.04em; color:#71717a; padding:0.3rem 0.4rem; }
+    .dbx-loading, .dbx-loading-inline { display:flex; padding:0.4rem; }
+    .dbx-empty, .dbx-empty-inline { font-size:0.75rem; color:#a1a1aa; padding:0.2rem 0.5rem; margin:0; }
+    .dbx-tree { display:flex; flex-direction:column; }
+    .dbx-node { display:flex; flex-direction:column; }
+    .dbx-row { display:flex; align-items:center; gap:0.15rem; padding:0.15rem 0.3rem 0.15rem 0.4rem; border-radius:6px; font-size:0.8125rem; color:#27272a; }
+    .dbx-row-db:hover, .dbx-row-table:hover { background:#f4f4f5; }
+    .dbx-row-main {
+        display:flex; align-items:center; gap:0.35rem; flex:1; min-width:0; background:none; border:none;
+        padding:0.15rem 0; text-align:left; cursor:pointer; font-size:inherit; color:inherit; font-family:inherit;
+    }
+    .dbx-row-col { cursor:default; color:#52525b; }
+    .dbx-caret { flex-shrink:0; color:#a1a1aa; transition:transform 0.1s ease; }
+    .dbx-caret-open { transform:rotate(90deg); }
+    .dbx-icon { flex-shrink:0; color:#71717a; }
+    .dbx-label { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+    .dbx-children { padding-left:1rem; border-left:1px solid #f0f0f1; margin-left:0.55rem; display:flex; flex-direction:column; }
+    .dbx-col-icon { flex-shrink:0; width:22px; text-align:center; font-size:0.6875rem; font-weight:700; color:#a1a1aa; font-family:ui-monospace,Consolas,monospace; }
+    .dbx-col-num { color:#2563eb; }
+    .dbx-col-date { color:#d97706; }
+    .dbx-col-bool { color:#16a34a; }
+    .dbx-col-text { color:#a1a1aa; }
+
+    /* "..." row menu */
+    .dbx-menu-anchor { position:relative; flex-shrink:0; }
+    .dbx-menu-btn {
+        display:flex; align-items:center; justify-content:center; width:20px; height:20px; padding:0;
+        background:none; border:none; border-radius:5px; color:#a1a1aa; cursor:pointer;
+        opacity:0; transition:opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+    }
+    .dbx-row:hover .dbx-menu-btn { opacity:1; }
+    .dbx-menu-btn:hover { background:#e4e4e7; color:#3f3f46; }
+    .dbx-menu-backdrop { position:fixed; inset:0; z-index:40; background:transparent; }
+    .dbx-menu {
+        position:absolute; top:calc(100% + 4px); right:0; z-index:50; min-width:220px;
+        background:#fff; border:1px solid #e4e4e7; border-radius:10px;
+        box-shadow:0 10px 28px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.06); padding:0.3rem; overflow:hidden;
+    }
+    .dbx-menu-item {
+        display:flex; align-items:center; gap:0.5rem; width:100%; text-align:left; background:none; border:none;
+        padding:0.45rem 0.55rem; border-radius:6px; font-size:0.8125rem; color:#27272a; cursor:pointer;
+        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    }
+    .dbx-menu-item:hover { background:#f4f4f5; }
+    .dbx-menu-item svg { flex-shrink:0; color:#71717a; }
+</style>
