@@ -11,6 +11,24 @@
 
 <PageTitle>Status Incidents</PageTitle>
 
+<style>
+    /* Belt-and-suspenders: guarantee no cell/row/column borders regardless of any inherited
+       table styling (Bootstrap/FluentUI resets are loaded globally alongside Tailwind). */
+    .incidents-table, .incidents-table thead, .incidents-table tbody, .incidents-table tr,
+    .incidents-table th, .incidents-table td {
+        border: none !important;
+        border-collapse: collapse;
+    }
+    /* The sortable column headers and row actions render as plain buttons — without Tailwind's
+       Preflight reset actually applying (e.g. the CDN script loads late/is blocked), they fall
+       back to the browser's native button chrome, which includes a visible border. */
+    .incidents-table th button, .incidents-table td button {
+        border: none !important;
+        outline: none !important;
+        background: transparent !important;
+    }
+</style>
+
 <div class="h-full flex flex-col gap-4 min-h-0">
     <!-- Header -->
     <div class="flex items-center justify-between flex-shrink-0">
@@ -101,9 +119,9 @@
 
             @if (pageData.Items.Any())
             {
-                <table class="min-w-full text-sm">
+                <table class="min-w-full text-sm incidents-table">
                     <thead class="bg-gray-50 sticky top-0 z-10">
-                        <tr class="border-b border-gray-200">
+                        <tr>
                             <th class="px-4 py-2.5 text-left">@SortHeader("Severity", "severity")</th>
                             <th class="px-4 py-2.5 text-left">@SortHeader("Incident", "title")</th>
                             <th class="px-4 py-2.5 text-left">@SortHeader("Entity", "entity")</th>
@@ -113,13 +131,13 @@
                             <th class="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-100">
+                    <tbody>
                         @foreach (var incident in pageData.Items)
                         {
-                            <tr class="hover:bg-indigo-50/40 cursor-pointer transition-colors" @onclick="() => ViewIncident(incident.Id)">
+                            <tr class="hover:bg-gray-50 cursor-pointer transition-colors" @onclick="() => ViewIncident(incident.Id)">
                                 <td class="px-4 py-2.5">
                                     <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium @incident.GetSeverityClass()">
-                                        <span>@incident.GetSeverityIcon()</span> @incident.Severity
+                                        @SeverityIcon() @incident.Severity
                                     </span>
                                 </td>
                                 <td class="px-4 py-2.5">
@@ -147,21 +165,14 @@
                                     }
                                 </td>
                                 <td class="px-4 py-2.5" @onclick:stopPropagation="true">
-                                    <div class="flex items-center justify-end gap-1">
-                                        <button @onclick="() => ViewIncident(incident.Id)" title="View"
-                                                class="p-1.5 rounded-md text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
-                                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
-                                            </svg>
+                                    <div class="ds-actions">
+                                        <button class="btn-icon btn-icon-open" title="View incident" @onclick="() => ViewIncident(incident.Id)">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
                                         </button>
                                         <AuthorizeView Roles="@writeRoles" Context="writeCtx">
                                             <Authorized>
-                                                <button @onclick="() => EditIncident(incident.Id)" title="Edit"
-                                                        class="p-1.5 rounded-md text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                                                    </svg>
+                                                <button class="btn-icon btn-icon-edit" title="Edit incident" @onclick="() => EditIncident(incident.Id)">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
                                                 </button>
                                             </Authorized>
                                         </AuthorizeView>
@@ -404,4 +415,7 @@
         if (d.Value.TotalHours >= 1) return $"{(int)d.Value.TotalHours}h {d.Value.Minutes}m";
         return $"{(int)d.Value.TotalMinutes}m";
     }
+
+    // Colored via the surrounding severity pill's own text color (currentColor) — no emoji.
+    private RenderFragment SeverityIcon() => @<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="currentColor"/></svg>;
 }
