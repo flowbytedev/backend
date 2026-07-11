@@ -22,11 +22,19 @@ public class QueryNotebooksController : ControllerBase
 {
     private readonly IQueryNotebookService _notebooks;
     private readonly INotebookAgentService _agent;
+    private readonly INotebookSharingService _sharing;
+    private readonly INotebookCommentService _comments;
+    private readonly INotebookRunCancellationRegistry _cancellation;
 
-    public QueryNotebooksController(IQueryNotebookService notebooks, INotebookAgentService agent)
+    public QueryNotebooksController(
+        IQueryNotebookService notebooks, INotebookAgentService agent, INotebookSharingService sharing,
+        INotebookCommentService comments, INotebookRunCancellationRegistry cancellation)
     {
         _notebooks = notebooks;
         _agent = agent;
+        _sharing = sharing;
+        _comments = comments;
+        _cancellation = cancellation;
     }
 
     [HttpGet]
@@ -84,66 +92,257 @@ public class QueryNotebooksController : ControllerBase
     [HttpPost("{id}/cells")]
     public async Task<ActionResult<NotebookCellDto>> AddCell(string id, [FromBody] SaveNotebookCellRequest request)
     {
-        var (companyId, _, _, error) = ReadContext();
+        var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
         if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
         if (request == null) return BadRequest("Request is required");
 
-        var (cell, cellError) = await _notebooks.AddCellAsync(companyId, id, request);
+        var (cell, cellError) = await _notebooks.AddCellAsync(companyId, userId, isAdmin, id, request);
         return cell == null ? BadRequest(cellError ?? "Couldn't add the cell.") : Ok(cell);
     }
 
     [HttpPut("{id}/cells/{cellId}")]
     public async Task<ActionResult<NotebookCellDto>> UpdateCell(string id, string cellId, [FromBody] SaveNotebookCellRequest request)
     {
-        var (companyId, _, _, error) = ReadContext();
+        var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
         if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
         if (request == null) return BadRequest("Request is required");
 
-        var (cell, cellError) = await _notebooks.UpdateCellAsync(companyId, id, cellId, request, HttpContext.RequestAborted);
+        var (cell, cellError) = await _notebooks.UpdateCellAsync(companyId, userId, isAdmin, id, cellId, request, HttpContext.RequestAborted);
         return cell == null ? BadRequest(cellError ?? "Couldn't update the cell.") : Ok(cell);
     }
 
     [HttpDelete("{id}/cells/{cellId}")]
     public async Task<IActionResult> RemoveCell(string id, string cellId)
     {
-        var (companyId, _, _, error) = ReadContext();
+        var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
         if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
 
-        return await _notebooks.RemoveCellAsync(companyId, id, cellId, HttpContext.RequestAborted) ? NoContent() : NotFound();
+        return await _notebooks.RemoveCellAsync(companyId, userId, isAdmin, id, cellId, HttpContext.RequestAborted) ? NoContent() : NotFound();
     }
 
     [HttpPut("{id}/cells/reorder")]
     public async Task<IActionResult> ReorderCells(string id, [FromBody] List<string> orderedCellIds)
     {
-        var (companyId, _, _, error) = ReadContext();
+        var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
         if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
         if (orderedCellIds == null || orderedCellIds.Count == 0) return BadRequest("No cell order provided.");
 
-        return await _notebooks.ReorderCellsAsync(companyId, id, orderedCellIds) ? NoContent() : NotFound();
+        return await _notebooks.ReorderCellsAsync(companyId, userId, isAdmin, id, orderedCellIds) ? NoContent() : NotFound();
     }
 
     [HttpPost("{id}/cells/{cellId}/run")]
-    public async Task<ActionResult<NotebookCellRunResult>> RunCell(string id, string cellId)
+    public async Task<ActionResult<NotebookCellRunResult>> RunCell(string id, string cellId, [FromBody] RunNotebookRequest? request)
     {
-        var (companyId, userId, _, error) = ReadContext();
+        var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
         if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
 
-        return Ok(await _notebooks.RunCellAsync(companyId, userId, id, cellId, HttpContext.RequestAborted));
+        return Ok(await _notebooks.RunCellAsync(companyId, userId, isAdmin, id, cellId, request?.Parameters, "manual", HttpContext.RequestAborted));
+    }
+
+    [HttpPost("{id}/cells/{cellId}/cancel")]
+    public IActionResult CancelCell(string id, string cellId)
+    {
+        var (_, _, _, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        return _cancellation.Cancel($"cell:{cellId}") ? Ok() : NotFound("No run is currently in progress for this cell.");
     }
 
     [HttpPost("{id}/run-all")]
-    public async Task<ActionResult<RunAllResult>> RunAll(string id)
+    public async Task<ActionResult<RunAllResult>> RunAll(string id, [FromBody] RunNotebookRequest? request)
+    {
+        var (companyId, userId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+
+        return Ok(await _notebooks.RunAllAsync(companyId, userId, isAdmin, id, request?.Parameters, "run_all", HttpContext.RequestAborted));
+    }
+
+    [HttpPost("{id}/run-all/cancel")]
+    public IActionResult CancelRunAll(string id)
+    {
+        var (_, _, _, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        return _cancellation.Cancel($"notebook:{id}:all") ? Ok() : NotFound("No Run All is currently in progress for this notebook.");
+    }
+
+    // ---- schedule ----
+
+    [HttpPut("{id}/schedule")]
+    public async Task<ActionResult<QueryNotebookDto>> UpdateSchedule(string id, [FromBody] ScheduleNotebookRequest request)
+    {
+        var (companyId, userId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (request == null) return BadRequest("Request is required");
+
+        var updated = await _notebooks.UpdateScheduleAsync(companyId, id, userId, isAdmin, request);
+        return updated == null
+            ? NotFound("Notebook not found, you don't have permission to manage its schedule, or the schedule needs a cron expression to be enabled.")
+            : Ok(updated);
+    }
+
+    // ---- run history ----
+
+    [HttpGet("{id}/cells/{cellId}/runs")]
+    public async Task<ActionResult<List<NotebookCellRunDto>>> GetCellRunHistory(string id, string cellId, [FromQuery] int take = 20)
+    {
+        var (companyId, userId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+
+        return Ok(await _notebooks.GetCellRunHistoryAsync(companyId, id, cellId, userId, isAdmin, take));
+    }
+
+    // ---- storage ----
+
+    [HttpGet("{id}/storage")]
+    public async Task<ActionResult<NotebookStorageSummaryDto>> GetStorage(string id)
+    {
+        var (companyId, userId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+
+        var summary = await _notebooks.GetStorageSummaryAsync(companyId, id, userId, isAdmin, HttpContext.RequestAborted);
+        return summary == null ? NotFound() : Ok(summary);
+    }
+
+    // ---- duplicate / export / import ----
+
+    [HttpPost("{id}/duplicate")]
+    public async Task<ActionResult<QueryNotebookDto>> Duplicate(string id, [FromBody] DuplicateNotebookRequest? request)
+    {
+        var (companyId, userId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+
+        var duplicate = await _notebooks.DuplicateAsync(companyId, id, userId, isAdmin, request?.Name, HttpContext.RequestAborted);
+        return duplicate == null ? NotFound("Notebook not found, or you don't have permission to view it.") : Ok(duplicate);
+    }
+
+    [HttpGet("{id}/export")]
+    public async Task<ActionResult<NotebookExportDto>> Export(string id)
+    {
+        var (companyId, userId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+
+        var export = await _notebooks.ExportAsync(companyId, id, userId, isAdmin);
+        return export == null ? NotFound("Notebook not found, or you don't have permission to view it.") : Ok(export);
+    }
+
+    [HttpPost("import")]
+    public async Task<ActionResult<QueryNotebookDto>> Import([FromBody] NotebookExportDto request)
     {
         var (companyId, userId, _, error) = ReadContext();
         if (error != null) return BadRequest(error);
         if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (request == null) return BadRequest("Request is required");
 
-        return Ok(await _notebooks.RunAllAsync(companyId, userId, id, HttpContext.RequestAborted));
+        return Ok(await _notebooks.ImportAsync(companyId, userId, request));
+    }
+
+    // ---- sharing ----
+
+    [HttpGet("{id}/sharing")]
+    public async Task<ActionResult<List<NotebookUserDto>>> GetSharing(string id)
+    {
+        var (companyId, userId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        var notebook = await _notebooks.GetAsync(companyId, id, userId, isAdmin);
+        if (notebook == null) return NotFound();
+
+        return Ok(await _sharing.GetNotebookUsersAsync(id));
+    }
+
+    [HttpPost("{id}/sharing")]
+    public async Task<IActionResult> ShareNotebook(string id, [FromBody] ShareNotebookRequest request)
+    {
+        var (companyId, userId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        var notebook = await _notebooks.GetAsync(companyId, id, userId, isAdmin);
+        if (notebook == null) return NotFound();
+        if (!notebook.CanEdit) return Forbid(); // only the owner/company-admin manages sharing
+        if (request == null || string.IsNullOrWhiteSpace(request.Email)) return BadRequest("Email is required");
+        if (id != request.NotebookId) return BadRequest("Notebook ID mismatch");
+
+        var success = await _sharing.ShareNotebookAsync(request, userId);
+        return success ? Ok(new { message = "Notebook shared successfully" }) : BadRequest("Failed to share notebook. The user may not exist.");
+    }
+
+    [HttpPut("{id}/sharing/{userId}")]
+    public async Task<IActionResult> UpdateSharing(string id, string userId, [FromBody] NotebookUserType userType)
+    {
+        var (companyId, requestUserId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        var notebook = await _notebooks.GetAsync(companyId, id, requestUserId, isAdmin);
+        if (notebook == null) return NotFound();
+        if (!notebook.CanEdit) return Forbid();
+
+        return await _sharing.UpdateNotebookUserTypeAsync(id, userId, userType) ? Ok() : NotFound("Notebook user not found");
+    }
+
+    [HttpDelete("{id}/sharing/{userId}")]
+    public async Task<IActionResult> RemoveSharing(string id, string userId)
+    {
+        var (companyId, requestUserId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        var notebook = await _notebooks.GetAsync(companyId, id, requestUserId, isAdmin);
+        if (notebook == null) return NotFound();
+        if (!notebook.CanEdit) return Forbid();
+
+        return await _sharing.RemoveNotebookUserAsync(id, userId) ? Ok() : NotFound("Notebook user not found");
+    }
+
+    // ---- cell comments ----
+
+    [HttpGet("{id}/cells/{cellId}/comments")]
+    public async Task<ActionResult<List<NotebookCellComment>>> GetComments(string id, string cellId)
+    {
+        var (companyId, userId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        var notebook = await _notebooks.GetAsync(companyId, id, userId, isAdmin);
+        if (notebook == null) return NotFound();
+
+        return Ok(await _comments.GetCommentsAsync(id, cellId));
+    }
+
+    [HttpPost("{id}/cells/{cellId}/comments")]
+    public async Task<ActionResult<NotebookCellComment>> AddComment(string id, string cellId, [FromBody] NotebookCellComment comment)
+    {
+        var (companyId, userId, isAdmin, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+        var notebook = await _notebooks.GetAsync(companyId, id, userId, isAdmin);
+        if (notebook == null) return NotFound();
+        if (comment == null || string.IsNullOrWhiteSpace(comment.Content)) return BadRequest("Content is required");
+
+        comment.NotebookId = id;
+        comment.CellId = cellId;
+        comment.UserId = userId;
+        return Ok(await _comments.AddCommentAsync(comment, companyId, notebook.Name));
+    }
+
+    [HttpPut("comments/{commentId}")]
+    public async Task<ActionResult<NotebookCellComment>> UpdateComment(string commentId, [FromBody] string content)
+    {
+        var (_, userId, _, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+
+        var updated = await _comments.UpdateCommentAsync(commentId, content, userId);
+        return updated == null ? NotFound() : Ok(updated);
+    }
+
+    [HttpDelete("comments/{commentId}")]
+    public async Task<IActionResult> DeleteComment(string commentId)
+    {
+        var (_, userId, _, error) = ReadContext();
+        if (error != null) return BadRequest(error);
+
+        return await _comments.DeleteCommentAsync(commentId, userId) ? NoContent() : NotFound();
     }
 
     // POST: ai-assist — plans a suggested SQL body for one cell. Never executes/materializes anything.

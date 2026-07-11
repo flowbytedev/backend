@@ -1,0 +1,142 @@
+@using Application.Shared.Models.Notebooks
+@inject IJSRuntime _jsRuntime
+
+<div class="ndg-wrap">
+    @if (Cells.Count == 0)
+    {
+        <p class="nc-hint">No cells yet.</p>
+    }
+    else
+    {
+        <svg class="ndg-svg" width="@Width" height="@Height" viewBox="0 0 @Width @Height">
+            @foreach (var edge in Edges)
+            {
+                <path d="@BezierPath(edge.From, edge.To)" class="ndg-edge" />
+            }
+            @foreach (var node in Nodes)
+            {
+                <g class="ndg-node @(node.Cell.CellType) @StatusClass(node.Cell.LastRunStatus)" @onclick="() => JumpTo(node.Cell.Id)">
+                    <rect x="@node.X" y="@node.Y" width="@NodeWidth" height="@NodeHeight" rx="8" />
+                    <circle cx="@(node.X + 12)" cy="@(node.Y + NodeHeight / 2)" r="4" class="ndg-status-dot" />
+                    <text x="@(node.X + 24)" y="@(node.Y + NodeHeight / 2 + 4)">@Label(node.Cell)</text>
+                </g>
+            }
+        </svg>
+        <div class="ndg-legend">
+            <span><span class="ndg-dot ndg-dot-success"></span> Success</span>
+            <span><span class="ndg-dot ndg-dot-error"></span> Error</span>
+            <span><span class="ndg-dot ndg-dot-none"></span> Not run</span>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public List<NotebookCellDto> Cells { get; set; } = new();
+
+    private const int NodeWidth = 190;
+    private const int NodeHeight = 40;
+    private const int ColGap = 90;
+    private const int RowGap = 16;
+    private const int Margin = 20;
+
+    private record Node(NotebookCellDto Cell, int X, int Y);
+    private record Edge((int X, int Y) From, (int X, int Y) To);
+
+    private List<Node> Nodes = new();
+    private List<Edge> Edges = new();
+    private int Width = 800;
+    private int Height = 400;
+
+    protected override void OnParametersSet() => Layout();
+
+    private void Layout()
+    {
+        Nodes = new();
+        Edges = new();
+        if (Cells.Count == 0) return;
+
+        var byId = Cells.ToDictionary(c => c.Id);
+        var layerOf = new Dictionary<string, int>();
+        var visiting = new HashSet<string>();
+
+        int LayerOf(string id)
+        {
+            if (layerOf.TryGetValue(id, out var cached)) return cached;
+            if (!visiting.Add(id)) return layerOf[id] = 0; // cycle guard — shouldn't happen, but stay defensive
+            if (!byId.TryGetValue(id, out var cell)) { visiting.Remove(id); return layerOf[id] = 0; }
+
+            var deps = cell.ReferencedCellIds.Where(byId.ContainsKey).ToList();
+            var layer = deps.Count == 0 ? 0 : deps.Max(LayerOf) + 1;
+            visiting.Remove(id);
+            return layerOf[id] = layer;
+        }
+
+        foreach (var c in Cells) LayerOf(c.Id);
+
+        var layers = Cells.GroupBy(c => layerOf[c.Id]).OrderBy(g => g.Key).ToList();
+        var positions = new Dictionary<string, (int X, int Y)>();
+
+        foreach (var layer in layers)
+        {
+            var x = Margin + layer.Key * (NodeWidth + ColGap);
+            var row = 0;
+            foreach (var cell in layer)
+            {
+                var y = Margin + row * (NodeHeight + RowGap);
+                positions[cell.Id] = (x, y);
+                Nodes.Add(new Node(cell, x, y));
+                row++;
+            }
+        }
+
+        foreach (var cell in Cells)
+        {
+            var to = positions[cell.Id];
+            foreach (var depId in cell.ReferencedCellIds.Where(positions.ContainsKey))
+            {
+                var from = positions[depId];
+                Edges.Add(new Edge((from.X + NodeWidth, from.Y + NodeHeight / 2), (to.X, to.Y + NodeHeight / 2)));
+            }
+        }
+
+        Width = Margin * 2 + layers.Count * NodeWidth + Math.Max(0, layers.Count - 1) * ColGap;
+        Height = Margin * 2 + (layers.Max(l => l.Count()) * (NodeHeight + RowGap));
+    }
+
+    private static string BezierPath((int X, int Y) from, (int X, int Y) to)
+    {
+        var midX = (from.X + to.X) / 2;
+        return $"M {from.X} {from.Y} C {midX} {from.Y}, {midX} {to.Y}, {to.X} {to.Y}";
+    }
+
+    private static string Label(NotebookCellDto cell)
+        => cell.CellType == "markdown" ? "Markdown note" : (string.IsNullOrWhiteSpace(cell.Name) ? "(unnamed)" : cell.Name);
+
+    private static string StatusClass(string? status) => status switch
+    {
+        "success" => "ndg-status-success",
+        "error" => "ndg-status-error",
+        _ => "ndg-status-none",
+    };
+
+    private async Task JumpTo(string cellId) => await _jsRuntime.InvokeVoidAsync("scrollToElement", $"cell-{cellId}");
+}
+
+<style>
+    .ndg-wrap { overflow:auto; max-height:70vh; }
+    .ndg-svg { display:block; }
+    .ndg-edge { fill:none; stroke:#d4d4d8; stroke-width:1.5; }
+    .ndg-node { cursor:pointer; }
+    .ndg-node rect { fill:#fff; stroke:#e4e4e7; stroke-width:1.5; transition:stroke 0.12s ease, fill 0.12s ease; }
+    .ndg-node:hover rect { stroke:#2563eb; fill:#f5f8ff; }
+    .ndg-node.markdown rect { fill:#fafaf9; stroke-dasharray:3,3; }
+    .ndg-node text { font-size:12px; font-family:ui-monospace,Consolas,monospace; fill:#27272a; }
+    .ndg-status-dot { fill:#d4d4d8; }
+    .ndg-node.ndg-status-success .ndg-status-dot { fill:#16a34a; }
+    .ndg-node.ndg-status-error .ndg-status-dot { fill:#dc2626; }
+    .ndg-legend { display:flex; gap:1rem; margin-top:0.75rem; font-size:0.75rem; color:#71717a; }
+    .ndg-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:0.25rem; }
+    .ndg-dot-success { background:#16a34a; }
+    .ndg-dot-error { background:#dc2626; }
+    .ndg-dot-none { background:#d4d4d8; }
+</style>

@@ -250,6 +250,41 @@ public class DatasetsController : ControllerBase
         return Ok(tables);
     }
 
+    // GET: api/Datasets/{datasetId}/tables/columns — columns for every accessible table in one round trip,
+    // so callers like the notebook's SQL autocomplete don't have to issue one request per table.
+    [HttpGet("{datasetId}/tables/columns")]
+    public async Task<ActionResult<Dictionary<string, List<Column>>>> GetAllTableColumns(string datasetId)
+    {
+        var userId = Request.Headers["UserId"].ToString();
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest("User ID is required in headers");
+
+        var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
+        if (!User.HasCompanyRole(companyId, "VIEW_DATA"))
+            return Forbid();
+
+        if (string.IsNullOrWhiteSpace(datasetId))
+            return BadRequest("Dataset ID is required");
+
+        if (!await DatasetExists(datasetId, userId))
+            return NotFound($"Dataset with ID '{datasetId}' not found.");
+
+        var tables = await _duckdbService.GetTablesAsync(datasetId) ?? new List<string>();
+
+        var allowed = await _datasetService.GetAccessibleTablesAsync(datasetId, userId);
+        if (allowed != null)
+            tables = tables.Where(t => allowed.Contains(t)).ToList();
+
+        var result = new Dictionary<string, List<Column>>();
+        foreach (var table in tables)
+        {
+            try { result[table] = await _duckdbService.GetTableColumnsAsync(datasetId, table); }
+            catch { /* skip tables whose columns can't be read rather than failing the whole map */ }
+        }
+
+        return Ok(result);
+    }
+
     // GET: api/Datasets/stats — per-dataset annotations (table count, file size, row estimate, status)
     // for the datasets list page. One entry per dataset the user can see.
     [HttpGet("stats")]

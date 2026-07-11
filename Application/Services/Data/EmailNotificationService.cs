@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using Application.Shared.Models;
+using Application.Shared.Models.Notebooks;
 using Application.Shared.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -86,6 +87,53 @@ public class EmailNotificationService : Application.Shared.Services.Data.IEmailN
         {
             // Notifications must never break the share operation.
             _logger.LogError(ex, "[DatasetShared] Failed to send share notification for dataset {DatasetId}.", datasetId);
+        }
+    }
+
+    public async Task SendNotebookSharedNotificationAsync(
+        string recipientEmail, string notebookId, string notebookName, string companyId, string sharedByUserName, NotebookUserType userType)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_options.ApiBaseUri) || string.IsNullOrWhiteSpace(_options.From))
+            {
+                _logger.LogWarning("[NotebookShared] Skipped — email service is not configured (ApiBaseUri/From).");
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(recipientEmail))
+                return;
+
+            var accessLevel = userType == NotebookUserType.Editor ? "Editor" : "Viewer";
+
+            var appBase = (_options.AppBaseUri ?? string.Empty).TrimEnd('/');
+            var notebookUrl = string.IsNullOrEmpty(appBase)
+                ? null
+                : $"{appBase}/data/notebook?c={companyId}&n={notebookId}";
+
+            var payload = new DatasetSharedEmailPayload
+            {
+                From = _options.From!,
+                To = new List<string> { recipientEmail.Trim() },
+                Subject = $"Notebook '{notebookName}' has been shared with you",
+                DatasetName = notebookName,
+                SharedByName = sharedByUserName,
+                AccessLevel = accessLevel,
+                DatasetUrl = notebookUrl,
+                Message = $"{sharedByUserName} has shared the notebook \"{notebookName}\" with you. Your access level is {accessLevel}."
+            };
+
+            var client = _httpClientFactory.CreateClient(HttpClientName);
+            var endpoint = string.IsNullOrWhiteSpace(_options.Endpoint) ? "/api/email/dataset-shared" : _options.Endpoint;
+
+            var response = await client.PostAsJsonAsync(endpoint, payload);
+            response.EnsureSuccessStatusCode();
+
+            _logger.LogInformation("[NotebookShared] Sent share notification for notebook {NotebookId} to {Recipient}.", notebookId, recipientEmail);
+        }
+        catch (Exception ex)
+        {
+            // Notifications must never break the share operation.
+            _logger.LogError(ex, "[NotebookShared] Failed to send share notification for notebook {NotebookId}.", notebookId);
         }
     }
 

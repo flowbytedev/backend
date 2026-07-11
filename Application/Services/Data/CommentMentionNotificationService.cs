@@ -99,6 +99,68 @@ public class CommentMentionNotificationService : ICommentMentionNotificationServ
         }
     }
 
+    public async Task SendNotebookMentionNotificationAsync(
+        string recipientEmail,
+        string? recipientName,
+        string mentionedByName,
+        string notebookId,
+        string notebookName,
+        string cellName,
+        string commentContent,
+        string companyId)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_options.ApiBaseUri) || string.IsNullOrWhiteSpace(_options.From))
+            {
+                _logger.LogWarning("[CommentMention] Skipped notebook mention — email service is not configured.");
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(recipientEmail))
+            {
+                _logger.LogWarning("[CommentMention] Skipped notebook mention — recipient email was empty.");
+                return;
+            }
+
+            var appBase = (_options.AppBaseUri ?? string.Empty).TrimEnd('/');
+            var commentUrl = string.IsNullOrEmpty(appBase)
+                ? null
+                : $"{appBase}/data/notebook?c={companyId}&n={notebookId}";
+
+            var payload = new CommentMentionEmailPayload
+            {
+                From = _options.From!,
+                To = new List<string> { recipientEmail.Trim() },
+                Subject = $"{mentionedByName} mentioned you in a comment",
+                RecipientName = recipientName,
+                MentionedByName = mentionedByName,
+                DatasetName = notebookName,
+                TableName = cellName,
+                CommentContent = commentContent,
+                CommentUrl = commentUrl
+            };
+
+            var client = _httpClientFactory.CreateClient(HttpClientName);
+            var endpoint = string.IsNullOrWhiteSpace(_options.Endpoint) ? "/api/email/comment-mention" : _options.Endpoint;
+
+            var response = await client.PostAsJsonAsync(endpoint, payload);
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync();
+                _logger.LogError(
+                    "[CommentMention] Email service returned {StatusCode} for notebook {NotebookId} to {Recipient}. Body: {Body}",
+                    (int)response.StatusCode, notebookId, recipientEmail, body);
+                return;
+            }
+
+            _logger.LogInformation("[CommentMention] Sent notebook mention notification for notebook {NotebookId} to {Recipient}.", notebookId, recipientEmail);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[CommentMention] Failed to send notebook mention notification for notebook {NotebookId} to {Recipient}.", notebookId, recipientEmail);
+        }
+    }
+
     private sealed class CommentMentionEmailPayload
     {
         [JsonPropertyName("from")]

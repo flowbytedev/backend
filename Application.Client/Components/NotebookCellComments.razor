@@ -1,0 +1,268 @@
+@using Application.Shared.Models.Data
+@using Application.Shared.Models.Notebooks
+@inject HttpClient HttpClient
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<div class="ncm-wrap">
+    <div class="ncm-list">
+        @if (IsLoading)
+        {
+            <div style="display:flex;justify-content:center;padding:1rem 0"><div class="ds-spinner"></div></div>
+        }
+        else if (!Comments.Any())
+        {
+            <p class="ncm-empty">No comments yet — be the first to add one.</p>
+        }
+        else
+        {
+            @foreach (var comment in Comments.OrderByDescending(c => c.CreatedAt))
+            {
+                var cmt = comment;
+                <div class="ncm-item">
+                    <div class="ncm-item-head">
+                        <div class="ncm-avatar">@(cmt.UserName?.FirstOrDefault().ToString()?.ToUpper() ?? "U")</div>
+                        <div style="flex:1;min-width:0">
+                            <div class="ncm-author">@cmt.UserName</div>
+                            <div class="ncm-time">@cmt.CreatedAt.ToString("MMM dd, h:mm tt")</div>
+                        </div>
+                        @if (cmt.UserId == CurrentUserId)
+                        {
+                            <button class="btn-icon" style="width:22px;height:22px" title="Delete" @onclick="() => DeleteComment(cmt.Id)">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                            </button>
+                        }
+                    </div>
+                    <div class="ncm-content">@((MarkupString)FormatCommentContent(cmt.Content))</div>
+                </div>
+            }
+        }
+    </div>
+
+    <div class="ncm-footer">
+        <div style="position:relative">
+            <textarea class="ncm-textarea" rows="2" @bind="NewCommentContent" @oninput="OnCommentInput" @onkeydown="OnCommentKeyDown"
+                      placeholder="Add a comment… Type @@ to mention someone"></textarea>
+            @if (ShowMentionDropdown && MentionUsers.Any())
+            {
+                <div class="ncm-mention-dropdown">
+                    @foreach (var user in MentionUsers.Take(5))
+                    {
+                        var u = user;
+                        <div class="ncm-mention-item" @onclick="() => SelectMentionUser(u)">
+                            <div class="ncm-mention-name">@u.FullName</div>
+                            <div class="ncm-mention-email">@@@u.UserName · @u.Email</div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:0.4rem">
+            <button class="btn btn-default" style="font-size:0.75rem;padding:0.3rem 0.65rem" @onclick="AddComment" disabled="@(string.IsNullOrWhiteSpace(NewCommentContent?.Trim()))">
+                Comment
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+    .ncm-wrap { display:flex; flex-direction:column; width:340px; max-height:420px; }
+    .ncm-list { overflow-y:auto; max-height:280px; padding:0.5rem 0.75rem; display:flex; flex-direction:column; gap:0.65rem; }
+    .ncm-empty { font-size:0.8125rem; color:#a1a1aa; text-align:center; padding:1rem 0; margin:0; }
+    .ncm-item { border-bottom:1px solid #f4f4f5; padding-bottom:0.5rem; }
+    .ncm-item:last-child { border-bottom:none; padding-bottom:0; }
+    .ncm-item-head { display:flex; align-items:center; gap:0.5rem; }
+    .ncm-avatar { flex-shrink:0; width:24px; height:24px; border-radius:50%; background:#e4e4e7; color:#3f3f46; font-size:0.6875rem; font-weight:600; display:flex; align-items:center; justify-content:center; }
+    .ncm-author { font-size:0.8125rem; font-weight:600; color:#18181b; }
+    .ncm-time { font-size:0.6875rem; color:#a1a1aa; }
+    .ncm-content { font-size:0.8125rem; color:#374151; line-height:1.45; margin:0.3rem 0 0 32px; white-space:pre-wrap; word-break:break-word; }
+    .ncm-footer { padding:0.6rem 0.75rem; border-top:1px solid #f4f4f5; }
+    .ncm-textarea {
+        width:100%; resize:none; padding:0.5rem 0.6rem !important; font-size:0.8125rem !important;
+        background-color:#f4f4f5 !important; border:1px solid transparent !important; border-radius:8px !important;
+        box-shadow:none !important; font-family:inherit;
+    }
+    .ncm-textarea:focus { background-color:#fff !important; border-color:#c7d2fe !important; box-shadow:0 0 0 3px rgba(99,102,241,0.15) !important; }
+    .ncm-mention-dropdown {
+        position:absolute; bottom:calc(100% + 4px); left:0; right:0; z-index:20;
+        background:#fff; border:1px solid #e4e4e7; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.12);
+        max-height:180px; overflow-y:auto; padding:4px;
+    }
+    .ncm-mention-item { padding:0.35rem 0.5rem; border-radius:6px; cursor:pointer; }
+    .ncm-mention-item:hover { background:#f4f4f5; }
+    .ncm-mention-name { font-size:0.8125rem; font-weight:600; color:#18181b; }
+    .ncm-mention-email { font-size:0.7rem; color:#71717a; }
+</style>
+
+@code {
+    [Parameter] public string CompanyId { get; set; } = string.Empty;
+    [Parameter] public string NotebookId { get; set; } = string.Empty;
+    [Parameter] public string CellId { get; set; } = string.Empty;
+    [Parameter] public EventCallback<int> OnCountChanged { get; set; }
+
+    private List<NotebookCellComment> Comments = new();
+    private List<UserMention> MentionUsers = new();
+    private Dictionary<string, UserMention> SelectedMentions = new(StringComparer.OrdinalIgnoreCase);
+    private string NewCommentContent = string.Empty;
+    private bool IsLoading;
+    private bool ShowMentionDropdown;
+    private string CurrentMentionQuery = string.Empty;
+    private int MentionStartPosition = -1;
+    private string CurrentUserId = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        CurrentUserId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        await LoadComments();
+    }
+
+    private async Task LoadComments()
+    {
+        IsLoading = true;
+        StateHasChanged();
+        try
+        {
+            if (!HttpClient.DefaultRequestHeaders.Contains("X-Company-Id"))
+                HttpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId);
+            var response = await HttpClient.GetFromJsonAsync<List<NotebookCellComment>>($"api/query-notebooks/{NotebookId}/cells/{CellId}/comments");
+            Comments = response ?? new();
+        }
+        catch { Comments = new(); }
+        finally
+        {
+            IsLoading = false;
+            StateHasChanged();
+            await OnCountChanged.InvokeAsync(Comments.Count);
+        }
+    }
+
+    private async Task AddComment()
+    {
+        if (string.IsNullOrWhiteSpace(NewCommentContent?.Trim())) return;
+        try
+        {
+            var comment = new NotebookCellComment
+            {
+                NotebookId = NotebookId,
+                CellId = CellId,
+                UserId = CurrentUserId,
+                Content = NewCommentContent.Trim(),
+                MentionedUserIds = ExtractMentionedUserIds(NewCommentContent)
+            };
+            var response = await HttpClient.PostAsJsonAsync($"api/query-notebooks/{NotebookId}/cells/{CellId}/comments", comment);
+            if (response.IsSuccessStatusCode)
+            {
+                var added = await response.Content.ReadFromJsonAsync<NotebookCellComment>();
+                if (added != null)
+                {
+                    Comments.Insert(0, added);
+                    NewCommentContent = string.Empty;
+                    SelectedMentions.Clear();
+                    await OnCountChanged.InvokeAsync(Comments.Count);
+                    StateHasChanged();
+                }
+            }
+        }
+        catch (Exception ex) { Console.WriteLine($"Error adding notebook comment: {ex.Message}"); }
+    }
+
+    private async Task DeleteComment(string commentId)
+    {
+        try
+        {
+            var response = await HttpClient.DeleteAsync($"api/query-notebooks/comments/{commentId}");
+            if (response.IsSuccessStatusCode)
+            {
+                Comments.RemoveAll(c => c.Id == commentId);
+                await OnCountChanged.InvokeAsync(Comments.Count);
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex) { Console.WriteLine($"Error deleting notebook comment: {ex.Message}"); }
+    }
+
+    private async Task OnCommentInput(ChangeEventArgs e)
+    {
+        var content = e.Value?.ToString() ?? string.Empty;
+        NewCommentContent = content;
+        await HandleMentionInput(content, content.Length);
+    }
+
+    private async Task HandleMentionInput(string content, int cursorPosition)
+    {
+        var lastAtIndex = content.LastIndexOf('@', Math.Max(0, cursorPosition - 1));
+        if (lastAtIndex >= 0)
+        {
+            var mentionQuery = content.Substring(lastAtIndex + 1, cursorPosition - lastAtIndex - 1);
+            if (!mentionQuery.Contains(' ') && mentionQuery.Length <= 20)
+            {
+                MentionStartPosition = lastAtIndex;
+                CurrentMentionQuery = mentionQuery;
+                await SearchUsers(mentionQuery);
+                ShowMentionDropdown = MentionUsers.Any();
+            }
+            else ShowMentionDropdown = false;
+        }
+        else ShowMentionDropdown = false;
+        StateHasChanged();
+    }
+
+    private async Task SearchUsers(string query)
+    {
+        if (string.IsNullOrWhiteSpace(query)) { MentionUsers.Clear(); return; }
+        try
+        {
+            if (!HttpClient.DefaultRequestHeaders.Contains("X-Company-Id"))
+                HttpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId);
+            var response = await HttpClient.GetFromJsonAsync<List<UserMention>>($"api/DataViews/users/search?searchTerm={Uri.EscapeDataString(query)}&maxResults=5");
+            MentionUsers = response ?? new();
+        }
+        catch { MentionUsers.Clear(); }
+    }
+
+    private void SelectMentionUser(UserMention user)
+    {
+        if (MentionStartPosition >= 0)
+        {
+            var before = NewCommentContent.Substring(0, MentionStartPosition);
+            var after = NewCommentContent.Substring(MentionStartPosition + CurrentMentionQuery.Length + 1);
+            NewCommentContent = $"{before}@{user.UserName} {after}";
+            SelectedMentions[user.UserName] = user;
+        }
+        ShowMentionDropdown = false;
+        MentionStartPosition = -1;
+        CurrentMentionQuery = string.Empty;
+        StateHasChanged();
+    }
+
+    private const string MentionPattern = @"@([\w.+\-]+(?:@[\w.\-]+)?)";
+
+    private List<string> ExtractMentionedUserIds(string content)
+    {
+        var ids = new List<string>();
+        var matches = System.Text.RegularExpressions.Regex.Matches(content, MentionPattern);
+        foreach (System.Text.RegularExpressions.Match match in matches)
+        {
+            var token = match.Groups[1].Value;
+            var user = SelectedMentions.TryGetValue(token, out var picked)
+                ? picked
+                : MentionUsers.FirstOrDefault(u => string.Equals(u.UserName, token, StringComparison.OrdinalIgnoreCase));
+            if (user != null) ids.Add(user.Id);
+        }
+        return ids.Distinct().ToList();
+    }
+
+    private string FormatCommentContent(string content)
+    {
+        if (string.IsNullOrEmpty(content)) return content;
+        var encoded = System.Net.WebUtility.HtmlEncode(content);
+        return System.Text.RegularExpressions.Regex.Replace(encoded, MentionPattern,
+            "<span style='color:#18181b;font-weight:600;background:#f4f4f5;padding:1px 4px;border-radius:3px'>@$1</span>");
+    }
+
+    private async Task OnCommentKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && e.CtrlKey) await AddComment();
+        else if (e.Key == "Escape") ShowMentionDropdown = false;
+    }
+}

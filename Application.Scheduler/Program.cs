@@ -94,6 +94,21 @@ builder.Services.AddScoped<Application.Shared.Services.Data.IIngestionService,
 builder.Services.AddScoped<Application.Shared.Services.Data.IngestionJob>();
 builder.Services.AddScoped<IngestionRegistrarJob>();
 
+// Scheduled notebook runs. IDatasetService only needs ApplicationDbContext/DuckDB (both already
+// registered above) so it's fully functional here; INotebookSharingService is NOT — see
+// UnsupportedNotebookSharingService for why a stub is used instead of the real implementation.
+builder.Services.AddScoped<Application.Shared.Services.Data.IDatasetService,
+    Application.Shared.Services.Data.DatasetService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.INotebookSharingService,
+    Application.Scheduler.Services.UnsupportedNotebookSharingService>();
+builder.Services.AddSingleton<Application.Shared.Services.Data.INotebookRunCancellationRegistry,
+    Application.Shared.Services.Data.NotebookRunCancellationRegistry>();
+builder.Services.AddScoped<Application.Shared.Services.Data.IQueryNotebookService,
+    Application.Shared.Services.Data.QueryNotebookService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.NotebookRunJob>();
+builder.Services.AddScoped<NotebookRunRegistrarJob>();
+builder.Services.Configure<Application.Shared.Options.NotebookOpsOptions>(builder.Configuration.GetSection("NotebookOps"));
+
 
 builder.Services.AddHangfire(cfg => cfg
     .UseSimpleAssemblyNameTypeSerializer()
@@ -270,6 +285,15 @@ if (ownsDefaultQueue)
         timeZone: tz
     );
 
+    // Scheduled notebook runs: same reconcile-against-the-table pattern, against query_notebook's
+    // schedule columns. The jobs it registers run on the "notebook" queue (see appsettings' Hangfire:Queues).
+    RecurringJob.AddOrUpdate<NotebookRunRegistrarJob>(
+        recurringJobId: "notebook-run-registrar",
+        methodCall: job => job.RunAsync(null, CancellationToken.None),
+        cronExpression: "*/5 * * * *",
+        timeZone: tz
+    );
+
     // Reconcile orphaned ingestion runs (stuck at "Running" after a process restart) on a recurring basis,
     // so stale rows are cleaned up even without a restart of either process.
     RecurringJob.AddOrUpdate<Application.Shared.Services.Data.IIngestionService>(
@@ -292,6 +316,16 @@ if (ownsDefaultQueue)
     catch (Exception ex)
     {
         Console.WriteLine($"Initial ingestion reconcile failed: {ex.Message}");
+    }
+
+    try
+    {
+        var notebookRegistrar = scope.ServiceProvider.GetRequiredService<NotebookRunRegistrarJob>();
+        await notebookRegistrar.RunAsync(null, CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Initial notebook-run reconcile failed: {ex.Message}");
     }
 }
 

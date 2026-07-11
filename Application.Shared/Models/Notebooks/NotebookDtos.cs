@@ -28,11 +28,21 @@ public class QueryNotebookDto
     public string? CreatedBy { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? ModifiedAt { get; set; }
-    /// <summary>Whether the requesting user may edit/delete this notebook (creator or admin).</summary>
+    /// <summary>Whether the requesting user may rename/delete/manage sharing for this notebook (creator or admin).</summary>
     public bool CanEdit { get; set; }
+    /// <summary>Whether the requesting user may add/edit/run cells — true for the owner, company admins,
+    /// anyone when the notebook is company-wide shared, or a user with an explicit Editor grant.</summary>
+    public bool CanEditCells { get; set; }
     /// <summary>Populated on both the list and single-notebook endpoints (even when Cells itself isn't).</summary>
     public int CellCount { get; set; }
     public List<NotebookCellDto> Cells { get; set; } = new();
+
+    public string? CronExpression { get; set; }
+    public bool ScheduleEnabled { get; set; }
+    public string? ScheduleTimeZone { get; set; }
+    public DateTime? LastScheduledRunAt { get; set; }
+    public string? LastScheduledRunStatus { get; set; }
+    public string? LastScheduledRunError { get; set; }
 }
 
 public class SaveNotebookRequest
@@ -93,4 +103,71 @@ public class NotebookAiAssistResult
 {
     public string Reply { get; set; } = string.Empty;
     public string? Sql { get; set; }
+}
+
+public class DuplicateNotebookRequest
+{
+    public string? Name { get; set; }
+}
+
+/// <summary>Portable JSON snapshot of a notebook for export/import. Cell <see cref="NotebookExportCellDto.Id"/>
+/// is the ORIGINAL cell id, kept only so <see cref="NotebookExportCellDto.ReferencedCellIds"/> can be
+/// remapped to freshly-generated ids on import — it's not reused as the new cell's id.</summary>
+public class NotebookExportDto
+{
+    public string Name { get; set; } = string.Empty;
+    public string? Description { get; set; }
+    public List<NotebookExportCellDto> Cells { get; set; } = new();
+}
+
+public class NotebookExportCellDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string CellType { get; set; } = "sql";
+    public string? Name { get; set; }
+    public string? Sql { get; set; }
+    public string? Markdown { get; set; }
+    public List<string> ReferencedCellIds { get; set; } = new();
+    public bool SnapshotMode { get; set; }
+    public int SortOrder { get; set; }
+    /// <summary>Advisory — dataset ids are company-specific. Re-validated on import; dropped (cell comes in
+    /// with no dataset) if the importing company can't actually access it.</summary>
+    public string? DatasetId { get; set; }
+    public string? DatasetName { get; set; }
+}
+
+public class ScheduleNotebookRequest
+{
+    /// <summary>Standard 5-field cron. Ignored (schedule effectively off) when Enabled is false.</summary>
+    public string? CronExpression { get; set; }
+    public bool Enabled { get; set; }
+    /// <summary>IANA id (e.g. "Asia/Beirut"); null uses the scheduler's default.</summary>
+    public string? TimeZone { get; set; }
+}
+
+/// <summary>Optional run-time inputs for a cell/notebook run — substituted into <c>{{name}}</c> placeholders
+/// in SQL text before execution. Never persisted; a fresh run with no matching key leaves that placeholder
+/// untouched (so it fails loudly at the SQL level instead of silently becoming an empty string).</summary>
+public class RunNotebookRequest
+{
+    public Dictionary<string, string>? Parameters { get; set; }
+}
+
+public class NotebookCellRunDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Error { get; set; }
+    public int? RowsReturned { get; set; }
+    public long? ElapsedMs { get; set; }
+    public string? MaterializedObject { get; set; }
+    public string TriggeredBy { get; set; } = "manual";
+    public DateTime StartedAt { get; set; }
+}
+
+public class NotebookStorageSummaryDto
+{
+    public int ObjectCount { get; set; }
+    public long TotalRows { get; set; }
+    public long TotalSizeBytes { get; set; }
 }

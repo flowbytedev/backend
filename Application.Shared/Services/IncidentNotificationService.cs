@@ -102,6 +102,57 @@ public class IncidentNotificationService : IIncidentNotificationService
         }
     }
 
+    public async Task NotifyGenericAsync(
+        IEnumerable<string> recipientEmails,
+        string subject,
+        string entityName,
+        string incidentTitle,
+        string? severity,
+        string? message,
+        string statusUrl,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_options.ApiBaseUri) || string.IsNullOrWhiteSpace(_options.From))
+            {
+                _logger.LogWarning("[IncidentNotification] Skipped generic notification — email service is not configured.");
+                return;
+            }
+
+            var recipients = recipientEmails
+                .Where(e => !string.IsNullOrWhiteSpace(e))
+                .Select(e => e.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            if (recipients.Count == 0) return;
+
+            var payload = new IncidentEmailPayload
+            {
+                From = _options.From!,
+                To = recipients,
+                Subject = subject,
+                EntityName = entityName,
+                IncidentTitle = incidentTitle,
+                Severity = severity ?? "",
+                Message = message ?? "",
+                StatusUrl = statusUrl,
+            };
+
+            var client = _httpClientFactory.CreateClient(HttpClientName);
+            var endpoint = string.IsNullOrWhiteSpace(_options.Endpoint) ? "/api/email/incident" : _options.Endpoint;
+
+            var response = await client.PostAsJsonAsync(endpoint, payload, ct);
+            response.EnsureSuccessStatusCode();
+
+            _logger.LogInformation("[IncidentNotification] Sent generic notification '{Subject}' to {Count} recipient(s).", subject, recipients.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[IncidentNotification] Failed to send generic notification '{Subject}'.", subject);
+        }
+    }
+
     /// <summary>
     /// The incident's entity plus every entity it transitively depends on (upstream), cycle-safe.
     /// </summary>

@@ -112,6 +112,13 @@ namespace Application.Shared.Data
         public DbSet<QueryNotebook> QueryNotebook { get; set; }
         public DbSet<QueryNotebookCell> QueryNotebookCell { get; set; }
 
+        // Per-user notebook sharing grants (additive to QueryNotebook.IsShared) and per-cell comment threads.
+        public DbSet<NotebookUser> NotebookUser { get; set; }
+        public DbSet<NotebookCellComment> NotebookCellComment { get; set; }
+
+        // Append-only run history behind each cell's "run history" panel.
+        public DbSet<NotebookCellRun> NotebookCellRun { get; set; }
+
         // "What's New" feature-announcement feed + per-user last-seen tracking.
         public DbSet<WhatsNewItem> WhatsNewItem { get; set; }
         public DbSet<WhatsNewSeen> WhatsNewSeen { get; set; }

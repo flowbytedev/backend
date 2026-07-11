@@ -18,6 +18,9 @@ else
     [Parameter] public string Height { get; set; } = "240px";
     /// <summary>Table (and cell-reference) names to offer as autocomplete suggestions in FROM/JOIN.</summary>
     [Parameter] public List<string>? Tables { get; set; }
+    /// <summary>Per-table column names ("table" or "table.column"-prefixed key -> column names), sourced
+    /// from the cell's dataset schema, offered as qualified ("table.column") and unqualified suggestions.</summary>
+    [Parameter] public Dictionary<string, List<string>>? Columns { get; set; }
     /// <summary>Fired on Ctrl+Enter (Cmd+Enter on Mac) inside the editor — the conventional "run" shortcut.</summary>
     [Parameter] public EventCallback OnRunRequested { get; set; }
 
@@ -29,6 +32,7 @@ else
     private string? _fallbackValue;
     private string? _lastValue;
     private List<string>? _lastTables;
+    private Dictionary<string, List<string>>? _lastColumns;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -42,7 +46,8 @@ else
                 _initialized = true;
                 _lastValue = Value;
                 _lastTables = Tables;
-                await _module.InvokeVoidAsync("setCompletions", _id, Tables ?? new List<string>());
+                _lastColumns = Columns;
+                await _module.InvokeVoidAsync("setCompletions", _id, Tables ?? new List<string>(), Columns ?? new Dictionary<string, List<string>>());
             }
             catch
             {
@@ -63,11 +68,12 @@ else
             try { await _module.InvokeVoidAsync("setValue", _id, Value ?? ""); } catch { }
         }
 
-        // Push an updated table list (e.g. the user picked a different dataset) for autocomplete.
-        if (!TablesEqual(Tables, _lastTables))
+        // Push an updated table list / column map (e.g. the user picked a different dataset) for autocomplete.
+        if (!TablesEqual(Tables, _lastTables) || !ReferenceEquals(Columns, _lastColumns))
         {
             _lastTables = Tables;
-            try { await _module.InvokeVoidAsync("setCompletions", _id, Tables ?? new List<string>()); } catch { }
+            _lastColumns = Columns;
+            try { await _module.InvokeVoidAsync("setCompletions", _id, Tables ?? new List<string>(), Columns ?? new Dictionary<string, List<string>>()); } catch { }
         }
     }
 

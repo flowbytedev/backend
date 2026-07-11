@@ -15,4 +15,16 @@ public interface ICommentMentionNotificationService
         string tableName,
         string commentContent,
         string companyId);
+
+    /// <summary>Same "you were mentioned" email, for a notebook cell's comment thread instead of a
+    /// dataset table's. Never throws.</summary>
+    Task SendNotebookMentionNotificationAsync(
+        string recipientEmail,
+        string? recipientName,
+        string mentionedByName,
+        string notebookId,
+        string notebookName,
+        string cellName,
+        string commentContent,
+        string companyId);
 }

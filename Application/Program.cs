@@ -237,6 +237,10 @@ builder.Services.AddScoped<Application.Shared.Services.Data.IColumnDocGeneration
 // Query notebooks (MotherDuck-style): notebook/cell CRUD + execution engine + the AI-assist planner.
 builder.Services.AddScoped<Application.Shared.Services.Data.IQueryNotebookService, Application.Shared.Services.Data.QueryNotebookService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.INotebookAgentService, Application.Shared.Services.Data.NotebookAgentService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.INotebookSharingService, Application.Shared.Services.Data.NotebookSharingService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.INotebookCommentService, Application.Shared.Services.Data.NotebookCommentService>();
+builder.Services.AddSingleton<Application.Shared.Services.Data.INotebookRunCancellationRegistry, Application.Shared.Services.Data.NotebookRunCancellationRegistry>();
+builder.Services.Configure<Application.Shared.Options.NotebookOpsOptions>(builder.Configuration.GetSection("NotebookOps"));
 
 // Metrics Services
 builder.Services.AddScoped<IMetricService, MetricService>();
