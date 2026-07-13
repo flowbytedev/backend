@@ -6,6 +6,7 @@
 @inject StateContainer StateContainer
 @inject IJSRuntime JSRuntime
 
+<div class="pbi-scope">
 <!-- Power BI Connection / Mapping -->
 <div class="bg-white overflow-hidden shadow rounded-lg">
     <div class="px-6 py-5 sm:p-6">
@@ -385,6 +386,56 @@
         </div>
     </FluentDialog>
 }
+</div>
+
+<style>
+    /* Dark mode: this component uses utility classes (bg-white etc.) that hardcode light
+       colors; re-tint them and the raw form controls under a dark theme. Scoped to the
+       component so nothing else is affected. */
+    [data-theme="dark"] .pbi-scope .bg-white { background: #181a20 !important; }
+    [data-theme="dark"] .pbi-scope .bg-gray-50 { background: #1e222b !important; }
+    [data-theme="dark"] .pbi-scope .bg-gray-100 { background: #1e222b !important; }
+    [data-theme="dark"] .pbi-scope .text-gray-900 { color: #f3f4f6 !important; }
+    [data-theme="dark"] .pbi-scope .text-gray-700 { color: #e6e9ef !important; }
+    [data-theme="dark"] .pbi-scope .text-gray-600 { color: #c5cad4 !important; }
+    [data-theme="dark"] .pbi-scope .text-gray-500 { color: #9aa1ac !important; }
+    [data-theme="dark"] .pbi-scope .text-gray-400 { color: #6b7280 !important; }
+    [data-theme="dark"] .pbi-scope .border,
+    [data-theme="dark"] .pbi-scope .border-gray-300,
+    [data-theme="dark"] .pbi-scope .border-gray-200 { border-color: #2b303b !important; }
+    [data-theme="dark"] .pbi-scope .border-gray-100 { border-color: #23272f !important; }
+    [data-theme="dark"] .pbi-scope .divide-gray-200 > *,
+    [data-theme="dark"] .pbi-scope .divide-gray-100 > * { border-color: #23272f !important; }
+    [data-theme="dark"] .pbi-scope input:not([type=checkbox]):not([type=radio]),
+    [data-theme="dark"] .pbi-scope select { background: #12141a !important; color: #f3f4f6 !important; border-color: #2b303b !important; }
+    [data-theme="dark"] .pbi-scope .hover\:bg-gray-50:hover { background: #20242c !important; }
+    [data-theme="dark"] .pbi-scope .bg-green-100 { background: rgba(34,197,94,0.15) !important; }
+    [data-theme="dark"] .pbi-scope .text-green-800 { color: #4ade80 !important; }
+    [data-theme="dark"] .pbi-scope .bg-green-50 { background: rgba(34,197,94,0.12) !important; }
+    [data-theme="dark"] .pbi-scope .border-green-200 { border-color: rgba(34,197,94,0.3) !important; }
+    [data-theme="dark"] .pbi-scope .bg-red-50 { background: rgba(239,68,68,0.12) !important; }
+    [data-theme="dark"] .pbi-scope .border-red-200 { border-color: rgba(239,68,68,0.3) !important; }
+    [data-theme="dark"] .pbi-scope .text-red-700,
+    [data-theme="dark"] .pbi-scope .text-red-600,
+    [data-theme="dark"] .pbi-scope .text-red-500,
+    [data-theme="dark"] .pbi-scope .text-red-800 { color: #f87171 !important; }
+    [data-theme="dark"] .pbi-scope .bg-red-100 { background: rgba(239,68,68,0.15) !important; }
+    [data-theme="dark"] .pbi-scope .bg-amber-50 { background: rgba(245,158,11,0.12) !important; }
+    [data-theme="dark"] .pbi-scope .border-amber-200 { border-color: rgba(245,158,11,0.3) !important; }
+    [data-theme="dark"] .pbi-scope .text-amber-800,
+    [data-theme="dark"] .pbi-scope .text-yellow-800 { color: #fcd34d !important; }
+    [data-theme="dark"] .pbi-scope .bg-yellow-100 { background: rgba(245,158,11,0.15) !important; }
+    [data-theme="dark"] .pbi-scope .bg-indigo-100 { background: rgba(99,102,241,0.18) !important; }
+    [data-theme="dark"] .pbi-scope .bg-indigo-50 { background: rgba(99,102,241,0.12) !important; }
+    [data-theme="dark"] .pbi-scope .border-indigo-100 { border-color: rgba(129,140,248,0.3) !important; }
+    [data-theme="dark"] .pbi-scope .text-indigo-700,
+    [data-theme="dark"] .pbi-scope .text-indigo-900 { color: #c7d2fe !important; }
+    [data-theme="dark"] .pbi-scope .text-indigo-600 { color: #a5b4fc !important; }
+    [data-theme="dark"] .pbi-scope .hover\:text-indigo-900:hover { color: #c7d2fe !important; }
+    [data-theme="dark"] .pbi-scope .hover\:text-red-900:hover { color: #fca5a5 !important; }
+    [data-theme="dark"] .pbi-scope .bg-indigo-600 { background: #6366f1 !important; }
+    [data-theme="dark"] .pbi-scope .bg-gray-400 { background: #4b515e !important; }
+</style>
 
 @code {
     [Parameter] public string EntityId { get; set; } = string.Empty;

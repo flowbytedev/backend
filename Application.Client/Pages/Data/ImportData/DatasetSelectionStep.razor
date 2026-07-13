@@ -72,6 +72,13 @@
     }
 </div>
 
+<style>
+    /* Dark mode: override hardcoded light inline colors */
+    [data-theme="dark"] [style*="color:#71717a"]{color:#9aa1ac!important}
+    [data-theme="dark"] [style*="color:#18181b"]{color:#f3f4f6!important}
+    [data-theme="dark"] [style*="color:#d4d4d8"]{color:#4b515e!important}
+</style>
+
 @code {
     [Parameter] public string CompanyId { get; set; } = string.Empty;
     [Parameter] public EventCallback<Dataset> OnDatasetSelected { get; set; }

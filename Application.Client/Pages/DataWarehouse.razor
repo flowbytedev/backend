@@ -140,6 +140,34 @@
     }
     .dw-welcome-title { margin: 0; font-size: 18px; font-weight: 700; color: #111827; letter-spacing: -.01em; }
     .dw-welcome-sub { margin: 0; font-size: 14px; color: #6b7280; max-width: 360px; line-height: 1.6; }
+
+    /* ── Dark mode ─────────────────────────────────── */
+    [data-theme="dark"] .dw-root { background: #0e1117; }
+    [data-theme="dark"] .dw-sidebar { background: #181a20; border-right-color: #2b303b; }
+    [data-theme="dark"] .dw-sidebar-header { border-bottom-color: #2b303b; }
+    [data-theme="dark"] .dw-sidebar-title { color: #e6e9ef; }
+    [data-theme="dark"] .dw-sidebar-title svg { color: #818cf8; }
+    [data-theme="dark"] .dw-toggle-btn { border-color: #2b303b; background: #181a20; color: #9aa1ac; }
+    [data-theme="dark"] .dw-toggle-btn:hover { background: #20242c; color: #e6e9ef; }
+    [data-theme="dark"] .dw-sidebar-search { border-bottom-color: #23272f; }
+    [data-theme="dark"] .dw-sidebar-search svg { color: #9aa1ac; }
+    [data-theme="dark"] .dw-sidebar-search input { border-color: #2b303b; background: #12141a; color: #e6e9ef; }
+    [data-theme="dark"] .dw-sidebar-search input:focus { border-color: #6366f1; background: #181a20; }
+    [data-theme="dark"] .dw-sidebar-count { color: #9aa1ac; }
+    [data-theme="dark"] .dw-table-item:hover { background: #20242c; }
+    [data-theme="dark"] .dw-table-item-active { background: rgba(99,102,241,0.15) !important; }
+    [data-theme="dark"] .dw-table-item svg { color: #9aa1ac; }
+    [data-theme="dark"] .dw-table-item-active svg { color: #818cf8; }
+    [data-theme="dark"] .dw-table-schema { color: #9aa1ac; }
+    [data-theme="dark"] .dw-table-name { color: #e6e9ef; }
+    [data-theme="dark"] .dw-table-item-active .dw-table-name { color: #a5b4fc; }
+    [data-theme="dark"] .dw-sidebar-error { background: rgba(239,68,68,0.12); border-color: rgba(248,113,113,0.3); color: #f87171; }
+    [data-theme="dark"] .dw-sidebar-empty { color: #9aa1ac; }
+    [data-theme="dark"] .dw-sidebar-loading { color: #9aa1ac; }
+    [data-theme="dark"] .dw-spinner { border-color: #2b303b; border-top-color: #6366f1; }
+    [data-theme="dark"] .dw-welcome-icon { background: rgba(99,102,241,0.15); color: #818cf8; }
+    [data-theme="dark"] .dw-welcome-title { color: #f3f4f6; }
+    [data-theme="dark"] .dw-welcome-sub { color: #9aa1ac; }
 </style>
 
 @if (!canView)

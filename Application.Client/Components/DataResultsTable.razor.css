@@ -261,3 +261,28 @@
         padding: 8px;
     }
 }
+
+/* ── Dark mode ─────────────────────────────────── */
+:global([data-theme="dark"]) .data-results-table { background: #181a20; border-color: #2b303b; }
+:global([data-theme="dark"]) .empty-state { color: #9aa1ac; }
+:global([data-theme="dark"]) .table-toolbar { background: #1e222b; border-bottom-color: #2b303b; }
+:global([data-theme="dark"]) .toolbar-left { color: #9aa1ac; }
+:global([data-theme="dark"]) .header-row { background: #1e222b; }
+:global([data-theme="dark"]) .header-cell { color: #e6e9ef; background: #1e222b; border-bottom-color: #23272f; border-right-color: #23272f; }
+:global([data-theme="dark"]) .header-cell:hover { background: #20242c; }
+:global([data-theme="dark"]) .header-cell.sorted { background: rgba(99,102,241,0.15); color: #818cf8; }
+:global([data-theme="dark"]) .filter-row { background: #1e222b; }
+:global([data-theme="dark"]) .filter-cell { border-bottom-color: #23272f; border-right-color: #23272f; }
+:global([data-theme="dark"]) .data-row:hover { background: #20242c; }
+:global([data-theme="dark"]) .data-row:hover .data-cell { background: #20242c; }
+:global([data-theme="dark"]) .data-cell { color: #e6e9ef; background: #181a20; border-bottom-color: #23272f; border-right-color: #23272f; }
+:global([data-theme="dark"]) .null-value { color: #4b515e; }
+:global([data-theme="dark"]) .number-value,
+:global([data-theme="dark"]) .currency-value,
+:global([data-theme="dark"]) .date-value { color: #e6e9ef; }
+:global([data-theme="dark"]) .negative-value { color: #f87171; }
+:global([data-theme="dark"]) .boolean-true { color: #4ade80; }
+:global([data-theme="dark"]) .boolean-false { color: #f87171; }
+:global([data-theme="dark"]) .table-footer { background: #1e222b; border-top-color: #2b303b; }
+:global([data-theme="dark"]) .pagination-info { color: #9aa1ac; }
+:global([data-theme="dark"]) .page-indicator { color: #e6e9ef; }

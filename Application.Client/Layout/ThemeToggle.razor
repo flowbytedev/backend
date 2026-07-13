@@ -1,0 +1,79 @@
+@inject IJSRuntime _js
+
+@* Drives the Fluent UI design tokens (dialogs, toasts, menus, form controls, …) and
+   persists the choice to localStorage under "theme". The app's own custom CSS is themed
+   separately via the [data-theme] attribute on <html>, which we mirror here from JS. *@
+<FluentDesignTheme @bind-Mode="_mode" StorageName="theme" />
+
+<button type="button" class="nav-item" @onclick="CycleAsync" title="@_title" aria-label="@_title">
+    @if (_mode == DesignThemeModes.Dark)
+    {
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <span>Dark</span>
+    }
+    else if (_mode == DesignThemeModes.Light)
+    {
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+        <span>Light</span>
+    }
+    else
+    {
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <span>System</span>
+    }
+</button>
+
+@code {
+    private DesignThemeModes _mode = DesignThemeModes.System;
+    private string _title = "Theme: System (click to switch)";
+
+    // FluentDesignTheme loads its own persisted value, but we also read it here so the
+    // button's icon/label and the <html data-theme> mirror agree from the first paint.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var stored = await _js.InvokeAsync<string>("appTheme.getMode");
+            var mode = ParseMode(stored);
+            if (mode != _mode)
+            {
+                _mode = mode;
+                UpdateTitle();
+                StateHasChanged();
+            }
+        }
+        catch { /* JS not ready — fall back to System default */ }
+    }
+
+    private async Task CycleAsync()
+    {
+        _mode = _mode switch
+        {
+            DesignThemeModes.System => DesignThemeModes.Light,
+            DesignThemeModes.Light => DesignThemeModes.Dark,
+            _ => DesignThemeModes.System
+        };
+        UpdateTitle();
+        // FluentDesignTheme persists + retints its components via the @bind-Mode change.
+        // Mirror the effective mode onto <html data-theme> so the custom CSS follows too.
+        try { await _js.InvokeVoidAsync("appTheme.applyMode", ModeString(_mode)); }
+        catch { /* non-critical — Fluent components still switch */ }
+    }
+
+    private void UpdateTitle() => _title = $"Theme: {_mode} (click to switch)";
+
+    private static DesignThemeModes ParseMode(string? value) => value?.ToLowerInvariant() switch
+    {
+        "dark" => DesignThemeModes.Dark,
+        "light" => DesignThemeModes.Light,
+        _ => DesignThemeModes.System
+    };
+
+    private static string ModeString(DesignThemeModes mode) => mode switch
+    {
+        DesignThemeModes.Dark => "dark",
+        DesignThemeModes.Light => "light",
+        _ => "system"
+    };
+}

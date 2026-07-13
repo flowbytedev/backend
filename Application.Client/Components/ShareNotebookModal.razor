@@ -13,7 +13,7 @@
                     Share Notebook
                     @if (!string.IsNullOrEmpty(NotebookName))
                     {
-                        <span style="color:#71717a;font-weight:400"> — @NotebookName</span>
+                        <span class="sd-title-meta" style="color:#71717a;font-weight:400"> — @NotebookName</span>
                     }
                 </h2>
                 <button class="ds-modal-close" @onclick="CloseDialog" aria-label="Close">
@@ -94,7 +94,7 @@
                 else if (sharedUsers?.Any() == true)
                 {
                     <hr class="ds-divider" />
-                    <p style="font-size:0.8125rem;font-weight:500;color:#71717a;margin:0 0 0.625rem 0;text-transform:uppercase;letter-spacing:0.05em">Shared With</p>
+                    <p class="sd-shared-cap" style="font-size:0.8125rem;font-weight:500;color:#71717a;margin:0 0 0.625rem 0;text-transform:uppercase;letter-spacing:0.05em">Shared With</p>
                     <div style="display:flex;flex-direction:column;gap:0.5rem">
                         @foreach (var user in sharedUsers)
                         {
@@ -137,6 +137,15 @@
     }
     .sd-suggestion-name { font-size: .8125rem; font-weight: 600; color: #18181b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .sd-suggestion-email { font-size: .75rem; color: #71717a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ── Dark mode ─────────────────────────────────────────────────────── */
+    [data-theme="dark"] .sd-suggestions { background: #181a20; border-color: #2b303b; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+    [data-theme="dark"] .sd-suggestion:hover { background: #20242c; }
+    [data-theme="dark"] .sd-suggestion-avatar { background: #2b303b; color: #e6e9ef; }
+    [data-theme="dark"] .sd-suggestion-name { color: #f3f4f6; }
+    [data-theme="dark"] .sd-suggestion-email { color: #9aa1ac; }
+    [data-theme="dark"] .sd-title-meta { color: #9aa1ac !important; }
+    [data-theme="dark"] .sd-shared-cap { color: #9aa1ac !important; }
 </style>
 
 @code {

@@ -235,6 +235,17 @@
     </EditForm>
 </div>
 
+<style>
+    /* Dark mode: override hardcoded light inline colors */
+    [data-theme="dark"] [style*="color:#71717a"]{color:#9aa1ac!important}
+    [data-theme="dark"] [style*="color:#3f3f46"]{color:#e6e9ef!important}
+    [data-theme="dark"] [style*="color:#b45309"]{color:#fcd34d!important}
+    [data-theme="dark"] [style*="color:#b91c1c"]{color:#f87171!important}
+    [data-theme="dark"] [style*="color:#15803d"]{color:#4ade80!important}
+    [data-theme="dark"] [style*="color:#d4d4d8"]{color:#4b515e!important}
+    [data-theme="dark"] [style*="1px solid #f4f4f5"]{border-color:#23272f!important}
+</style>
+
 @code {
     [Parameter] public Dataset? Dataset { get; set; }
     [Parameter] public string FileName { get; set; } = string.Empty;

@@ -138,6 +138,15 @@ else
 </div>
 }
 
+<style>
+    /* Dark mode: override hardcoded light inline colors */
+    [data-theme="dark"] [style*="color:#6366f1"]{color:#818cf8!important}
+    [data-theme="dark"] [style*="color:#71717a"]{color:#9aa1ac!important}
+    [data-theme="dark"] [style*="color:#18181b"]{color:#f3f4f6!important}
+    [data-theme="dark"] [style*="color:#d4d4d8"]{color:#4b515e!important}
+    [data-theme="dark"] [style*="1px solid #f4f4f5"]{border-color:#23272f!important}
+</style>
+
 @code {
     [Parameter] public string Action { get; set; } = string.Empty;
     private Table tableModel = new Table();

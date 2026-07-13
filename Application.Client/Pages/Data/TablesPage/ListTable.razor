@@ -571,6 +571,34 @@ else
     }
     .sd-suggestion-name { font-size: .8125rem; font-weight: 600; color: #18181b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .sd-suggestion-email { font-size: .75rem; color: #71717a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ---- Dark mode ---- */
+    [data-theme="dark"] .sd-suggestions { background:#181a20; border-color:#2b303b; }
+    [data-theme="dark"] .sd-suggestion:hover { background:#20242c; }
+    [data-theme="dark"] .sd-suggestion-avatar { background:#1e222b; color:#e6e9ef; }
+    [data-theme="dark"] .sd-suggestion-name { color:#f3f4f6; }
+    [data-theme="dark"] .sd-suggestion-email { color:#9aa1ac; }
+    /* inline-style color overrides */
+    [data-theme="dark"] [style*="color:#18181b"]{color:#f3f4f6!important}
+    [data-theme="dark"] [style*="color:#71717a"]{color:#9aa1ac!important}
+    [data-theme="dark"] [style*="color:#a1a1aa"]{color:#9aa1ac!important}
+    [data-theme="dark"] [style*="color:#3f3f46"]{color:#e6e9ef!important}
+    [data-theme="dark"] [style*="color:#4f46e5"]{color:#818cf8!important}
+    [data-theme="dark"] [style*="color:#2563eb"]{color:#93c5fd!important}
+    [data-theme="dark"] [style*="color:#15803d"]{color:#4ade80!important}
+    [data-theme="dark"] [style*="color:#b91c1c"]{color:#f87171!important}
+    [data-theme="dark"] [style*="color:#1d4ed8"]{color:#93c5fd!important}
+    [data-theme="dark"] [style*="color:#92400e"]{color:#fcd34d!important}
+    [data-theme="dark"] [style*="color:#0891b2"]{color:#22d3ee!important}
+    [data-theme="dark"] [style*="color:#7c3aed"]{color:#a78bfa!important}
+    [data-theme="dark"] [style*="background:#eef2ff"]{background:rgba(129,140,248,.15)!important}
+    [data-theme="dark"] [style*="background:#f4f4f5"]{background:#1e222b!important}
+    [data-theme="dark"] [style*="background:#dcfce7"]{background:rgba(34,197,94,.15)!important}
+    [data-theme="dark"] [style*="background:#fee2e2"]{background:rgba(239,68,68,.12)!important}
+    [data-theme="dark"] [style*="background:#dbeafe"]{background:rgba(59,130,246,.12)!important}
+    [data-theme="dark"] [style*="background:#fef3c7"]{background:rgba(245,158,11,.12)!important}
+    [data-theme="dark"] [style*="1px solid #f4f4f5"]{border-color:#23272f!important}
+    [data-theme="dark"] [style*="border-color:#fecaca"]{border-color:rgba(239,68,68,.4)!important}
 </style>
 
 @code {

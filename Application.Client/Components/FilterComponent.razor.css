@@ -27,3 +27,15 @@ button {
 button:hover {
     background-color: #0056b3;
 }
+
+/* ── Dark mode ─────────────────────────────────── */
+:global([data-theme="dark"]) .filter-container {
+    background-color: #181a20;
+}
+
+:global([data-theme="dark"]) .filter-row select,
+:global([data-theme="dark"]) .filter-row input {
+    background-color: #12141a;
+    color: #e6e9ef;
+    border: 1px solid #2b303b;
+}

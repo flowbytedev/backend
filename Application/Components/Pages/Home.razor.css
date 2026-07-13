@@ -117,3 +117,26 @@
     .hp-root { padding: 24px 16px 48px; }
     .hp-cards { grid-template-columns: 1fr; }
 }
+
+/* ── Dark theme ─────────────────────────────────────── */
+/* :global([data-theme="dark"]) prefixes the <html> attribute (set outside this
+   component) onto scoped selectors so these win over the light defaults above. */
+:global([data-theme="dark"]) .hp-hero-eyebrow { color: #9aa1ac; background: #1e222b; border-color: #2b303b; }
+:global([data-theme="dark"]) .hp-hero-title { color: #f3f4f6; }
+:global([data-theme="dark"]) .hp-hero-sub { color: #9aa1ac; }
+:global([data-theme="dark"]) .hp-btn-ghost { background: #181a20; color: #e6e9ef; border-color: #2b303b; }
+:global([data-theme="dark"]) .hp-btn-ghost:hover { background: #20242c; border-color: #3a4150; }
+:global([data-theme="dark"]) .hp-divider { background: #262a33; }
+:global([data-theme="dark"]) .hp-section-label { color: #8b909c; }
+:global([data-theme="dark"]) .hp-card { background: #181a20; border-color: #2b303b; }
+:global([data-theme="dark"]) .hp-card:not(.hp-card-soon):hover { border-color: #4f46e5; box-shadow: 0 2px 12px rgba(99,102,241,.18); }
+:global([data-theme="dark"]) .hp-card-title { color: #f3f4f6; }
+:global([data-theme="dark"]) .hp-card-desc { color: #9aa1ac; }
+:global([data-theme="dark"]) .hp-card-arrow { color: #4b515e; }
+:global([data-theme="dark"]) .hp-icon-indigo { background: rgba(99,102,241,.16); color: #a5b4fc; }
+:global([data-theme="dark"]) .hp-icon-violet { background: rgba(124,58,237,.18); color: #c4b5fd; }
+:global([data-theme="dark"]) .hp-icon-emerald { background: rgba(5,150,105,.18); color: #6ee7b7; }
+:global([data-theme="dark"]) .hp-icon-amber { background: rgba(217,119,6,.18); color: #fcd34d; }
+:global([data-theme="dark"]) .hp-icon-sky { background: rgba(2,132,199,.18); color: #7dd3fc; }
+:global([data-theme="dark"]) .hp-icon-gray { background: #1e222b; color: #9aa1ac; }
+:global([data-theme="dark"]) .hp-soon-chip { color: #8b909c; background: #1e222b; border-color: #2b303b; }

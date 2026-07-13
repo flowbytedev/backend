@@ -368,10 +368,6 @@ builder.Services.AddHttpClient(PowerBiService.HttpClientName, client =>
 // lists tables across MSSQL/PostgreSQL/MySQL/ClickHouse/DuckDB, materializes Table entities).
 builder.Services.AddScoped<IDatabaseTableService, DatabaseTableService>();
 
-// Add Chat Service for AI functionality
-builder.Services.AddScoped<IChatService, ChatService>();
-builder.Services.AddScoped<IChatMessageRepository, InMemoryChatMessageRepository>();
-
 // AI-assisted schema (column data type) inference for data import
 builder.Services.AddScoped<ISchemaInferenceService, SchemaInferenceService>();
 

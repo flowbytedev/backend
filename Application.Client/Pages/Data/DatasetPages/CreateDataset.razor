@@ -126,6 +126,12 @@ else
 </div>
 }
 
+<style>
+    /* Dark mode: override hardcoded light inline colors */
+    [data-theme="dark"] [style*="color:#ef4444"]{color:#f87171!important}
+    [data-theme="dark"] [style*="color:#b45309"]{color:#fcd34d!important}
+</style>
+
 @code {
     private Dataset datasetModel = new();
     private bool isSubmitting = false;

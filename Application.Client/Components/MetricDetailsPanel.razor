@@ -92,6 +92,33 @@
     .mdp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .mdp-btn-ghost { background: none; border: none; color: #9ca3af; margin-left: auto; }
     .mdp-btn-ghost:hover { color: #374151; background: #f3f4f6; }
+
+    /* ── Dark mode ─────────────────────────────────── */
+    [data-theme="dark"] .mdp-panel { background: #181a20; }
+    [data-theme="dark"] .mdp-header { border-bottom-color: #2b303b; }
+    [data-theme="dark"] .mdp-title { color: #f3f4f6; }
+    [data-theme="dark"] .mdp-subtitle { color: #9aa1ac; }
+    [data-theme="dark"] .mdp-close-btn { color: #9aa1ac; }
+    [data-theme="dark"] .mdp-close-btn:hover { background: #20242c; color: #e6e9ef; }
+    [data-theme="dark"] .mdp-section-title { color: #818cf8; border-bottom-color: #2b303b; }
+    [data-theme="dark"] .mdp-field-label { color: #9aa1ac; }
+    [data-theme="dark"] .mdp-field-value { color: #e6e9ef; }
+    [data-theme="dark"] .mdp-code-block { background: #12141a; color: #e6e9ef; }
+    [data-theme="dark"] .mdp-chip { background: #1e222b; color: #e6e9ef; border-color: #2b303b; }
+    [data-theme="dark"] .mdp-badge-ready { background: rgba(34,197,94,0.15); color: #4ade80; }
+    [data-theme="dark"] .mdp-badge-not-ready { background: #1e222b; color: #9aa1ac; }
+    [data-theme="dark"] .mdp-kv-label { color: #9aa1ac; }
+    [data-theme="dark"] .mdp-kv-value { color: #e6e9ef; }
+    [data-theme="dark"] .mdp-ds-card { background: #1e222b; border-color: #2b303b; }
+    [data-theme="dark"] .mdp-footer { border-top-color: #2b303b; }
+    [data-theme="dark"] .mdp-btn-secondary { background: #181a20; color: #e6e9ef; border-color: #2b303b; }
+    [data-theme="dark"] .mdp-btn-secondary:hover { background: #20242c; }
+    [data-theme="dark"] .mdp-btn-ghost { color: #9aa1ac; }
+    [data-theme="dark"] .mdp-btn-ghost:hover { color: #e6e9ef; background: #20242c; }
+    /* Functions cards — override inline styles */
+    [data-theme="dark"] .mdp-func-card { background: #1e222b !important; border-color: #2b303b !important; }
+    [data-theme="dark"] .mdp-func-name { color: #f3f4f6 !important; }
+    [data-theme="dark"] .mdp-func-meta { color: #9aa1ac !important; }
 </style>
 
 <div class="mdp-backdrop" @onclick="HandleClose"></div>
@@ -178,15 +205,15 @@
                 </div>
                 @foreach (var func in Content.Functions)
                 {
-                    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;">
-                        <div style="font-weight:600;font-size:13px;color:#111827;">@func.Function</div>
+                    <div class="mdp-func-card" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;">
+                        <div class="mdp-func-name" style="font-weight:600;font-size:13px;color:#111827;">@func.Function</div>
                         @if (!string.IsNullOrEmpty(func.SubFunction))
                         {
-                            <div style="font-size:12px;color:#6b7280;margin-top:2px;">@func.SubFunction</div>
+                            <div class="mdp-func-meta" style="font-size:12px;color:#6b7280;margin-top:2px;">@func.SubFunction</div>
                         }
                         @if (!string.IsNullOrEmpty(func.FunctionHead))
                         {
-                            <div style="font-size:12px;color:#6b7280;">Head: @func.FunctionHead</div>
+                            <div class="mdp-func-meta" style="font-size:12px;color:#6b7280;">Head: @func.FunctionHead</div>
                         }
                     </div>
                 }

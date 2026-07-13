@@ -29,18 +29,18 @@
 }
 else
 {
-<div style="height:88vh;display:flex;flex-direction:column;background:#fafafa">
+<div class="dv-shell" style="height:88vh;display:flex;flex-direction:column;background:#fafafa">
     <!-- Header -->
-    <div style="background:#fff;border-bottom:1px solid #e4e4e7;padding:0.75rem 1.25rem;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:1rem">
+    <div class="dv-header" style="background:#fff;border-bottom:1px solid #e4e4e7;padding:0.75rem 1.25rem;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:1rem">
         <div style="display:flex;align-items:center;gap:0.75rem">
             <button class="btn-icon" @onclick="GoBack" title="Back">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
             </button>
             <div>
-                <h1 style="margin:0;font-size:1.0625rem;font-weight:600;color:#18181b">
+                <h1 class="dv-h1" style="margin:0;font-size:1.0625rem;font-weight:600;color:#18181b">
                     @(TableInfo?.TableName ?? "Loading…")
                 </h1>
-                <p style="margin:0;font-size:0.8125rem;color:#71717a">
+                <p class="dv-sub" style="margin:0;font-size:0.8125rem;color:#71717a">
                     @if (DatasetInfo != null && TableInfo != null)
                     {
                         <span>@DatasetInfo.Name@(TotalRows > 0 ? $" · {TotalRows:N0} rows" : "")</span>
@@ -56,13 +56,13 @@ else
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
                     Add Row
                 </button>
-                <button class="btn btn-outline" style="color:#dc2626;border-color:#fecaca" @onclick="DeleteSelected" disabled="@IsLoading" title="Delete selected rows">
+                <button class="btn btn-outline dv-btn-danger" style="color:#dc2626;border-color:#fecaca" @onclick="DeleteSelected" disabled="@IsLoading" title="Delete selected rows">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                     Delete
                 </button>
-                <span style="width:1px;height:22px;background:#e4e4e7;margin:0 0.25rem"></span>
+                <span class="dv-divider" style="width:1px;height:22px;background:#e4e4e7;margin:0 0.25rem"></span>
             }
-            <button class="btn btn-outline" style="color:#16a34a;border-color:#16a34a" @onclick="DownloadCsv" disabled="@IsLoading" title="Download the full table as CSV">
+            <button class="btn btn-outline dv-btn-success" style="color:#16a34a;border-color:#16a34a" @onclick="DownloadCsv" disabled="@IsLoading" title="Download the full table as CSV">
                 <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                 Download
             </button>
@@ -92,28 +92,28 @@ else
         <div style="flex:1;padding:1rem;overflow:hidden;display:flex;flex-direction:column">
             @if (IsLoading)
             {
-                <div style="flex:1;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:0.5rem;border:1px solid #e4e4e7">
+                <div class="dv-statecard" style="flex:1;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:0.5rem;border:1px solid #e4e4e7">
                     <div style="text-align:center">
                         <div class="ds-spinner" style="width:32px;height:32px;border-width:2.5px;margin:0 auto 0.75rem"></div>
-                        <p style="font-size:0.875rem;color:#71717a;margin:0">Loading table…</p>
+                        <p class="dv-muted" style="font-size:0.875rem;color:#71717a;margin:0">Loading table…</p>
                     </div>
                 </div>
             }
             else if (TableColumns?.Any() == true)
             {
                 <div id="@GridId" class="ag-theme-quartz" style="flex:1;width:100%"></div>
-                <p style="font-size:0.75rem;color:#a1a1aa;margin:0.5rem 0 0 0">
+                <p class="dv-faint" style="font-size:0.75rem;color:#a1a1aa;margin:0.5rem 0 0 0">
                     Scroll to load more · sort and filter from the header row.
                     @if (AllowEdit) { <span>Click a cell to edit — <strong>changes save automatically</strong>; select rows with the checkboxes to delete.</span> }
                 </p>
             }
             else
             {
-                <div style="flex:1;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:0.5rem;border:1px solid #e4e4e7">
+                <div class="dv-statecard" style="flex:1;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:0.5rem;border:1px solid #e4e4e7">
                     <div style="text-align:center">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" style="color:#d4d4d8;margin-bottom:0.75rem"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
-                        <h3 style="font-size:0.9375rem;font-weight:600;color:#18181b;margin:0 0 0.25rem 0">No Data Available</h3>
-                        <p style="font-size:0.875rem;color:#71717a;margin:0">This table appears to be empty or could not be loaded.</p>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="dv-empty-icon" style="color:#d4d4d8;margin-bottom:0.75rem"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
+                        <h3 class="dv-h3" style="font-size:0.9375rem;font-weight:600;color:#18181b;margin:0 0 0.25rem 0">No Data Available</h3>
+                        <p class="dv-muted" style="font-size:0.875rem;color:#71717a;margin:0">This table appears to be empty or could not be loaded.</p>
                     </div>
                 </div>
             }
@@ -458,3 +458,21 @@ else
         dotNetRef?.Dispose();
     }
 }
+
+<style>
+    /* Dark mode — this page is styled entirely with inline styles, so overrides use !important
+       to beat the element's own style attribute. (The AG Grid quartz theme is themed by AG Grid's
+       own CSS, not here.) */
+    [data-theme="dark"] .dv-shell { background:#0e1117 !important; }
+    [data-theme="dark"] .dv-header { background:#181a20 !important; border-bottom-color:#2b303b !important; }
+    [data-theme="dark"] .dv-h1 { color:#f3f4f6 !important; }
+    [data-theme="dark"] .dv-h3 { color:#f3f4f6 !important; }
+    [data-theme="dark"] .dv-sub { color:#9aa1ac !important; }
+    [data-theme="dark"] .dv-muted { color:#9aa1ac !important; }
+    [data-theme="dark"] .dv-faint { color:#9aa1ac !important; }
+    [data-theme="dark"] .dv-divider { background:#2b303b !important; }
+    [data-theme="dark"] .dv-statecard { background:#181a20 !important; border-color:#2b303b !important; }
+    [data-theme="dark"] .dv-empty-icon { color:#4b515e !important; }
+    [data-theme="dark"] .dv-btn-danger { color:#f87171 !important; border-color:rgba(248,113,113,.35) !important; }
+    [data-theme="dark"] .dv-btn-success { color:#4ade80 !important; border-color:rgba(74,222,128,.4) !important; }
+</style>

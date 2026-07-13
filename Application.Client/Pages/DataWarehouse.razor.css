@@ -259,3 +259,25 @@
 .main-content::-webkit-scrollbar-thumb:hover {
     background: #a0a0a0;
 }
+
+/* ── Dark mode ─────────────────────────────────── */
+:global([data-theme="dark"]) .page-layout { background: #0e1117; }
+:global([data-theme="dark"]) .sidebar { background: #181a20; border-right-color: #2b303b; }
+:global([data-theme="dark"]) .sidebar-header { background: #1e222b; border-bottom-color: #2b303b; }
+:global([data-theme="dark"]) .sidebar-header h2 { color: #f3f4f6; }
+:global([data-theme="dark"]) .toggle-btn { color: #9aa1ac; }
+:global([data-theme="dark"]) .toggle-btn:hover { color: #e6e9ef; }
+:global([data-theme="dark"]) .search-box { border-bottom-color: #23272f; }
+:global([data-theme="dark"]) .search-input { background: #12141a; color: #e6e9ef; border-color: #2b303b; }
+:global([data-theme="dark"]) .search-input:focus { border-color: #6366f1; }
+:global([data-theme="dark"]) .table-item:hover { background: #20242c; border-color: #2b303b; }
+:global([data-theme="dark"]) .table-item.selected { background: rgba(99,102,241,0.15); border-color: #6366f1; }
+:global([data-theme="dark"]) .table-name .schema { color: #9aa1ac; }
+:global([data-theme="dark"]) .table-name .name { color: #e6e9ef; }
+:global([data-theme="dark"]) .loading-section,
+:global([data-theme="dark"]) .error-section,
+:global([data-theme="dark"]) .empty-section { color: #9aa1ac; }
+:global([data-theme="dark"]) .spinner { border-color: #2b303b; border-top-color: #6366f1; }
+:global([data-theme="dark"]) .error-section p { color: #f87171; }
+:global([data-theme="dark"]) .welcome-section { color: #9aa1ac; }
+:global([data-theme="dark"]) .welcome-section h1 { color: #f3f4f6; }

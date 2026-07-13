@@ -165,3 +165,29 @@ footer { margin-top: 26px; font-size: 11.5px; color: var(--faint); text-align: c
     .fade { animation: none; opacity: 1; transform: none; }
     .rfill { transition: none; }
 }
+
+/* ---------- dark mode: remap the local token palette by role ---------- */
+:global([data-theme="dark"]) .oos-wrap {
+    --paper: #0e1117;
+    --panel: #181a20;
+    --ink: #f3f4f6;
+    --muted: #9aa1ac;
+    --faint: #6b7280;
+    --line: #2b303b;
+    --tag: #1e222b;
+    --tag-edge: #2b303b;
+    --accent: #818cf8;
+    --crit: #f87171;
+    --crit-bg: rgba(239,68,68,.12);
+    --low: #fcd34d;
+    --low-bg: rgba(245,158,11,.12);
+    --ok: #4ade80;
+    --ok-bg: rgba(34,197,94,.15);
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+}
+/* hardcoded (non-token) light colors */
+:global([data-theme="dark"]) .oos-wrap .btn.primary:hover { background: #4f46e5; }
+:global([data-theme="dark"]) .oos-wrap .callout { border-color: rgba(239,68,68,.3); }
+:global([data-theme="dark"]) .oos-wrap tbody tr:hover { background: #20242c; }
+:global([data-theme="dark"]) .oos-wrap .badge.restocking { background: rgba(129,140,248,.15); }
+:global([data-theme="dark"]) .oos-wrap .detail-cta:hover { background: #20242c; }

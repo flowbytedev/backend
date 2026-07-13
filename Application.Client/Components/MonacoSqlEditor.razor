@@ -3,13 +3,13 @@
 
 @if (_failed)
 {
-    <textarea style="width:100%;height:@Height;font-family:ui-monospace,Consolas,monospace;font-size:13px;padding:8px;border:1px solid #e4e4e7;border-radius:6px;box-sizing:border-box"
+    <textarea class="mse-fallback" style="width:100%;height:@Height;font-family:ui-monospace,Consolas,monospace;font-size:13px;padding:8px;border:1px solid #e4e4e7;border-radius:6px;box-sizing:border-box"
               @bind="_fallbackValue" @bind:event="oninput" @bind:after="OnFallbackChanged" @onkeydown="OnFallbackKeyDown"
               placeholder="SELECT * FROM ..."></textarea>
 }
 else
 {
-    <div id="@_id" style="height:@Height;border:1px solid #e4e4e7;border-radius:6px;overflow:hidden"></div>
+    <div id="@_id" class="mse-host" style="height:@Height;border:1px solid #e4e4e7;border-radius:6px;overflow:hidden"></div>
 }
 
 @code {
@@ -123,3 +123,10 @@ else
         _ref?.Dispose();
     }
 }
+
+<style>
+    /* Dark mode: only the editor chrome (border/fallback textarea) is ours.
+       Monaco's own surface + syntax colors are themed in JS (monaco-sql-editor.js) — not fought here. */
+    [data-theme="dark"] .mse-host { border-color:#2b303b !important; }
+    [data-theme="dark"] .mse-fallback { border-color:#2b303b !important; background:#12141a !important; color:#e6e9ef !important; }
+</style>

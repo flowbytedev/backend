@@ -123,6 +123,24 @@
     </div>
 </div>
 
+<style>
+    /* Dark mode: the .dv-* surfaces are themed globally in app.css; these rules re-tint the
+       hardcoded inline colors (targeted by their literal hex so no markup changes are needed). */
+    [data-theme="dark"] .dv-comment-avatar { background: #2b303b; color: #e6e9ef; }
+    [data-theme="dark"] .dv-comments-header { color: #9aa1ac; }
+    [data-theme="dark"] .dv-comments-header [style*="color:#18181b"] { color: #f3f4f6 !important; }
+    [data-theme="dark"] .dv-comments-header [style*="color:#71717a"] { color: #9aa1ac !important; }
+    [data-theme="dark"] .dv-comments-list [style*="text-align:center"] { color: #9aa1ac !important; }
+    [data-theme="dark"] .dv-comments-list [style*="color:#d4d4d8"] { color: #4b515e !important; }
+    [data-theme="dark"] .dv-comments-list [style*="color:#a1a1aa"] { color: #6b7280 !important; }
+    [data-theme="dark"] .dv-comment-item [style*="color:#18181b"],
+    [data-theme="dark"] .dv-mention-item [style*="color:#18181b"] { color: #f3f4f6 !important; }
+    [data-theme="dark"] .dv-comment-item [style*="color:#71717a"],
+    [data-theme="dark"] .dv-mention-item [style*="color:#71717a"] { color: #9aa1ac !important; }
+    [data-theme="dark"] .dv-comment-item [style*="color:#374151"] { color: #e6e9ef !important; }
+    [data-theme="dark"] .dv-comment-item [style*="background:#f4f4f5"] { background: #2b303b !important; color: #e6e9ef !important; }
+</style>
+
 @code {
     [Parameter] public string CompanyId { get; set; } = string.Empty;
     [Parameter] public string DatasetId { get; set; } = string.Empty;

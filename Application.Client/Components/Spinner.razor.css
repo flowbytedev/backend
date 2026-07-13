@@ -35,3 +35,13 @@
 .content {
     padding: 20px;
 }
+
+/* ── Dark mode ─────────────────────────────────── */
+:global([data-theme="dark"]) .spinner-overlay {
+    background-color: rgba(14, 17, 23, 0.8);
+}
+
+:global([data-theme="dark"]) .spinner {
+    border-color: #2b303b;
+    border-top-color: #3498db;
+}

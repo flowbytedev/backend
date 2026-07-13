@@ -553,6 +553,47 @@ else
 
     /* Resume (play) button reads as a positive action */
     .btn-icon-resume { color: #16a34a; }
+
+    /* ---- Dark mode ---- */
+    [data-theme="dark"] .ig-combo-btn { background:#181a20; border-color:#2b303b; }
+    [data-theme="dark"] .ig-combo-btn:hover { border-color:#4b515e; }
+    [data-theme="dark"] .ig-combo-btn-open { border-color:#818cf8; box-shadow:0 0 0 2px rgba(129,140,248,.2); }
+    [data-theme="dark"] .ig-combo-caret { color:#9aa1ac; }
+    [data-theme="dark"] .ig-combo-avatar { background:#2b303b; color:#f3f4f6; }
+    [data-theme="dark"] .ig-combo-avatar-all { background:rgba(129,140,248,.15); color:#818cf8; }
+    [data-theme="dark"] .ig-combo-name { color:#f3f4f6; }
+    [data-theme="dark"] .ig-combo-sub { color:#9aa1ac; }
+    [data-theme="dark"] .ig-tag-loc { background:rgba(34,197,94,.15); color:#4ade80; }
+    [data-theme="dark"] .ig-tag-ext { background:rgba(59,130,246,.12); color:#93c5fd; }
+    [data-theme="dark"] .ig-combo-menu { background:#181a20; border-color:#2b303b; }
+    [data-theme="dark"] .ig-combo-menu-head { color:#9aa1ac; }
+    [data-theme="dark"] .ig-combo-item:hover { background:#20242c; }
+    [data-theme="dark"] .ig-combo-item-on { background:#20242c; }
+    [data-theme="dark"] .ig-combo-count { color:#e6e9ef; background:#1e222b; border-color:#2b303b; }
+    [data-theme="dark"] .ig-combo-count-zero { color:#9aa1ac; }
+    [data-theme="dark"] .ig-dslink { color:#93c5fd; }
+    [data-theme="dark"] .ig-st-active { color:#4ade80; background:rgba(34,197,94,.15); }
+    [data-theme="dark"] .ig-st-running { color:#93c5fd; background:rgba(59,130,246,.12); }
+    [data-theme="dark"] .ig-st-pending { color:#fcd34d; background:rgba(245,158,11,.12); }
+    [data-theme="dark"] .ig-st-error { color:#f87171; background:rgba(239,68,68,.12); }
+    [data-theme="dark"] .ig-st-paused { color:#9aa1ac; background:#1e222b; }
+    [data-theme="dark"] .btn-icon-resume { color:#4ade80; }
+    /* inline-style color overrides */
+    [data-theme="dark"] [style*="color:#18181b"]{color:#f3f4f6!important}
+    [data-theme="dark"] [style*="color:#27272a"]{color:#e6e9ef!important}
+    [data-theme="dark"] [style*="color:#71717a"]{color:#9aa1ac!important}
+    [data-theme="dark"] [style*="color:#a1a1aa"]{color:#9aa1ac!important}
+    [data-theme="dark"] [style*="color:#2563eb"]{color:#93c5fd!important}
+    [data-theme="dark"] [style*="color:#15803d"]{color:#4ade80!important}
+    [data-theme="dark"] [style*="color:#b91c1c"]{color:#f87171!important}
+    [data-theme="dark"] [style*="color:#92400e"]{color:#fcd34d!important}
+    [data-theme="dark"] [style*="color:#16a34a"]{color:#4ade80!important}
+    [data-theme="dark"] [style*="color:#dc2626"]{color:#f87171!important}
+    [data-theme="dark"] [style*="background:#fff;"]{background:#181a20!important}
+    [data-theme="dark"] [style*="background:#fffbeb"]{background:rgba(245,158,11,.12)!important}
+    [data-theme="dark"] [style*="1px solid #f4f4f5"]{border-color:#23272f!important}
+    [data-theme="dark"] [style*="1px solid #e4e4e7"]{border-color:#2b303b!important}
+    [data-theme="dark"] [style*="1px solid #fde68a"]{border-color:rgba(245,158,11,.35)!important}
 </style>
 
 @code {

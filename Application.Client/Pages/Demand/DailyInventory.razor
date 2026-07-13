@@ -12,7 +12,7 @@
 
 <PageTitle>Daily Inventory</PageTitle>
 
-<div style="max-width: 1800px; margin: 0 auto; padding: 0; height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;">
+<div class="di-root" style="max-width: 1800px; margin: 0 auto; padding: 0; height: 100%; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;">
 
     <!-- Header -->
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-shrink: 0;">
@@ -21,14 +21,14 @@
             <p style="font-size: 0.8rem; color: #6b7280; margin: 4px 0 0;">Item-location stock positions with 6-week rolling sales</p>
         </div>
         <div style="display: flex; align-items: center; gap: 8px;">
-            <button @onclick="ExportCsv" title="Export all filtered rows (max 1,000,000) to CSV"
+            <button @onclick="ExportCsv" title="Export all filtered rows (max 1,000,000) to CSV" class="di-btn"
                     style="padding: 6px 12px; border-radius: 6px; border: 1px solid #d1d5db; background: white; font-size: 0.8rem; cursor: pointer; color: #374151; white-space: nowrap; display: inline-flex; align-items: center; gap: 6px;">
                 <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 Export CSV
             </button>
             @if (_rows.Count > 0)
             {
-                <span style="font-size: 11px; font-weight: 500; color: #6b7280; background: #f0f1f3; padding: 3px 8px; border-radius: 5px;">
+                <span class="di-badge-count" style="font-size: 11px; font-weight: 500; color: #6b7280; background: #f0f1f3; padding: 3px 8px; border-radius: 5px;">
                     @_rows.Count rows@(_hasMore ? "+" : "")
                 </span>
             }
@@ -42,7 +42,7 @@
         <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
 
             <!-- Filter bar -->
-            <div style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 16px; margin-bottom: 12px; flex-shrink: 0;">
+            <div class="di-card" style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px 16px; margin-bottom: 12px; flex-shrink: 0;">
                 <div style="display: grid; grid-template-columns: auto auto 1fr 1fr auto auto; gap: 8px; align-items: end;">
                     <div>
                         <label style="font-size: 0.72rem; font-weight: 600; color: #6b7280; display: block; margin-bottom: 3px; text-transform: uppercase;">End Date</label>
@@ -54,36 +54,36 @@
                     <!-- Location multi-select -->
                     <div style="position: relative;">
                         <label style="font-size: 0.72rem; font-weight: 600; color: #6b7280; display: block; margin-bottom: 3px; text-transform: uppercase;">Location</label>
-                        <button @onclick="ToggleLocationDropdown" type="button"
+                        <button @onclick="ToggleLocationDropdown" type="button" class="di-select-btn"
                                 style="min-width: 160px; padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.8rem; color: #374151; background: white; cursor: pointer; text-align: left; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
                             <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                 @if (_selectedLocations.Count == 0)
-                                { <span style="color: #9ca3af;">All locations</span> }
+                                { <span class="di-muted" style="color: #9ca3af;">All locations</span> }
                                 else if (_selectedLocations.Count == 1)
                                 { @_selectedLocations.First() }
                                 else
                                 { <span>@_selectedLocations.Count selected</span> }
                             </span>
-                            <span style="font-size: 0.6rem; color: #9ca3af; flex-shrink: 0;">▼</span>
+                            <span class="di-muted" style="font-size: 0.6rem; color: #9ca3af; flex-shrink: 0;">▼</span>
                         </button>
 
                         @if (_locationDropdownOpen)
                         {
-                            <div style="position: absolute; top: 100%; left: 0; z-index: 100; background: white; border: 1px solid #d1d5db; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); min-width: 220px; max-height: 280px; overflow-y: auto; margin-top: 2px;">
+                            <div class="di-dropdown" style="position: absolute; top: 100%; left: 0; z-index: 100; background: white; border: 1px solid #d1d5db; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); min-width: 220px; max-height: 280px; overflow-y: auto; margin-top: 2px;">
                                 @if (_loadingLocations)
                                 {
-                                    <div style="padding: 12px 14px; font-size: 0.8rem; color: #6b7280;">Loading…</div>
+                                    <div class="di-muted" style="padding: 12px 14px; font-size: 0.8rem; color: #6b7280;">Loading…</div>
                                 }
                                 else
                                 {
-                                    <div style="padding: 8px 10px; border-bottom: 1px solid #f3f4f6;">
+                                    <div class="di-divider" style="padding: 8px 10px; border-bottom: 1px solid #f3f4f6;">
                                         <input @bind="_locationSearch" @bind:event="oninput" placeholder="Search…"
                                                style="width: 100%; padding: 5px 8px; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 0.78rem; box-sizing: border-box;" />
                                     </div>
                                     @if (_selectedLocations.Count > 0)
                                     {
-                                        <div style="padding: 6px 10px; border-bottom: 1px solid #f3f4f6;">
-                                            <button @onclick="ClearLocationSelection" type="button"
+                                        <div class="di-divider" style="padding: 6px 10px; border-bottom: 1px solid #f3f4f6;">
+                                            <button @onclick="ClearLocationSelection" type="button" class="di-muted"
                                                     style="font-size: 0.75rem; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0;">
                                                 Clear selection (@_selectedLocations.Count)
                                             </button>
@@ -92,7 +92,7 @@
                                     @foreach (var loc in FilteredLocations)
                                     {
                                         var isChecked = _selectedLocations.Contains(loc.Code!);
-                                        <label style="display: flex; align-items: center; gap: 8px; padding: 7px 14px; cursor: pointer; font-size: 0.8rem; color: #374151; @(isChecked ? "background: #f0f7ff;" : "")">
+                                        <label class="@(isChecked ? "di-option-sel" : "")" style="display: flex; align-items: center; gap: 8px; padding: 7px 14px; cursor: pointer; font-size: 0.8rem; color: #374151; @(isChecked ? "background: #f0f7ff;" : "")">
                                             <input type="checkbox" checked="@isChecked"
                                                    @onchange="@(e => ToggleLocation(loc.Code!, (bool)e.Value!))"
                                                    style="cursor: pointer;" />
@@ -100,14 +100,14 @@
                                                 @loc.Code
                                                 @if (!string.IsNullOrWhiteSpace(loc.Name))
                                                 {
-                                                    <span style="color: #9ca3af; margin-left: 4px; font-size: 0.75rem;">@loc.Name</span>
+                                                    <span class="di-muted" style="color: #9ca3af; margin-left: 4px; font-size: 0.75rem;">@loc.Name</span>
                                                 }
                                             </span>
                                         </label>
                                     }
                                     @if (!FilteredLocations.Any())
                                     {
-                                        <div style="padding: 12px 14px; font-size: 0.8rem; color: #9ca3af;">No locations found</div>
+                                        <div class="di-muted" style="padding: 12px 14px; font-size: 0.8rem; color: #9ca3af;">No locations found</div>
                                     }
                                 }
                             </div>
@@ -139,7 +139,7 @@
                                 style="padding: 6px 14px; border-radius: 6px; border: 1px solid #4f46e5; background: #4f46e5; font-size: 0.8rem; cursor: pointer; color: white; font-weight: 500; white-space: nowrap;">
                             Apply
                         </button>
-                        <button @onclick="ResetFilters"
+                        <button @onclick="ResetFilters" class="di-btn"
                                 style="padding: 6px 12px; border-radius: 6px; border: 1px solid #d1d5db; background: white; font-size: 0.8rem; cursor: pointer; color: #374151; white-space: nowrap;">
                             Clear
                         </button>
@@ -156,13 +156,13 @@
             }
             else if (!_loading && _rows.Count == 0)
             {
-                <div style="text-align: center; padding: 60px; background: white; border: 1px solid #e5e7eb; border-radius: 10px; flex-shrink: 0;">
+                <div class="di-card" style="text-align: center; padding: 60px; background: white; border: 1px solid #e5e7eb; border-radius: 10px; flex-shrink: 0;">
                     <p style="color: #6b7280; font-size: 0.9rem;">No inventory data found for the selected filters.</p>
                 </div>
             }
             else
             {
-                <div style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0;">
+                <div class="di-card" style="background: white; border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0;">
                     <div id="inventory-scroll-container" style="flex: 1; min-height: 0; overflow: auto;" @onclick="CloseLocationDropdown">
                         <table style="width: 100%; border-collapse: collapse;">
                             <thead style="background: #fafbfc; border-bottom: 1px solid #eef0f3; position: sticky; top: 0; z-index: 1;">
@@ -190,7 +190,7 @@
                                     var row = _rows[i];
                                     <tr id="@(i == sentinelIndex ? "inventory-scroll-sentinel" : null)" style="border-bottom: 1px solid rgba(49, 51, 63, 0.06);">
                                         <td style="@_tdStyle">@row.ItemNo</td>
-                                        <td style="@_tdStyle; color: #6b7280;">@row.VariantCode</td>
+                                        <td class="di-td-muted" style="@_tdStyle; color: #6b7280;">@row.VariantCode</td>
                                         <td style="@_tdStyle">@row.LocationCode</td>
                                         @foreach (var col in _selectedDetailColumns)
                                         {
@@ -202,7 +202,7 @@
                                         <td style="@_tdStyleR">@FormatQty(row.Week3Qty)</td>
                                         <td style="@_tdStyleR">@FormatQty(row.Week2Qty)</td>
                                         <td style="@_tdStyleR; font-weight: 550;">@FormatQty(row.Week1Qty)</td>
-                                        <td style="@_tdStyleR; font-weight: 550; color: @(row.StockOnHand > 0 ? "#166534" : row.StockOnHand < 0 ? "#dc2626" : "#374151");">
+                                        <td class="@(row.StockOnHand > 0 ? "di-pos" : row.StockOnHand < 0 ? "di-neg" : "di-zero")" style="@_tdStyleR; font-weight: 550; color: @(row.StockOnHand > 0 ? "#166534" : row.StockOnHand < 0 ? "#dc2626" : "#374151");">
                                             @FormatQty(row.StockOnHand)
                                         </td>
                                     </tr>
@@ -219,7 +219,7 @@
                         @if (!_hasMore && _rows.Count > 0)
                         {
                             <div style="text-align: center; padding: 12px;">
-                                <span style="font-size: 0.78rem; color: #9ca3af;">All @_rows.Count rows loaded</span>
+                                <span class="di-muted" style="font-size: 0.78rem; color: #9ca3af;">All @_rows.Count rows loaded</span>
                             </div>
                         }
                     </div>
@@ -228,13 +228,13 @@
         </div>
 
         <!-- Right sidebar: item detail column selector -->
-        <aside style="width: 260px; flex-shrink: 0; background: white; border: 1px solid #e5e7eb; border-radius: 10px; display: flex; flex-direction: column; min-height: 0;">
-            <div style="padding: 12px 14px; border-bottom: 1px solid #f3f4f6; flex-shrink: 0;">
+        <aside class="di-card" style="width: 260px; flex-shrink: 0; background: white; border: 1px solid #e5e7eb; border-radius: 10px; display: flex; flex-direction: column; min-height: 0;">
+            <div class="di-divider" style="padding: 12px 14px; border-bottom: 1px solid #f3f4f6; flex-shrink: 0;">
                 <div style="display: flex; align-items: center; justify-content: space-between;">
-                    <span style="font-size: 0.78rem; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.03em;">Item Detail Columns</span>
+                    <span class="di-strong" style="font-size: 0.78rem; font-weight: 700; color: #374151; text-transform: uppercase; letter-spacing: 0.03em;">Item Detail Columns</span>
                     @if (_selectedDetailColumns.Count > 0)
                     {
-                        <button @onclick="ClearDetailColumns" type="button"
+                        <button @onclick="ClearDetailColumns" type="button" class="di-muted"
                                 style="font-size: 0.72rem; color: #6b7280; background: none; border: none; cursor: pointer; padding: 0;">
                             Clear (@_selectedDetailColumns.Count)
                         </button>
@@ -247,18 +247,18 @@
             <div style="flex: 1; min-height: 0; overflow-y: auto; padding: 6px;">
                 @if (_loadingDetailColumns)
                 {
-                    <div style="padding: 12px 8px; font-size: 0.8rem; color: #6b7280;">Loading columns…</div>
+                    <div class="di-muted" style="padding: 12px 8px; font-size: 0.8rem; color: #6b7280;">Loading columns…</div>
                 }
                 else if (!FilteredDetailColumns.Any())
                 {
-                    <div style="padding: 12px 8px; font-size: 0.8rem; color: #9ca3af;">No columns found.</div>
+                    <div class="di-muted" style="padding: 12px 8px; font-size: 0.8rem; color: #9ca3af;">No columns found.</div>
                 }
                 else
                 {
                     @foreach (var col in FilteredDetailColumns)
                     {
                         var isSel = _selectedDetailColumns.Contains(col);
-                        <label style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; font-size: 0.8rem; color: #374151; border-radius: 6px; @(isSel ? "background: #eef2ff;" : "")">
+                        <label class="@(isSel ? "di-option-sel" : "")" style="display: flex; align-items: center; gap: 8px; padding: 6px 8px; cursor: pointer; font-size: 0.8rem; color: #374151; border-radius: 6px; @(isSel ? "background: #eef2ff;" : "")">
                             <input type="checkbox" checked="@isSel"
                                    @onchange="@(e => ToggleDetailColumn(col, (bool)e.Value!))"
                                    style="cursor: pointer;" />
@@ -270,6 +270,40 @@
         </aside>
     </div>
 </div>
+
+<style>
+    /* Dark-mode overrides for this page's custom light-hardcoded chrome. Inline styles win, so !important is required. */
+    [data-theme="dark"] .di-root h1 { color: #f3f4f6 !important; }
+    [data-theme="dark"] .di-root p { color: #9aa1ac !important; }
+    [data-theme="dark"] .di-root label { color: #e6e9ef !important; }
+    [data-theme="dark"] .di-root .di-strong { color: #f3f4f6 !important; }
+    [data-theme="dark"] .di-root .di-muted { color: #9aa1ac !important; }
+
+    [data-theme="dark"] .di-root .di-card { background: #181a20 !important; border-color: #2b303b !important; }
+    [data-theme="dark"] .di-root .di-dropdown { background: #181a20 !important; border-color: #2b303b !important; box-shadow: 0 4px 16px rgba(0,0,0,0.5) !important; }
+    [data-theme="dark"] .di-root .di-divider { border-color: #23272f !important; }
+
+    [data-theme="dark"] .di-root .di-btn { background: #181a20 !important; border-color: #2b303b !important; color: #e6e9ef !important; }
+    [data-theme="dark"] .di-root .di-btn:hover { background: #20242c !important; }
+    [data-theme="dark"] .di-root .di-select-btn { background: #12141a !important; border-color: #2b303b !important; color: #e6e9ef !important; }
+
+    [data-theme="dark"] .di-root .di-badge-count { background: #1e222b !important; color: #9aa1ac !important; }
+
+    [data-theme="dark"] .di-root input:not([type=checkbox]) { background: #12141a !important; border-color: #2b303b !important; color: #e6e9ef !important; color-scheme: dark; }
+    [data-theme="dark"] .di-root input::placeholder { color: #9aa1ac !important; }
+    [data-theme="dark"] .di-root input[type=checkbox] { accent-color: #6366f1; }
+
+    [data-theme="dark"] .di-root .di-option-sel { background: rgba(129,140,248,0.15) !important; }
+
+    [data-theme="dark"] .di-root thead { background: #1e222b !important; border-color: #2b303b !important; }
+    [data-theme="dark"] .di-root th { color: #9aa1ac !important; }
+    [data-theme="dark"] .di-root td { color: #e6e9ef !important; }
+    [data-theme="dark"] .di-root .di-td-muted { color: #9aa1ac !important; }
+    [data-theme="dark"] .di-root tbody tr { border-bottom-color: #23272f !important; }
+    [data-theme="dark"] .di-root .di-pos { color: #4ade80 !important; }
+    [data-theme="dark"] .di-root .di-neg { color: #f87171 !important; }
+    [data-theme="dark"] .di-root .di-zero { color: #e6e9ef !important; }
+</style>
 
 @code {
     private const string _thStyle  = "padding: 10px 16px; font-size: 11.5px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: 0.03em; text-align: left; white-space: nowrap;";

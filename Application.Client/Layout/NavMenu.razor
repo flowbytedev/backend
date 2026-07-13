@@ -143,6 +143,22 @@
         .nav-open .nav-sidebar { transform: translateX(0); }
         .nav-open .nav-backdrop { display: block; }
     }
+
+    /* ── Dark theme ──────────────────────────────────────── */
+    [data-theme="dark"] .nav-sidebar { background: #161821; border-color: #262a33; }
+    [data-theme="dark"] .nav-section-label { color: #8b909c; }
+    [data-theme="dark"] .nav-item { color: #c5cad4; }
+    [data-theme="dark"] .nav-item:hover { background: #22262f; color: #f3f4f6; }
+    [data-theme="dark"] .nav-item.active { background: rgba(129,140,248,0.16); color: #a5b4fc; }
+    [data-theme="dark"] .nav-group-children { border-color: #262a33; }
+    [data-theme="dark"] .nav-divider { border-color: #262a33; }
+    [data-theme="dark"] .nav-footer { border-color: #262a33; }
+    [data-theme="dark"] .nav-username { color: #c5cad4; }
+    [data-theme="dark"] .nav-logout { color: #9aa1ac; }
+    [data-theme="dark"] .nav-logout:hover { background: rgba(248,113,113,0.12); color: #f87171; }
+    [data-theme="dark"] .nav-sidebar-scroll:hover { scrollbar-color: #3a4150 transparent; }
+    [data-theme="dark"] .nav-sidebar-scroll:hover::-webkit-scrollbar-thumb { background: #3a4150; }
+    [data-theme="dark"] .nav-sidebar-scroll::-webkit-scrollbar-thumb:hover { background: #4b515e; }
 </style>
 
 <div class="nav-backdrop" onclick="document.body.classList.remove('nav-open')"></div>
@@ -335,6 +351,7 @@
     }
 
     <div class="nav-footer">
+        <ThemeToggle />
         <AuthorizeView>
             <Authorized>
                 <div class="nav-user-row">
@@ -405,6 +422,14 @@
             _stateContainer.Company = await GetUserDefaultCompany(userId);
 
         _stateContainer.OnChange += StateHasChanged;
+
+        if (_stateContainer.Company != null && !string.IsNullOrEmpty(userId))
+        {
+            _client.DefaultRequestHeaders.Remove("X-Company-Id");
+            _client.DefaultRequestHeaders.Add("X-Company-Id", _stateContainer.Company.Id);
+            _client.DefaultRequestHeaders.Remove("UserId");
+            _client.DefaultRequestHeaders.Add("UserId", userId);
+        }
     }
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs e)

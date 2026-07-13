@@ -59,7 +59,7 @@ else
         <div style="width:260px;flex-shrink:0;display:flex;flex-direction:column;gap:0.75rem;overflow:hidden">
             <div class="ds-card" style="padding:0.75rem;display:flex;flex-direction:column;flex-shrink:0;max-height:40%;overflow:hidden">
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.5rem;flex-shrink:0">
-                    <span style="font-size:0.75rem;font-weight:600;color:#71717a;text-transform:uppercase;letter-spacing:0.05em">Saved Queries</span>
+                    <span class="qw-sec-label" style="font-size:0.75rem;font-weight:600;color:#71717a;text-transform:uppercase;letter-spacing:0.05em">Saved Queries</span>
                     <button class="btn-icon" title="Save current query" @onclick="OpenSaveQuery" disabled="@string.IsNullOrEmpty(selectedDatasetId)">
                         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
                     </button>
@@ -71,7 +71,7 @@ else
                         {
                             <div class="qw-saved-item" style="display:flex;align-items:center;justify-content:space-between;gap:0.25rem;padding:0.375rem 0.25rem;border-radius:4px">
                                 <button class="qw-link" title="@q.Description" style="background:none;border:none;text-align:left;cursor:pointer;flex:1;min-width:0;color:#2563eb;font-size:0.8125rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" @onclick="() => LoadSavedQuery(q)">
-                                    @q.Name @if (q.IsShared) { <span style="color:#16a34a;font-size:0.6875rem">· shared</span> }
+                                    @q.Name @if (q.IsShared) { <span class="qw-shared" style="color:#16a34a;font-size:0.6875rem">· shared</span> }
                                 </button>
                                 @if (q.CanEdit)
                                 {
@@ -90,7 +90,7 @@ else
             </div>
 
             <div class="ds-card" style="padding:0.75rem;display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden">
-                <span style="font-size:0.75rem;font-weight:600;color:#71717a;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0">@(QueryingExternalSource ? "Source Tables" : IsExternal ? "Snapshots" : "Tables")@(tables.Any() ? $" ({tables.Count})" : "")</span>
+                <span class="qw-sec-label" style="font-size:0.75rem;font-weight:600;color:#71717a;text-transform:uppercase;letter-spacing:0.05em;flex-shrink:0">@(QueryingExternalSource ? "Source Tables" : IsExternal ? "Snapshots" : "Tables")@(tables.Any() ? $" ({tables.Count})" : "")</span>
                 <div style="margin-top:0.5rem;overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:0.125rem">
                     @if (tables.Any())
                     {
@@ -133,11 +133,11 @@ else
                     <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
                         @if (QueryingExternalSource)
                         {
-                            <span style="font-size:0.8125rem;color:#71717a">Snapshot into local table</span>
+                            <span class="qw-dim" style="font-size:0.8125rem;color:#71717a">Snapshot into local table</span>
                         }
                         else
                         {
-                            <span style="font-size:0.8125rem;color:#71717a">Save result as</span>
+                            <span class="qw-dim" style="font-size:0.8125rem;color:#71717a">Save result as</span>
                             <select class="ds-input" @bind="saveResultAsView"><option value="false">Table</option><option value="true">View</option></select>
                         }
                         <input class="ds-input" placeholder="object_name" @bind="saveResultName" style="flex:1;min-width:160px" />
@@ -161,7 +161,7 @@ else
                     <div style="display:flex;align-items:center;gap:0.75rem">
                         @if (result != null && string.IsNullOrEmpty(result.Error))
                         {
-                            <span style="font-size:0.75rem;color:#71717a">
+                            <span class="qw-dim" style="font-size:0.75rem;color:#71717a">
                                 @if (result.IsSelect)
                                 {
                                     <span>@result.RowsReturned row@(result.RowsReturned == 1 ? "" : "s")@(result.Truncated ? " (truncated)" : "") · @result.ElapsedMs ms</span>
@@ -191,7 +191,7 @@ else
 
                 @if (result?.Error is { Length: > 0 } err)
                 {
-                    <div style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:6px;padding:0.625rem 0.75rem;font-size:0.8125rem;font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap">@err</div>
+                    <div class="qw-err" style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:6px;padding:0.625rem 0.75rem;font-size:0.8125rem;font-family:ui-monospace,Consolas,monospace;white-space:pre-wrap">@err</div>
                 }
                 else if (result == null)
                 {
@@ -212,7 +212,7 @@ else
                         }
                         else
                         {
-                            <p style="font-size:0.875rem;color:#16a34a">Statement executed successfully — @result.RowsAffected row(s) affected.</p>
+                            <p class="qw-ok" style="font-size:0.875rem;color:#16a34a">Statement executed successfully — @result.RowsAffected row(s) affected.</p>
                         }
                     </div>
                 }
@@ -230,7 +230,7 @@ else
                             @foreach (var col in ColumnNames) { <option value="@col">@col</option> }
                         </select>
                         <div style="display:flex;gap:0.375rem;align-items:center;flex-wrap:wrap">
-                            <span style="font-size:0.75rem;color:#71717a">Values:</span>
+                            <span class="qw-dim" style="font-size:0.75rem;color:#71717a">Values:</span>
                             @foreach (var col in ColumnNames)
                             {
                                 <label style="display:flex;align-items:center;gap:0.2rem;font-size:0.75rem">
@@ -246,7 +246,7 @@ else
                         }
                         else
                         {
-                            <p style="font-size:0.8125rem;color:#71717a">Choose an X axis and at least one value column.</p>
+                            <p class="qw-dim" style="font-size:0.8125rem;color:#71717a">Choose an X axis and at least one value column.</p>
                         }
                     </div>
                 }
@@ -261,6 +261,19 @@ else
     .qw-tab-active { background:#2563eb; color:#fff; border-color:#2563eb; }
     .qw-saved-item:hover, .qw-link:hover { background:#f4f4f5; }
     .qw-modes { display:flex; gap:0.25rem; }
+
+    /* ---- Dark mode ---- */
+    [data-theme="dark"] .qw-tab { background:#1e222b; border-color:#2b303b; color:#9aa1ac; }
+    [data-theme="dark"] .qw-tab-active { background:#4f46e5; color:#fff; border-color:#4f46e5; }
+    [data-theme="dark"] .qw-saved-item:hover, [data-theme="dark"] .qw-link:hover { background:#20242c; }
+    /* Sidebar links: table names read as body text; saved-query links keep the accent. (Inline colors → !important) */
+    [data-theme="dark"] .qw-link { color:#e6e9ef !important; }
+    [data-theme="dark"] .qw-saved-item .qw-link { color:#818cf8 !important; }
+    [data-theme="dark"] .qw-sec-label { color:#9aa1ac !important; }
+    [data-theme="dark"] .qw-shared { color:#4ade80 !important; }
+    [data-theme="dark"] .qw-dim { color:#9aa1ac !important; }
+    [data-theme="dark"] .qw-ok { color:#4ade80 !important; }
+    [data-theme="dark"] .qw-err { background:rgba(239,68,68,.12) !important; border-color:rgba(248,113,113,.3) !important; color:#f87171 !important; }
 </style>
 
 @code {

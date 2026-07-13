@@ -91,6 +91,23 @@
     .ncm-mention-item:hover { background:#f4f4f5; }
     .ncm-mention-name { font-size:0.8125rem; font-weight:600; color:#18181b; }
     .ncm-mention-email { font-size:0.7rem; color:#71717a; }
+
+    /* ---- Dark mode ---- */
+    [data-theme="dark"] .ncm-empty { color:#9aa1ac; }
+    [data-theme="dark"] .ncm-item { border-bottom-color:#23272f; }
+    [data-theme="dark"] .ncm-avatar { background:#2b303b; color:#e6e9ef; }
+    [data-theme="dark"] .ncm-author { color:#f3f4f6; }
+    [data-theme="dark"] .ncm-time { color:#9aa1ac; }
+    [data-theme="dark"] .ncm-content { color:#e6e9ef; }
+    [data-theme="dark"] .ncm-footer { border-top-color:#23272f; }
+    [data-theme="dark"] .ncm-textarea { background-color:#12141a !important; color:#e6e9ef !important; }
+    [data-theme="dark"] .ncm-textarea:focus { background-color:#181a20 !important; border-color:#818cf8 !important; }
+    [data-theme="dark"] .ncm-mention-dropdown { background:#181a20; border-color:#2b303b; }
+    [data-theme="dark"] .ncm-mention-item:hover { background:#20242c; }
+    [data-theme="dark"] .ncm-mention-name { color:#f3f4f6; }
+    [data-theme="dark"] .ncm-mention-email { color:#9aa1ac; }
+    /* Inline-styled mention chip emitted by FormatCommentContent — override via its class. */
+    [data-theme="dark"] .ncm-mention-tag { color:#c7d2fe !important; background:#20242c !important; }
 </style>
 
 @code {
@@ -257,7 +274,7 @@
         if (string.IsNullOrEmpty(content)) return content;
         var encoded = System.Net.WebUtility.HtmlEncode(content);
         return System.Text.RegularExpressions.Regex.Replace(encoded, MentionPattern,
-            "<span style='color:#18181b;font-weight:600;background:#f4f4f5;padding:1px 4px;border-radius:3px'>@$1</span>");
+            "<span class='ncm-mention-tag' style='color:#18181b;font-weight:600;background:#f4f4f5;padding:1px 4px;border-radius:3px'>@$1</span>");
     }
 
     private async Task OnCommentKeyDown(KeyboardEventArgs e)

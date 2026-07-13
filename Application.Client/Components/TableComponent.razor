@@ -8,7 +8,11 @@
 
 
 
-<div style="background-color:white; border-radius: 5px; padding: 5px; height:80vh; overflow-x:auto; overflow-y:auto; outline: 1px solid transparent;">
+<style>
+    [data-theme="dark"] .tc-wrap { background-color: #181a20 !important; }
+</style>
+
+<div class="tc-wrap" style="background-color:white; border-radius: 5px; padding: 5px; height:80vh; overflow-x:auto; overflow-y:auto; outline: 1px solid transparent;">
     <FluentDataGrid role="grid"
                         @ref="grid"
                         Items="Items.AsQueryable()"

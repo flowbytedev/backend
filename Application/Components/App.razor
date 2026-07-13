@@ -7,6 +7,22 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <base href="/" />
+    <script>
+        // Set the theme attribute before first paint to avoid a flash of the light
+        // theme. Mirrors the mode persisted by <FluentDesignTheme> under "theme".
+        (function () {
+            try {
+                var mode = 'system';
+                var raw = localStorage.getItem('theme');
+                if (raw) {
+                    try { mode = JSON.parse(raw).mode || 'system'; } catch (e) { mode = raw; }
+                }
+                mode = String(mode).toLowerCase();
+                var dark = mode === 'dark' || (mode !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+                document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+            } catch (e) { }
+        })();
+    </script>
     <link rel="stylesheet" href="Application.styles.css" />
     <link rel="icon" type="image/x-icon" href="favicon.ico" />
     <script src="https://cdn.tailwindcss.com"></script>
@@ -44,6 +60,13 @@
     <script src="js/dataGridEditor.js?v=2"></script>
     <script src="js/sidebar-resize.js"></script>
     <script src="_framework/blazor.web.js"></script>
+    <script>
+        // Enhanced navigation morphs the DOM and drops data-theme off <html>. Re-apply
+        // the persisted theme after each enhanced page load so it survives navigation.
+        Blazor.addEventListener('enhancedload', function () {
+            if (window.appTheme) window.appTheme.reapply();
+        });
+    </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.40.0/min/vs/loader.min.js"></script>
     
 

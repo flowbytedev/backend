@@ -15,7 +15,112 @@
 
 <PageTitle>@(IsEditMode ? $"Edit Incident - {incident?.Title}" : "Report Incident")</PageTitle>
 
-<div class="min-h-screen bg-gray-50">
+<style>
+    /* ── Dark theme (data-theme="dark") — override hardcoded Tailwind light colors ── */
+    [data-theme="dark"] .sd-scope.min-h-screen { background-color: #0e1117; }
+    [data-theme="dark"] .sd-scope.bg-white { background-color: #181a20; }
+
+    [data-theme="dark"] .sd-scope .bg-white { background-color: #181a20; }
+    [data-theme="dark"] .sd-scope .bg-white\/60 { background-color: rgba(24,26,32,0.6); }
+    [data-theme="dark"] .sd-scope .bg-gray-50 { background-color: #1e222b; }
+    [data-theme="dark"] .sd-scope .bg-gray-50\/60 { background-color: rgba(30,34,43,0.6); }
+    [data-theme="dark"] .sd-scope .bg-gray-100 { background-color: #20242c; }
+
+    [data-theme="dark"] .sd-scope .text-gray-900 { color: #f3f4f6; }
+    [data-theme="dark"] .sd-scope .text-gray-800 { color: #e6e9ef; }
+    [data-theme="dark"] .sd-scope .text-gray-700 { color: #e6e9ef; }
+    [data-theme="dark"] .sd-scope .text-gray-600 { color: #9aa1ac; }
+    [data-theme="dark"] .sd-scope .text-gray-500 { color: #9aa1ac; }
+    [data-theme="dark"] .sd-scope .text-gray-400 { color: #767d89; }
+    [data-theme="dark"] .sd-scope .text-gray-300 { color: #4b515e; }
+
+    [data-theme="dark"] .sd-scope .border-gray-100 { border-color: #23272f; }
+    [data-theme="dark"] .sd-scope .border-gray-200 { border-color: #2b303b; }
+    [data-theme="dark"] .sd-scope .border-gray-200\/80 { border-color: #2b303b; }
+    [data-theme="dark"] .sd-scope .border-gray-300 { border-color: #2b303b; }
+
+    [data-theme="dark"] .sd-scope .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #23272f; }
+    [data-theme="dark"] .sd-scope .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2b303b; }
+
+    [data-theme="dark"] .sd-scope .hover\:bg-gray-50:hover { background-color: #20242c; }
+    [data-theme="dark"] .sd-scope .hover\:bg-gray-100:hover { background-color: #262b34; }
+    [data-theme="dark"] .sd-scope .hover\:bg-red-50:hover { background-color: rgba(239,68,68,0.12); }
+    [data-theme="dark"] .sd-scope .hover\:bg-indigo-100:hover { background-color: rgba(129,140,248,0.20); }
+    [data-theme="dark"] .sd-scope .hover\:border-gray-400:hover { border-color: #3a4150; }
+    [data-theme="dark"] .sd-scope .hover\:border-red-200:hover { border-color: rgba(239,68,68,0.30); }
+
+    [data-theme="dark"] .sd-scope input:not([type="checkbox"]):not([type="radio"]),
+    [data-theme="dark"] .sd-scope select,
+    [data-theme="dark"] .sd-scope textarea {
+        background-color: #12141a !important;
+        border-color: #2b303b !important;
+        color: #e6e9ef !important;
+    }
+    [data-theme="dark"] .sd-scope input::placeholder,
+    [data-theme="dark"] .sd-scope textarea::placeholder { color: #767d89 !important; }
+
+    [data-theme="dark"] .sd-scope .bg-red-50 { background-color: rgba(239,68,68,0.12); }
+    [data-theme="dark"] .sd-scope .bg-red-100 { background-color: rgba(239,68,68,0.15); }
+    [data-theme="dark"] .sd-scope .border-red-200 { border-color: rgba(239,68,68,0.30); }
+    [data-theme="dark"] .sd-scope .text-red-400,
+    [data-theme="dark"] .sd-scope .text-red-500,
+    [data-theme="dark"] .sd-scope .text-red-600,
+    [data-theme="dark"] .sd-scope .text-red-700,
+    [data-theme="dark"] .sd-scope .text-red-800 { color: #f87171; }
+    [data-theme="dark"] .sd-scope .hover\:text-red-600:hover,
+    [data-theme="dark"] .sd-scope .hover\:text-red-800:hover { color: #fca5a5; }
+
+    [data-theme="dark"] .sd-scope .bg-green-50 { background-color: rgba(34,197,94,0.12); }
+    [data-theme="dark"] .sd-scope .bg-green-100 { background-color: rgba(34,197,94,0.15); }
+    [data-theme="dark"] .sd-scope .border-green-200 { border-color: rgba(34,197,94,0.30); }
+    [data-theme="dark"] .sd-scope .text-green-500,
+    [data-theme="dark"] .sd-scope .text-green-600,
+    [data-theme="dark"] .sd-scope .text-green-700,
+    [data-theme="dark"] .sd-scope .text-green-800 { color: #4ade80; }
+
+    [data-theme="dark"] .sd-scope .bg-yellow-50 { background-color: rgba(245,158,11,0.10); }
+    [data-theme="dark"] .sd-scope .bg-yellow-100 { background-color: rgba(245,158,11,0.15); }
+    [data-theme="dark"] .sd-scope .border-yellow-200 { border-color: rgba(245,158,11,0.30); }
+    [data-theme="dark"] .sd-scope .text-yellow-700,
+    [data-theme="dark"] .sd-scope .text-yellow-800 { color: #fcd34d; }
+
+    [data-theme="dark"] .sd-scope .bg-orange-50 { background-color: rgba(249,115,22,0.10); }
+    [data-theme="dark"] .sd-scope .bg-orange-100 { background-color: rgba(249,115,22,0.15); }
+    [data-theme="dark"] .sd-scope .border-orange-200 { border-color: rgba(249,115,22,0.30); }
+    [data-theme="dark"] .sd-scope .text-orange-600,
+    [data-theme="dark"] .sd-scope .text-orange-700,
+    [data-theme="dark"] .sd-scope .text-orange-800 { color: #fdba74; }
+
+    [data-theme="dark"] .sd-scope .bg-blue-50 { background-color: rgba(59,130,246,0.10); }
+    [data-theme="dark"] .sd-scope .bg-blue-100 { background-color: rgba(59,130,246,0.15); }
+    [data-theme="dark"] .sd-scope .border-blue-200 { border-color: rgba(59,130,246,0.30); }
+    [data-theme="dark"] .sd-scope .text-blue-600,
+    [data-theme="dark"] .sd-scope .text-blue-700,
+    [data-theme="dark"] .sd-scope .text-blue-800 { color: #93c5fd; }
+    [data-theme="dark"] .sd-scope .text-blue-900 { color: #bfdbfe; }
+
+    [data-theme="dark"] .sd-scope .bg-purple-50 { background-color: rgba(168,85,247,0.12); }
+    [data-theme="dark"] .sd-scope .bg-purple-100 { background-color: rgba(168,85,247,0.18); }
+    [data-theme="dark"] .sd-scope .text-purple-700,
+    [data-theme="dark"] .sd-scope .text-purple-800 { color: #d8b4fe; }
+
+    [data-theme="dark"] .sd-scope .bg-indigo-50 { background-color: rgba(129,140,248,0.14); }
+    [data-theme="dark"] .sd-scope .bg-indigo-100 { background-color: rgba(129,140,248,0.20); }
+    [data-theme="dark"] .sd-scope .border-indigo-200 { border-color: rgba(129,140,248,0.30); }
+    [data-theme="dark"] .sd-scope .text-indigo-600,
+    [data-theme="dark"] .sd-scope .text-indigo-700 { color: #a5b4fc; }
+    [data-theme="dark"] .sd-scope .text-indigo-800 { color: #c7d2fe; }
+    [data-theme="dark"] .sd-scope .hover\:text-indigo-600:hover,
+    [data-theme="dark"] .sd-scope .hover\:text-indigo-800:hover { color: #c7d2fe; }
+
+    [data-theme="dark"] .sd-scope .bg-gray-200 { background-color: #23272f; }
+    [data-theme="dark"] .sd-scope .bg-gray-300 { background-color: #363c48; }
+
+    [data-theme="dark"] .sd-scope .ring-white { --tw-ring-color: #181a20; }
+    [data-theme="dark"] .sd-scope .ring-offset-1 { --tw-ring-offset-color: #181a20; }
+</style>
+
+<div class="min-h-screen bg-gray-50 sd-scope">
     <!-- Header -->
     <div class="bg-white border-b border-gray-200">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

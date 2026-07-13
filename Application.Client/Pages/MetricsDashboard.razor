@@ -162,6 +162,25 @@
         .kd-scope h1 { font-size:24px; }
         .kd-name { min-height:0; }
     }
+
+    /* ---------- dark mode: remap token palettes (scope + detached modal) ---------- */
+    [data-theme="dark"] .kd-scope,
+    [data-theme="dark"] .kd-backdrop {
+        --ink:#f3f4f6; --bg:#0e1117; --card:#181a20; --muted:#9aa1ac; --line:#2b303b;
+        --good:#4ade80; --warn:#fcd34d; --bad:#f87171;
+    }
+    /* footer-paint rule uses !important, so match it */
+    [data-theme="dark"] .al-root:has(.kd-scope) .al-footer { background:#0e1117 !important; }
+    /* hardcoded (non-token) light colors */
+    [data-theme="dark"] .kd-back:hover,
+    [data-theme="dark"] .kd-pill:hover,
+    [data-theme="dark"] .kd-search:focus,
+    [data-theme="dark"] .kd-close:hover { border-color:#4b515e; }
+    [data-theme="dark"] .kd-card:hover { border-color:#4b515e; box-shadow:0 6px 18px rgba(0,0,0,.4); }
+    [data-theme="dark"] .kd-pill.active { background:#4f46e5; border-color:#4f46e5; color:#fff; }
+    [data-theme="dark"] .kd-toggle button.active { background:#4f46e5; color:#fff; }
+    [data-theme="dark"] .kd-backdrop { background:rgba(0,0,0,.6); }
+    [data-theme="dark"] .kd-dtable thead th { background:#1e222b; }
 </style>
 
 <div class="kd-scope">

@@ -21,7 +21,7 @@ public class DataActivityLogFilter : IAsyncActionFilter
     public DataActivityLogFilter(IDataAppLogService log) => _log = log;
 
     private static readonly HashSet<string> TargetControllers =
-        new(StringComparer.OrdinalIgnoreCase) { "Datasets", "Ingestion", "Sharing", "Query", "QueryNotebooks" };
+        new(StringComparer.OrdinalIgnoreCase) { "Datasets", "Ingestion", "Sharing", "Query", "QueryNotebooks", "Conversations" };
 
     // Action method name -> (area, action). Anything unmapped falls back to a derived name.
     private static readonly Dictionary<string, (string Area, string Action)> Map =
@@ -95,6 +95,12 @@ public class DataActivityLogFilter : IAsyncActionFilter
             ["Export"] = ("notebook", "notebook.export"),
             ["Import"] = ("notebook", "notebook.import"),
             ["UpdateSchedule"] = ("notebook", "notebook.update_schedule"),
+            // Chat/collaboration
+            ["CreateOrGetDm"] = ("chat", "chat.start_dm"),
+            ["CreateGroup"] = ("chat", "chat.create_group"),
+            ["SendMessage"] = ("chat", "chat.send_message"),
+            ["EditMessage"] = ("chat", "chat.edit_message"),
+            ["DeleteMessage"] = ("chat", "chat.delete_message"),
         };
 
     private static readonly HashSet<string> QueryActions =
