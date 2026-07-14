@@ -5,9 +5,9 @@ namespace Application.Shared.Models.Data;
 
 /// <summary>
 /// AI-generated + human-edited semantic metadata for a single column of a dataset table (the
-/// "semantic layer"). Keyed by (dataset_id, table_name, column_name), scoped to a company. Columns
-/// themselves are not persisted — they're read live from DuckDB / discovered from the source — so this
-/// row is a documentation overlay that a column may or may not have. Persisted via the DACPAC table
+/// "semantic layer"). Keyed by (dataset_id, table_name, column_name, is_snapshot), scoped to a company.
+/// Columns themselves are not persisted — they're read live from DuckDB / discovered from the source — so
+/// this row is a documentation overlay that a column may or may not have. Persisted via the DACPAC table
 /// <c>dataset_column_doc</c> (schema managed as SQL, not EF migrations); PascalCase auto-maps to
 /// snake_case by <see cref="Data.ApplicationDbContext"/>.
 /// </summary>
@@ -25,6 +25,11 @@ public class DatasetColumnDoc
 
     [StringLength(150)]
     public string ColumnName { get; set; } = string.Empty;
+
+    /// <summary>True = documents the dataset's DuckDB snapshot (Local datasets, and External datasets in
+    /// snapshot mode); false = documents the External dataset's live source table. Part of the logical key
+    /// so source and snapshot docs don't collide.</summary>
+    public bool IsSnapshot { get; set; } = true;
 
     /// <summary>Friendly display label, e.g. "Net Amount" for <c>net_amt_acy</c>.</summary>
     [StringLength(200)]

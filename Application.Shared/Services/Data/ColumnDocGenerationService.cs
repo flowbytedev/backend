@@ -5,10 +5,14 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Application.Shared.Data;
+using Application.Shared.Enums;
 using Application.Shared.Models;
 using Application.Shared.Models.Data;
+using Application.Shared.Services;
 using Azure;
 using Azure.AI.OpenAI;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using OpenAI.Chat;
@@ -26,9 +30,11 @@ public interface IColumnDocGenerationService
     /// <summary>
     /// Samples a table's columns + a few sanitized rows and asks Azure OpenAI to propose a description,
     /// display name, semantic type/unit and a PII flag per column, then persists them as AI-generated
-    /// docs. Never throws — failures are returned via <see cref="ColumnDocGenerationResult.Error"/>.
+    /// docs. When <paramref name="snapshotMode"/> is true the table is read from the dataset's DuckDB
+    /// snapshot; when false it is read from the External dataset's live source. Never throws — failures
+    /// are returned via <see cref="ColumnDocGenerationResult.Error"/>.
     /// </summary>
-    Task<ColumnDocGenerationResult> GenerateAsync(string companyId, string datasetId, string tableName, CancellationToken ct = default);
+    Task<ColumnDocGenerationResult> GenerateAsync(string companyId, string datasetId, string tableName, bool snapshotMode, CancellationToken ct = default);
 }
 
 public class ColumnDocGenerationService : IColumnDocGenerationService
@@ -40,30 +46,36 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
     private readonly AzureOpenAIConfiguration _config;
     private readonly AzureOpenAIClient _client;
     private readonly IDuckdbService _duckdb;
+    private readonly IDatabaseTableService _dbTables;
+    private readonly ApplicationDbContext _db;
     private readonly IDatasetDocService _docService;
     private readonly ILogger<ColumnDocGenerationService> _logger;
 
     public ColumnDocGenerationService(
         IOptions<AzureOpenAIConfiguration> config,
         IDuckdbService duckdb,
+        IDatabaseTableService dbTables,
+        ApplicationDbContext db,
         IDatasetDocService docService,
         ILogger<ColumnDocGenerationService> logger)
     {
         _config = config.Value;
         _client = new AzureOpenAIClient(new Uri(_config.Endpoint), new AzureKeyCredential(_config.ApiKey));
         _duckdb = duckdb;
+        _dbTables = dbTables;
+        _db = db;
         _docService = docService;
         _logger = logger;
     }
 
-    public async Task<ColumnDocGenerationResult> GenerateAsync(string companyId, string datasetId, string tableName, CancellationToken ct = default)
+    public async Task<ColumnDocGenerationResult> GenerateAsync(string companyId, string datasetId, string tableName, bool snapshotMode, CancellationToken ct = default)
     {
         var result = new ColumnDocGenerationResult();
 
         List<Column> columns;
         try
         {
-            columns = await _duckdb.GetTableColumnsAsync(datasetId, tableName);
+            columns = await _docService.GetLiveColumnsAsync(companyId, datasetId, tableName, snapshotMode, ct);
         }
         catch (Exception ex)
         {
@@ -79,13 +91,27 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
         }
 
         // A small, read-only sample gives the model real values to reason about. Failure here is
-        // non-fatal — we can still describe from names + types.
+        // non-fatal — we can still describe from names + types. In snapshot mode we read the dataset's
+        // DuckDB copy; in source mode we read the External dataset's live source table.
         List<List<string?>> sampleRows = new();
         try
         {
-            var quoted = "\"" + tableName.Replace("\"", "\"\"") + "\"";
-            var sample = await _duckdb.ExecuteSqlAsync(datasetId, $"SELECT * FROM {quoted} LIMIT {MaxSampleRows}", allowWrite: false, maxRows: MaxSampleRows, ct);
-            if (sample.Error == null)
+            SqlQueryResult? sample = null;
+            if (snapshotMode)
+            {
+                var quoted = "\"" + tableName.Replace("\"", "\"\"") + "\"";
+                sample = await _duckdb.ExecuteSqlAsync(datasetId, $"SELECT * FROM {quoted} LIMIT {MaxSampleRows}", allowWrite: false, maxRows: MaxSampleRows, ct);
+            }
+            else
+            {
+                var dataset = await _db.Dataset.AsNoTracking()
+                    .FirstOrDefaultAsync(d => d.Id == datasetId && d.CompanyId == companyId, ct);
+                if (dataset?.SourceType == DatasetSourceType.External && !string.IsNullOrWhiteSpace(dataset.SourceEntityId))
+                    // ExecuteQueryAsync caps rows at the reader, so no dialect-specific LIMIT/TOP is needed.
+                    sample = await _dbTables.ExecuteQueryAsync(dataset.SourceEntityId!, companyId, $"SELECT * FROM {tableName}", MaxSampleRows, ct);
+            }
+
+            if (sample != null && sample.Error == null)
                 sampleRows = sample.Rows.Select(r => columns.Select(c => r.TryGetValue(c.Name, out var v) ? v?.ToString() : null).ToList()).ToList();
         }
         catch (Exception ex)
@@ -125,7 +151,7 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
                 return result;
             }
 
-            await _docService.ApplyGeneratedDocsAsync(companyId, datasetId, tableName, docs, ct);
+            await _docService.ApplyGeneratedDocsAsync(companyId, datasetId, tableName, snapshotMode, docs, ct);
             result.ColumnsDocumented = docs.Count;
             return result;
         }

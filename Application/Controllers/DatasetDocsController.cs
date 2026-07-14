@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Application.Shared.Authorization;
+using Application.Shared.Enums;
+using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Application.Shared.Services.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -31,44 +33,54 @@ public class DatasetDocsController : ControllerBase
         _datasetService = datasetService;
     }
 
-    // GET: live columns merged with saved docs.
+    // GET: live columns merged with saved docs. snapshot=false (only honored for External datasets)
+    // documents the live source table; snapshot=true documents the dataset's DuckDB snapshot.
     [HttpGet]
-    public async Task<ActionResult<TableDocDto>> Get(string datasetId, string tableName)
+    public async Task<ActionResult<TableDocDto>> Get(string datasetId, string tableName, [FromQuery] bool snapshot = true)
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
         if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
-        if (!await DatasetAccessible(datasetId, userId)) return NotFound($"Dataset '{datasetId}' not found.");
 
-        return Ok(await _docs.GetTableDocsAsync(companyId, datasetId, tableName, HttpContext.RequestAborted));
+        var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);
+        if (dataset == null) return NotFound($"Dataset '{datasetId}' not found.");
+        var snapshotMode = ResolveSnapshotMode(dataset, snapshot);
+
+        return Ok(await _docs.GetTableDocsAsync(companyId, datasetId, tableName, snapshotMode, HttpContext.RequestAborted));
     }
 
     // POST generate: run the AI generator, persist, return the updated docs.
     [HttpPost("generate")]
-    public async Task<ActionResult<TableDocDto>> Generate(string datasetId, string tableName)
+    public async Task<ActionResult<TableDocDto>> Generate(string datasetId, string tableName, [FromQuery] bool snapshot = true)
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
         if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
-        if (!await DatasetAccessible(datasetId, userId)) return NotFound($"Dataset '{datasetId}' not found.");
 
-        var result = await _generator.GenerateAsync(companyId, datasetId, tableName, HttpContext.RequestAborted);
+        var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);
+        if (dataset == null) return NotFound($"Dataset '{datasetId}' not found.");
+        var snapshotMode = ResolveSnapshotMode(dataset, snapshot);
+
+        var result = await _generator.GenerateAsync(companyId, datasetId, tableName, snapshotMode, HttpContext.RequestAborted);
         if (result.Error != null) return BadRequest(result.Error);
 
-        return Ok(await _docs.GetTableDocsAsync(companyId, datasetId, tableName, HttpContext.RequestAborted));
+        return Ok(await _docs.GetTableDocsAsync(companyId, datasetId, tableName, snapshotMode, HttpContext.RequestAborted));
     }
 
     // PUT: save user edits to column docs.
     [HttpPut]
-    public async Task<ActionResult<TableDocDto>> Save(string datasetId, string tableName, [FromBody] List<SaveColumnDocRequest> edits)
+    public async Task<ActionResult<TableDocDto>> Save(string datasetId, string tableName, [FromBody] List<SaveColumnDocRequest> edits, [FromQuery] bool snapshot = true)
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
         if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
-        if (!await DatasetAccessible(datasetId, userId)) return NotFound($"Dataset '{datasetId}' not found.");
         if (edits == null) return BadRequest("No edits provided.");
 
-        return Ok(await _docs.SaveColumnDocsAsync(companyId, datasetId, tableName, userId, edits, HttpContext.RequestAborted));
+        var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);
+        if (dataset == null) return NotFound($"Dataset '{datasetId}' not found.");
+        var snapshotMode = ResolveSnapshotMode(dataset, snapshot);
+
+        return Ok(await _docs.SaveColumnDocsAsync(companyId, datasetId, tableName, snapshotMode, userId, edits, HttpContext.RequestAborted));
     }
 
     private (string companyId, string userId, string? error) ReadHeaders()
@@ -80,6 +92,8 @@ public class DatasetDocsController : ControllerBase
         return (companyId, userId, null);
     }
 
-    private async Task<bool> DatasetAccessible(string datasetId, string userId)
-        => !string.IsNullOrWhiteSpace(datasetId) && await _datasetService.GetDatasetAsync(datasetId, userId) != null;
+    // Local datasets live only in DuckDB, so they're always documented in snapshot mode regardless of the
+    // requested flag; only External datasets can be documented against their live source (snapshot=false).
+    private static bool ResolveSnapshotMode(Dataset dataset, bool requested)
+        => dataset.SourceType == DatasetSourceType.External ? requested : true;
 }

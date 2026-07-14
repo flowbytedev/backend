@@ -4,6 +4,10 @@ CREATE TABLE [dbo].[dataset_column_doc] (
     [dataset_id]      NVARCHAR (450)  NOT NULL,
     [table_name]      NVARCHAR (150)  NOT NULL,
     [column_name]     NVARCHAR (150)  NOT NULL,
+    -- Which physical layer the doc describes: 1 = the dataset's DuckDB snapshot (Local datasets, and
+    -- External datasets in snapshot mode); 0 = the External dataset's live source table. Lets source and
+    -- snapshot docs coexist without colliding when their table/column names overlap.
+    [is_snapshot]     BIT             DEFAULT ((1)) NOT NULL,
     [display_name]    NVARCHAR (200)  NULL,
     [description]     NVARCHAR (1000) NULL,
     [semantic_type]   NVARCHAR (60)   NULL,

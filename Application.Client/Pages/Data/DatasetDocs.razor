@@ -2,6 +2,7 @@
 @using System.Net.Http.Json
 @using Application.Shared.Models
 @using Application.Shared.Models.Data
+@using Application.Shared.Enums
 @inject HttpClient _httpClient
 @inject IToastService _toastService
 @inject AuthenticationStateProvider _authenticationStateProvider
@@ -57,6 +58,16 @@ else
                 }
             </select>
         </label>
+        @if (IsExternal)
+        {
+            <div class="dd-field">
+                <span class="dd-label">Documenting</span>
+                <div class="dd-seg">
+                    <button type="button" class="dd-seg-btn @(snapshotMode ? "" : "dd-seg-active")" @onclick="() => SetMode(false)">Source (live)</button>
+                    <button type="button" class="dd-seg-btn @(snapshotMode ? "dd-seg-active" : "")" @onclick="() => SetMode(true)">Snapshot</button>
+                </div>
+            </div>
+        }
         <label class="dd-field">
             <span class="dd-label">Table</span>
             <select class="ds-input" value="@selectedTable" @onchange="OnTableChanged" disabled="@(string.IsNullOrEmpty(selectedDatasetId))">
@@ -145,6 +156,13 @@ else
     private string selectedDatasetId = string.Empty;
     private string selectedTable = string.Empty;
 
+    // For External datasets: true documents the DuckDB snapshot, false documents the live source. Local
+    // datasets only have a DuckDB layer, so this stays true (and the toggle is hidden).
+    private bool snapshotMode = true;
+    private Dataset? SelectedDataset => datasets.FirstOrDefault(x => x.Id == selectedDatasetId);
+    private bool IsExternal => SelectedDataset?.SourceType == DatasetSourceType.External;
+    private string SnapshotFlag => snapshotMode ? "true" : "false";
+
     private TableDocDto? doc;
     private bool loadingDocs, generating, saving;
 
@@ -180,8 +198,9 @@ else
         if (!string.IsNullOrEmpty(d) && datasets.Any(ds => ds.Id == d))
         {
             selectedDatasetId = d;
-            try { tables = await _httpClient.GetFromJsonAsync<List<string>>($"api/datasets/{selectedDatasetId}/tables") ?? new(); }
-            catch { tables = new(); }
+            // Deep links from the Tables page reference DuckDB snapshot tables.
+            snapshotMode = true;
+            await LoadTables();
 
             if (!string.IsNullOrEmpty(t) && tables.Contains(t))
             {
@@ -199,8 +218,29 @@ else
         doc = null;
         if (string.IsNullOrEmpty(selectedDatasetId)) return;
 
-        try { tables = await _httpClient.GetFromJsonAsync<List<string>>($"api/datasets/{selectedDatasetId}/tables") ?? new(); }
+        // External datasets default to documenting the live source; Local datasets only have a DuckDB layer.
+        snapshotMode = !IsExternal;
+        await LoadTables();
+    }
+
+    private async Task LoadTables()
+    {
+        if (string.IsNullOrEmpty(selectedDatasetId)) { tables = new(); return; }
+        // Source mode lists the external database's live tables; snapshot mode lists the DuckDB tables.
+        var url = (IsExternal && !snapshotMode)
+            ? $"api/datasets/{selectedDatasetId}/source-tables"
+            : $"api/datasets/{selectedDatasetId}/tables";
+        try { tables = await _httpClient.GetFromJsonAsync<List<string>>(url) ?? new(); }
         catch { tables = new(); }
+    }
+
+    private async Task SetMode(bool snapshot)
+    {
+        if (snapshotMode == snapshot) return;
+        snapshotMode = snapshot;
+        selectedTable = string.Empty;
+        doc = null;
+        await LoadTables();
     }
 
     private async Task OnTableChanged(ChangeEventArgs e)
@@ -217,7 +257,7 @@ else
         StateHasChanged();
         try
         {
-            doc = await _httpClient.GetFromJsonAsync<TableDocDto>($"api/datasets/{selectedDatasetId}/tables/{Uri.EscapeDataString(selectedTable)}/docs");
+            doc = await _httpClient.GetFromJsonAsync<TableDocDto>($"api/datasets/{selectedDatasetId}/tables/{Uri.EscapeDataString(selectedTable)}/docs?snapshot={SnapshotFlag}");
         }
         catch (Exception ex)
         {
@@ -234,7 +274,7 @@ else
         StateHasChanged();
         try
         {
-            var response = await _httpClient.PostAsync($"api/datasets/{selectedDatasetId}/tables/{Uri.EscapeDataString(selectedTable)}/docs/generate", null);
+            var response = await _httpClient.PostAsync($"api/datasets/{selectedDatasetId}/tables/{Uri.EscapeDataString(selectedTable)}/docs/generate?snapshot={SnapshotFlag}", null);
             if (response.IsSuccessStatusCode)
             {
                 doc = await response.Content.ReadFromJsonAsync<TableDocDto>();
@@ -271,7 +311,7 @@ else
                 PiiType = c.PiiType,
             }).ToList();
 
-            var response = await _httpClient.PutAsJsonAsync($"api/datasets/{selectedDatasetId}/tables/{Uri.EscapeDataString(selectedTable)}/docs", edits);
+            var response = await _httpClient.PutAsJsonAsync($"api/datasets/{selectedDatasetId}/tables/{Uri.EscapeDataString(selectedTable)}/docs?snapshot={SnapshotFlag}", edits);
             if (response.IsSuccessStatusCode)
             {
                 doc = await response.Content.ReadFromJsonAsync<TableDocDto>();
@@ -299,6 +339,10 @@ else
     .dd-pickers { display:flex; gap:1rem; margin-bottom:1rem; flex-wrap:wrap; }
     .dd-field { display:flex; flex-direction:column; gap:0.25rem; min-width:240px; }
     .dd-label { font-size:0.75rem; font-weight:600; color:#52525b; }
+    .dd-seg { display:flex; border:1px solid #e4e4e7; border-radius:8px; overflow:hidden; width:fit-content; }
+    .dd-seg-btn { padding:0.45rem 0.85rem; font-size:0.8125rem; font-weight:600; color:#52525b; background:#fff; border:none; cursor:pointer; }
+    .dd-seg-btn + .dd-seg-btn { border-left:1px solid #e4e4e7; }
+    .dd-seg-active { background:#eff6ff; color:#2563eb; }
     .dd-loading, .dd-empty { padding:2rem; text-align:center; color:#71717a; font-size:0.875rem; }
     .dd-table-wrap { overflow:auto; border:1px solid #e4e4e7; border-radius:10px; }
     .dd-table { width:100%; border-collapse:collapse; font-size:0.8125rem; }
@@ -316,6 +360,10 @@ else
     [data-theme="dark"] .dd-title { color:#f3f4f6; }
     [data-theme="dark"] .dd-subtitle { color:#9aa1ac; }
     [data-theme="dark"] .dd-label { color:#9aa1ac; }
+    [data-theme="dark"] .dd-seg { border-color:#2b303b; }
+    [data-theme="dark"] .dd-seg-btn { background:#181a20; color:#9aa1ac; }
+    [data-theme="dark"] .dd-seg-btn + .dd-seg-btn { border-left-color:#2b303b; }
+    [data-theme="dark"] .dd-seg-active { background:rgba(37,99,235,0.18); color:#93c5fd; }
     [data-theme="dark"] .dd-loading, [data-theme="dark"] .dd-empty { color:#9aa1ac; }
     [data-theme="dark"] .dd-table-wrap { border-color:#2b303b; }
     [data-theme="dark"] .dd-table thead th { background:#1e222b; border-bottom-color:#2b303b; color:#9aa1ac; }

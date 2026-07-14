@@ -266,13 +266,10 @@ public class DashboardAgentService : IDashboardAgentService
         {
             var columns = await _duckdbService.GetTableColumnsAsync(dataset.Id!, table);
 
-            // Enrich with any saved semantic-layer docs so the model understands cryptic column names.
+            // Enrich with any saved semantic-layer docs (DuckDB/snapshot layer) so the model understands
+            // cryptic column names.
             Dictionary<string, ColumnDocDto> docs;
-            try
-            {
-                var tableDoc = await _docService.GetTableDocsAsync(companyId, dataset.Id!, table, ct);
-                docs = tableDoc.Columns.ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
-            }
+            try { docs = await _docService.GetSavedColumnDocsAsync(companyId, dataset.Id!, table, snapshotMode: true, ct); }
             catch { docs = new(); }
 
             sb.AppendLine($"Table \"{table}\":");
@@ -304,10 +301,20 @@ public class DashboardAgentService : IDashboardAgentService
             // The source discovery doesn't include columns; a tiny bounded SELECT gives us the column shape.
             var preview = await _databaseTableService.ExecuteQueryAsync(dataset.SourceEntityId!, companyId,
                 $"SELECT * FROM {t.FullName} LIMIT {SampleRows}", SampleRows, ct);
+
+            // Enrich with any saved source-layer docs (is_snapshot=0), keyed by the same "{schema}.{name}"
+            // FullName the docs page documents source tables under.
+            Dictionary<string, ColumnDocDto> docs;
+            try { docs = await _docService.GetSavedColumnDocsAsync(companyId, dataset.Id!, t.FullName, snapshotMode: false, ct); }
+            catch { docs = new(); }
+
             sb.AppendLine($"Table \"{t.FullName}\":");
             if (preview.Error == null)
                 foreach (var c in preview.Columns)
-                    sb.AppendLine($"  - {c.Name} ({c.DataType})");
+                {
+                    var note = docs.TryGetValue(c.Name, out var d) ? DescribeDoc(d) : null;
+                    sb.AppendLine(note == null ? $"  - {c.Name} ({c.DataType})" : $"  - {c.Name} ({c.DataType}) — {note}");
+                }
             sb.AppendLine();
         }
     }
