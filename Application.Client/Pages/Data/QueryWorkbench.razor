@@ -9,7 +9,7 @@
 @inject AuthenticationStateProvider _authenticationStateProvider
 @inject IJSRuntime _jsRuntime
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
-@attribute [Authorize(Policy = PolicyNames.DatasetsAccess)]
+@attribute [Authorize(Policy = PolicyNames.QueryAccess)]
 
 <PageTitle>Query Workbench</PageTitle>
 
@@ -331,8 +331,8 @@ else
         }
 
         var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
-        canView = authState.User.HasCompanyRole(companyId, "VIEW_DATA");
-        canEdit = authState.User.HasCompanyRole(companyId, "EDIT_DATA");
+        canView = authState.User.HasCompanyRole(companyId, "QUERY");
+        canEdit = authState.User.HasCompanyRole(companyId, "QUERY");
         if (!canView) { isLoading = false; return; }
 
         SetHeaders(authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value);

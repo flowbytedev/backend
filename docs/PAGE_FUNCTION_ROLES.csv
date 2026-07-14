@@ -41,7 +41,7 @@ Status,PowerBI Connections,(in Status pages),Trigger refresh,POST,GMRL_INCIDENTS
 Status,DB Table Check,(in Status pages),View DB connection/tables/check,GET,GMRL_STATUS_READ,
 Status,DB Table Check,(in Status pages),Save/Delete/Test connection or check; run check,POST/PUT/DELETE,GMRL_INCIDENTS,StatusWrite policy
 Data,Datasets List,/data/datasets,View datasets page,GET,GMRL_DATASETS,Page access via DatasetsAccess policy
-Data,Datasets List,/data/datasets,List datasets/stats,GET,GMRL_VIEW_DATA,ADMIN implicitly allowed
+Data,Datasets List,/data/datasets,List datasets/stats,GET,GMRL_VIEW_DATA,ADMIN implicitly allowed; QUERY/DATA_ADMIN also allowed (shared read via DataReadAccess)
 Data,Dataset Create,/data/datasets/create,Create dataset,POST,GMRL_EDIT_DATA,ADMIN implicitly allowed
 Data,Dataset Edit,/data/datasets/edit/{id},Edit dataset,PUT,GMRL_EDIT_DATA,ADMIN implicitly allowed
 Data,Datasets List,/data/datasets,Delete dataset,DELETE,GMRL_EDIT_DATA,ADMIN implicitly allowed
@@ -59,14 +59,15 @@ Data,Import Data,/data/import,View import wizard,GET,GMRL_DATASETS,Page access v
 Data,Import Data,/data/import,Infer schema,POST,GMRL_EDIT_DATA,
 Data,Import Data,/data/import,Peek/Validate file,POST,GMRL_EDIT_DATA,
 Data,Import Data,/data/import,Import CSV/file,POST,GMRL_EDIT_DATA,
-Data,Query Workbench,/data/query,View query page,GET,GMRL_DATASETS,Page access via DatasetsAccess policy
-Data,Query Workbench,/data/query,Run query,POST,GMRL_VIEW_DATA,Write-back within run requires EDIT_DATA
-Data,Query Workbench,/data/query,Save query result,POST,GMRL_EDIT_DATA,
-Data,Query Workbench,/data/query,View/Create/Update saved queries,GET/POST/PUT,GMRL_VIEW_DATA,Editing others' queries requires ADMIN
-Data,Query Workbench,/data/query,Delete saved query,DELETE,GMRL_VIEW_DATA,Deleting others' queries requires ADMIN
-Data,Ingestion Sources,/data/ingestion,View ingestion sources,GET,GMRL_VIEW_DATA,Page access via DatasetsAccess policy
-Data,Ingestion Sources,/data/ingestion,Create/Edit/Delete source,POST/PUT/DELETE,GMRL_EDIT_DATA,
-Data,Ingestion Sources,/data/ingestion,Run now / Run batch / Reconcile,POST,GMRL_EDIT_DATA,
+Data,Query Workbench,/data/query,View query page,GET,GMRL_QUERY,Page access via QueryAccess policy; ADMIN always
+Data,Query Workbench,/data/query,Run query / save result,POST,GMRL_QUERY,QUERY grants full query access (read + write-back)
+Data,Query Workbench,/data/query,View/Create/Update/Delete saved queries,GET/POST/PUT/DELETE,GMRL_QUERY,Editing/deleting others' queries still requires ADMIN
+Data,Query Notebook,/data/notebook,View notebook page,GET,GMRL_QUERY,Page access via QueryAccess policy; ADMIN always
+Data,Query Notebook,/data/notebook,Create/Run/Edit/Delete notebooks & cells,GET/POST/PUT/DELETE,GMRL_QUERY,QUERY grants full notebook access
+Data,Query Notebook,/data/notebook,Create ingestion job from cell,POST,GMRL_DATA_ADMIN,Posts to IngestionController - requires DATA_ADMIN
+Data,Ingestion Sources,/data/ingestion,View ingestion sources,GET,GMRL_DATA_ADMIN,Page access via DataAdminAccess policy; ADMIN always
+Data,Ingestion Sources,/data/ingestion,Create/Edit/Delete source; Run now/batch/reconcile,POST/PUT/DELETE,GMRL_DATA_ADMIN,
+Data,Data Docs,/data/docs,View/Generate/Save column docs,GET/POST/PUT,GMRL_DATA_ADMIN,Page access via DataAdminAccess policy; ADMIN always
 Data,API Keys,/data/api-keys,View API keys page,GET,GMRL_DATASETS,Page access via DatasetsAccess policy
 Data,API Keys,/data/api-keys,List/Create/Update/Revoke/Delete key,GET/POST/PUT/DELETE,GMRL_ADMIN,Company-admin only (HasCompanyRole with no suffix)
 Data,Dashboard Links,(in Data pages),List dashboards,GET,GMRL_DATASETS,No extra role beyond page policy

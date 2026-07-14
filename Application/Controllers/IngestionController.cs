@@ -21,7 +21,7 @@ namespace Application.Controllers;
 /// </summary>
 [Route("api/datasets/{datasetId}/ingestion")]
 [ApiController]
-[Authorize(Policy = PolicyNames.DatasetsAccess)]
+[Authorize(Policy = PolicyNames.DataAdminAccess)]
 public class IngestionController : ControllerBase
 {
     private readonly IIngestionService _ingestionService;
@@ -46,7 +46,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, _, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
 
         var all = await _ingestionService.GetAllSourcesAsync(companyId, HttpContext.RequestAborted);
         EnrichWithHangfire(all);
@@ -59,7 +59,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
         if (!await DatasetAccessible(datasetId, userId)) return NotFound($"Dataset '{datasetId}' not found.");
 
         var list = await _ingestionService.GetSourcesAsync(companyId, datasetId, HttpContext.RequestAborted);
@@ -73,7 +73,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, _, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
 
         var source = await _ingestionService.GetSourceAsync(companyId, id, HttpContext.RequestAborted);
         return source == null ? NotFound() : Ok(source);
@@ -85,7 +85,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
         if (request == null || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.TargetTable))
             return BadRequest("Name and target table are required");
         if (!await DatasetAccessible(datasetId, userId)) return NotFound($"Dataset '{datasetId}' not found.");
@@ -99,7 +99,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, _, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
         if (request == null || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.TargetTable))
             return BadRequest("Name and target table are required");
 
@@ -113,7 +113,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, _, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
 
         return await _ingestionService.DeleteAsync(companyId, id, HttpContext.RequestAborted)
             ? NoContent()
@@ -128,7 +128,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
         if (request == null || string.IsNullOrWhiteSpace(request.Message)) return BadRequest("Message is required");
         if (!await DatasetAccessible(datasetId, userId)) return NotFound($"Dataset '{datasetId}' not found.");
 
@@ -145,7 +145,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, _, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
 
         var runs = await _ingestionService.GetRunsAsync(companyId, id, 20, HttpContext.RequestAborted);
 
@@ -168,7 +168,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, _, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
 
         // Confirm the source belongs to this company before running it.
         var source = await _ingestionService.GetSourceAsync(companyId, id, HttpContext.RequestAborted);
@@ -186,7 +186,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, _, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
 
         // Confirm the source belongs to this company before queueing it.
         var source = await _ingestionService.GetSourceAsync(companyId, id, HttpContext.RequestAborted);
@@ -218,7 +218,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, _, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
 
         // Confirm the source belongs to this company before touching its runs.
         var source = await _ingestionService.GetSourceAsync(companyId, id, HttpContext.RequestAborted);
@@ -242,7 +242,7 @@ public class IngestionController : ControllerBase
     {
         var (companyId, _, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
 
         var updated = await _ingestionService.SetEnabledAsync(companyId, id, enabled, HttpContext.RequestAborted);
         if (updated == null) return NotFound();

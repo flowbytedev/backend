@@ -19,7 +19,7 @@ namespace Application.Controllers;
 /// </summary>
 [Route("api/datasets/{datasetId}/tables/{tableName}/docs")]
 [ApiController]
-[Authorize(Policy = PolicyNames.DatasetsAccess)]
+[Authorize(Policy = PolicyNames.DataAdminAccess)]
 public class DatasetDocsController : ControllerBase
 {
     private readonly IDatasetDocService _docs;
@@ -40,7 +40,7 @@ public class DatasetDocsController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
 
         var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);
         if (dataset == null) return NotFound($"Dataset '{datasetId}' not found.");
@@ -55,7 +55,7 @@ public class DatasetDocsController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
 
         var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);
         if (dataset == null) return NotFound($"Dataset '{datasetId}' not found.");
@@ -73,7 +73,7 @@ public class DatasetDocsController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN")) return Forbid();
         if (edits == null) return BadRequest("No edits provided.");
 
         var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);

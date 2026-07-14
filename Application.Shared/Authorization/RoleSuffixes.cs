@@ -18,7 +18,11 @@ public static class RoleSuffixes
     public const string InventoryRead = "INVENTORY_READ";
     public const string DashboardsRead = "DASHBOARDS_READ";
 
-    /// <summary>Grants access to the Datasets/Tables audit log viewer (ADMIN also passes).</summary>
+    /// <summary>Grants access to the Query Workbench and Query Notebook (ADMIN also passes).</summary>
+    public const string Query = "QUERY";
+
+    /// <summary>Grants access to the Datasets/Tables audit log viewer, Ingestion and Data Docs
+    /// (ADMIN also passes).</summary>
     public const string DataAdmin = "DATA_ADMIN";
 
     /// <summary>Builds the full, company-prefixed role name (e.g. <c>ACME_METRICS_READ</c>).</summary>

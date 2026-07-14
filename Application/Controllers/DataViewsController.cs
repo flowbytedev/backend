@@ -176,7 +176,9 @@ public class DataViewsController : ControllerBase
         if (string.IsNullOrWhiteSpace(companyId))
             return BadRequest("Company ID is required in headers");
 
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA"))
+        // Mention autocomplete is shared by data-table comments (VIEW_DATA) and notebook cell comments
+        // (QUERY), plus data-admin tooling (DATA_ADMIN) — any of these may @-mention a teammate.
+        if (!User.HasCompanyRole(companyId, "VIEW_DATA", "QUERY", "DATA_ADMIN"))
             return Forbid();
 
         try

@@ -18,7 +18,7 @@ namespace Application.Controllers;
 /// </summary>
 [Route("api/datasets/{datasetId}")]
 [ApiController]
-[Authorize(Policy = PolicyNames.DatasetsAccess)]
+[Authorize(Policy = PolicyNames.QueryAccess)]
 public class QueryController : ControllerBase
 {
     private readonly IDuckdbService _duckdbService;
@@ -47,7 +47,7 @@ public class QueryController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         if (string.IsNullOrWhiteSpace(request?.Sql)) return BadRequest("Query is required");
 
         var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);
@@ -70,7 +70,7 @@ public class QueryController : ControllerBase
 
         // VIEW_DATA → read-only; EDIT_DATA/ADMIN → writes allowed. The service classifies the
         // statement and returns a clear error inline if a write is attempted without edit rights.
-        var hasEdit = User.HasCompanyRole(companyId, "EDIT_DATA");
+        var hasEdit = User.HasCompanyRole(companyId, "QUERY");
         var result = await _duckdbService.ExecuteSqlAsync(
             datasetId, request.Sql, allowWrite: hasEdit, maxRows: request.MaxRows ?? 0, HttpContext.RequestAborted);
         return Ok(result);
@@ -82,7 +82,7 @@ public class QueryController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         if (request == null || string.IsNullOrWhiteSpace(request.Sql) || string.IsNullOrWhiteSpace(request.ObjectName))
             return BadRequest("Query and object name are required");
 
@@ -120,7 +120,7 @@ public class QueryController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         return Ok(await _savedQueryService.GetForDatasetAsync(companyId, datasetId, userId));
     }
@@ -131,7 +131,7 @@ public class QueryController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         if (request == null || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.QueryText))
             return BadRequest("Name and query text are required");
         if (!await DatasetAccessible(datasetId, userId))
@@ -146,7 +146,7 @@ public class QueryController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         if (request == null || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.QueryText))
             return BadRequest("Name and query text are required");
 
@@ -162,7 +162,7 @@ public class QueryController : ControllerBase
     {
         var (companyId, userId, error) = ReadHeaders();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         var isAdmin = User.HasCompanyRole(companyId, "ADMIN");
         if (!await _savedQueryService.DeleteAsync(companyId, id, userId, isAdmin))

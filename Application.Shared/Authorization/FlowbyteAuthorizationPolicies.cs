@@ -11,6 +11,9 @@ public static class FlowbyteAuthorizationPolicies
     public static void AddFlowbytePolicies(this AuthorizationOptions options)
     {
         Add(options, PolicyNames.DatasetsAccess, RoleSuffixes.Datasets);
+        Add(options, PolicyNames.QueryAccess, RoleSuffixes.Query);
+        Add(options, PolicyNames.DataAdminAccess, RoleSuffixes.DataAdmin);
+        Add(options, PolicyNames.DataReadAccess, RoleSuffixes.Datasets, RoleSuffixes.Query, RoleSuffixes.DataAdmin);
         Add(options, PolicyNames.DataWarehouseRead, RoleSuffixes.DataWarehouse);
         Add(options, PolicyNames.MetricsRead, RoleSuffixes.MetricsRead, RoleSuffixes.MetricsWrite);
         Add(options, PolicyNames.MetricsWrite, RoleSuffixes.MetricsWrite);

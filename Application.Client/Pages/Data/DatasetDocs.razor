@@ -7,7 +7,7 @@
 @inject IToastService _toastService
 @inject AuthenticationStateProvider _authenticationStateProvider
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
-@attribute [Authorize(Policy = PolicyNames.DatasetsAccess)]
+@attribute [Authorize(Policy = PolicyNames.DataAdminAccess)]
 
 <PageTitle>Data Documentation</PageTitle>
 
@@ -177,8 +177,8 @@ else
         }
 
         var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
-        canView = authState.User.HasCompanyRole(companyId, "VIEW_DATA");
-        canEdit = authState.User.HasCompanyRole(companyId, "EDIT_DATA");
+        canView = authState.User.HasCompanyRole(companyId, "DATA_ADMIN");
+        canEdit = authState.User.HasCompanyRole(companyId, "DATA_ADMIN");
         if (!canView) { isLoading = false; return; }
 
         _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");

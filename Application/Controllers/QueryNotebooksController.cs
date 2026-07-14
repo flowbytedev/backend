@@ -17,7 +17,7 @@ namespace Application.Controllers;
 /// </summary>
 [Route("api/query-notebooks")]
 [ApiController]
-[Authorize(Policy = PolicyNames.DatasetsAccess)]
+[Authorize(Policy = PolicyNames.QueryAccess)]
 public class QueryNotebooksController : ControllerBase
 {
     private readonly IQueryNotebookService _notebooks;
@@ -42,7 +42,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         return Ok(await _notebooks.GetForCompanyAsync(companyId, userId, isAdmin));
     }
 
@@ -51,7 +51,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         var notebook = await _notebooks.GetAsync(companyId, id, userId, isAdmin);
         return notebook == null ? NotFound() : Ok(notebook);
@@ -62,7 +62,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, _, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         return Ok(await _notebooks.CreateAsync(companyId, userId, request ?? new()));
     }
 
@@ -71,7 +71,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         var updated = await _notebooks.RenameAsync(companyId, id, userId, isAdmin, request ?? new());
         return updated == null ? NotFound("Notebook not found, or you don't have permission to edit it.") : Ok(updated);
@@ -82,7 +82,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         return await _notebooks.DeleteAsync(companyId, id, userId, isAdmin, HttpContext.RequestAborted)
             ? NoContent()
@@ -94,7 +94,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         if (request == null) return BadRequest("Request is required");
 
         var (cell, cellError) = await _notebooks.AddCellAsync(companyId, userId, isAdmin, id, request);
@@ -106,7 +106,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         if (request == null) return BadRequest("Request is required");
 
         var (cell, cellError) = await _notebooks.UpdateCellAsync(companyId, userId, isAdmin, id, cellId, request, HttpContext.RequestAborted);
@@ -118,7 +118,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         return await _notebooks.RemoveCellAsync(companyId, userId, isAdmin, id, cellId, HttpContext.RequestAborted) ? NoContent() : NotFound();
     }
@@ -128,7 +128,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         if (orderedCellIds == null || orderedCellIds.Count == 0) return BadRequest("No cell order provided.");
 
         return await _notebooks.ReorderCellsAsync(companyId, userId, isAdmin, id, orderedCellIds) ? NoContent() : NotFound();
@@ -139,7 +139,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         return Ok(await _notebooks.RunCellAsync(companyId, userId, isAdmin, id, cellId, request?.Parameters, "manual", HttpContext.RequestAborted));
     }
@@ -157,7 +157,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         return Ok(await _notebooks.RunAllAsync(companyId, userId, isAdmin, id, request?.Parameters, "run_all", HttpContext.RequestAborted));
     }
@@ -177,7 +177,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         if (request == null) return BadRequest("Request is required");
 
         var updated = await _notebooks.UpdateScheduleAsync(companyId, id, userId, isAdmin, request);
@@ -193,7 +193,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         return Ok(await _notebooks.GetCellRunHistoryAsync(companyId, id, cellId, userId, isAdmin, take));
     }
@@ -205,7 +205,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         var summary = await _notebooks.GetStorageSummaryAsync(companyId, id, userId, isAdmin, HttpContext.RequestAborted);
         return summary == null ? NotFound() : Ok(summary);
@@ -218,7 +218,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         var duplicate = await _notebooks.DuplicateAsync(companyId, id, userId, isAdmin, request?.Name, HttpContext.RequestAborted);
         return duplicate == null ? NotFound("Notebook not found, or you don't have permission to view it.") : Ok(duplicate);
@@ -229,7 +229,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
 
         var export = await _notebooks.ExportAsync(companyId, id, userId, isAdmin);
         return export == null ? NotFound("Notebook not found, or you don't have permission to view it.") : Ok(export);
@@ -240,7 +240,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, _, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         if (request == null) return BadRequest("Request is required");
 
         return Ok(await _notebooks.ImportAsync(companyId, userId, request));
@@ -351,7 +351,7 @@ public class QueryNotebooksController : ControllerBase
     {
         var (companyId, userId, isAdmin, error) = ReadContext();
         if (error != null) return BadRequest(error);
-        if (!User.HasCompanyRole(companyId, "EDIT_DATA")) return Forbid();
+        if (!User.HasCompanyRole(companyId, "QUERY")) return Forbid();
         if (request == null || string.IsNullOrWhiteSpace(request.Message)) return BadRequest("Message is required");
 
         var notebook = await _notebooks.GetAsync(companyId, id, userId, isAdmin);
