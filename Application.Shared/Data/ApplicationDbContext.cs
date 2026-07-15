@@ -123,6 +123,9 @@ namespace Application.Shared.Data
         public DbSet<WhatsNewItem> WhatsNewItem { get; set; }
         public DbSet<WhatsNewSeen> WhatsNewSeen { get; set; }
 
+        // Per-company application settings (e.g. the debug-logging toggle).
+        public DbSet<CompanySettings> CompanySettings { get; set; }
+
         // METRICS
         public DbSet<Metric> Metrics { get; set; }
 

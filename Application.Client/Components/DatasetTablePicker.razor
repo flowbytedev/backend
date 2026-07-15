@@ -1,0 +1,656 @@
+@using System.Net.Http.Json
+@using Application.Shared.Models
+@using Application.Shared.Models.Data
+@using Application.Shared.Enums
+@using Microsoft.AspNetCore.Components.Web
+@inject HttpClient _httpClient
+
+@*
+    Reusable Dataset + Table picker with autocomplete filtering and rich per-option detail.
+    Self-contained: fetches datasets, dataset stats, table names and table stats itself given a
+    CompanyId (+ UserId). Two-way bindable via @bind-DatasetId / @bind-TableName / @bind-SnapshotMode,
+    so a parent can use :after callbacks to react. Light/dark aware; keyboard navigable.
+*@
+
+<div class="dtp @(Compact ? "dtp-compact" : "") @(Disabled ? "dtp-disabled" : "")">
+    @if (_open != Panel.None)
+    {
+        <div class="dtp-backdrop" @onclick="Close"></div>
+    }
+
+    <!-- Dataset -->
+    <div class="dtp-field">
+        <span class="dtp-label">@DatasetLabel</span>
+        <div class="dtp-combo">
+            <button type="button" class="dtp-trigger @(_open == Panel.Dataset ? "dtp-trigger-open" : "")"
+                    @onclick="ToggleDataset" disabled="@Disabled">
+                <span class="dtp-trigger-main">
+                    @if (SelectedDatasetOption is { } sd)
+                    {
+                        <span class="dtp-trigger-title">@sd.Dataset.Name</span>
+                        <span class="dtp-trigger-sub">@DatasetDetail(sd)</span>
+                    }
+                    else
+                    {
+                        <span class="dtp-trigger-placeholder">@DatasetPlaceholder</span>
+                    }
+                </span>
+                <svg class="dtp-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </button>
+
+            @if (_open == Panel.Dataset)
+            {
+                <div class="dtp-panel" @onclick:stopPropagation="true">
+                    <div class="dtp-search-wrap">
+                        <svg class="dtp-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                        <input class="dtp-search" placeholder="Search datasets…" @ref="_searchRef"
+                               @bind="_datasetFilter" @bind:event="oninput" @bind:after="ResetActive"
+                               @onkeydown="OnKeyDown" />
+                    </div>
+                    @if (_loadingDatasets)
+                    {
+                        <div class="dtp-state"><span class="ds-spinner" style="width:15px;height:15px;border-width:2px"></span></div>
+                    }
+                    else if (FilteredDatasets is { Count: 0 })
+                    {
+                        <div class="dtp-state">No datasets match.</div>
+                    }
+                    else
+                    {
+                        <div class="dtp-list">
+                            @{ var i = 0; }
+                            @foreach (var opt in FilteredDatasets)
+                            {
+                                var idx = i++;
+                                <button type="button" class="dtp-opt @(idx == _activeIndex ? "dtp-opt-active" : "") @(opt.Dataset.Id == DatasetId ? "dtp-opt-selected" : "")"
+                                        @onclick="() => SelectDataset(opt.Dataset.Id)"
+                                        @onmouseover="() => _activeIndex = idx">
+                                    <span class="dtp-opt-icon">@(opt.Dataset.SourceType == DatasetSourceType.External ? "🔗" : "🗄")</span>
+                                    <span class="dtp-opt-body">
+                                        <span class="dtp-opt-title">@opt.Dataset.Name</span>
+                                        @if (!string.IsNullOrWhiteSpace(opt.Dataset.Description))
+                                        {
+                                            <span class="dtp-opt-desc">@opt.Dataset.Description</span>
+                                        }
+                                        <span class="dtp-opt-meta">
+                                            <span class="dtp-tag @(opt.Dataset.SourceType == DatasetSourceType.External ? "dtp-tag-ext" : "dtp-tag-local")">
+                                                @(opt.Dataset.SourceType == DatasetSourceType.External ? "External" : "Local")
+                                            </span>
+                                            @if (opt.Stats is { DatabaseExists: true })
+                                            {
+                                                <span class="dtp-stat">@opt.Stats.TableCount tables</span>
+                                                <span class="dtp-stat">@FmtCount(opt.Stats.TotalRows) rows</span>
+                                                <span class="dtp-stat">@FmtBytes(opt.Stats.SizeBytes)</span>
+                                            }
+                                        </span>
+                                    </span>
+                                    @if (opt.Dataset.Id == DatasetId)
+                                    {
+                                        <svg class="dtp-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                                    }
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+
+    <!-- Source/Snapshot mode (external datasets only) -->
+    @if (ShowModeToggle && SelectedDatasetOption?.Dataset.SourceType == DatasetSourceType.External)
+    {
+        <div class="dtp-field dtp-field-mode">
+            <span class="dtp-label">Reading</span>
+            <div class="dtp-seg">
+                <button type="button" class="dtp-seg-btn @(SnapshotMode ? "" : "dtp-seg-active")"
+                        @onclick="() => SetMode(false)" disabled="@Disabled">Source (live)</button>
+                <button type="button" class="dtp-seg-btn @(SnapshotMode ? "dtp-seg-active" : "")"
+                        @onclick="() => SetMode(true)" disabled="@Disabled">Snapshot</button>
+            </div>
+        </div>
+    }
+
+    <!-- Table -->
+    @if (ShowTable)
+    {
+        var tableDisabled = Disabled || string.IsNullOrEmpty(DatasetId);
+        <div class="dtp-field">
+            <span class="dtp-label">@TableLabel</span>
+            <div class="dtp-combo">
+                <button type="button" class="dtp-trigger @(_open == Panel.Table ? "dtp-trigger-open" : "")"
+                        @onclick="ToggleTable" disabled="@tableDisabled">
+                    <span class="dtp-trigger-main">
+                        @if (SelectedTableOption is { } st)
+                        {
+                            <span class="dtp-trigger-title dtp-mono">@st.Name</span>
+                            <span class="dtp-trigger-sub">@TableDetail(st)</span>
+                        }
+                        else
+                        {
+                            <span class="dtp-trigger-placeholder">@TablePlaceholder</span>
+                        }
+                    </span>
+                    <svg class="dtp-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+
+                @if (_open == Panel.Table)
+                {
+                    <div class="dtp-panel" @onclick:stopPropagation="true">
+                        <div class="dtp-search-wrap">
+                            <svg class="dtp-search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                            <input class="dtp-search" placeholder="Search tables…" @ref="_searchRef"
+                                   @bind="_tableFilter" @bind:event="oninput" @bind:after="ResetActive"
+                                   @onkeydown="OnKeyDown" />
+                        </div>
+                        @if (_loadingTables)
+                        {
+                            <div class="dtp-state"><span class="ds-spinner" style="width:15px;height:15px;border-width:2px"></span></div>
+                        }
+                        else if (FilteredTables is { Count: 0 })
+                        {
+                            <div class="dtp-state">No tables match.</div>
+                        }
+                        else
+                        {
+                            <div class="dtp-list">
+                                @{ var j = 0; }
+                                @foreach (var opt in FilteredTables)
+                                {
+                                    var idx = j++;
+                                    <button type="button" class="dtp-opt @(idx == _activeIndex ? "dtp-opt-active" : "") @(opt.Name == TableName ? "dtp-opt-selected" : "")"
+                                            @onclick="() => SelectTable(opt.Name)"
+                                            @onmouseover="() => _activeIndex = idx">
+                                        <span class="dtp-opt-icon">▦</span>
+                                        <span class="dtp-opt-body">
+                                            <span class="dtp-opt-title dtp-mono">@opt.Name</span>
+                                            <span class="dtp-opt-meta">
+                                                @if (opt.Live)
+                                                {
+                                                    <span class="dtp-tag dtp-tag-live">live source</span>
+                                                }
+                                                @if (opt.Stats is { } ts)
+                                                {
+                                                    <span class="dtp-stat">@FmtCount(ts.RowCount) rows</span>
+                                                    <span class="dtp-stat">@ts.ColumnCount cols</span>
+                                                    @if (!string.IsNullOrWhiteSpace(ts.TypeSummary))
+                                                    {
+                                                        <span class="dtp-stat dtp-stat-dim">@ts.TypeSummary</span>
+                                                    }
+                                                }
+                                            </span>
+                                        </span>
+                                        @if (opt.Name == TableName)
+                                        {
+                                            <svg class="dtp-check" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                                        }
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    // ── Public API ──────────────────────────────────────────────────────────
+    [Parameter, EditorRequired] public string CompanyId { get; set; } = string.Empty;
+    [Parameter] public string? UserId { get; set; }
+
+    [Parameter] public string DatasetId { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> DatasetIdChanged { get; set; }
+
+    [Parameter] public string TableName { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> TableNameChanged { get; set; }
+
+    /// <summary>For External datasets: true reads the DuckDB snapshot, false the live source. Ignored for Local.</summary>
+    [Parameter] public bool SnapshotMode { get; set; } = true;
+    [Parameter] public EventCallback<bool> SnapshotModeChanged { get; set; }
+
+    [Parameter] public bool ShowTable { get; set; } = true;
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Compact, label-less inline layout for header toolbars.</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    /// <summary>Show the External Source/Snapshot toggle (independent of <see cref="ShowTable"/>, since a
+    /// host may manage its own table list yet still want the picker to own the mode). Only ever visible for
+    /// External datasets.</summary>
+    [Parameter] public bool ShowModeToggle { get; set; } = true;
+
+    /// <summary>Optional preloaded datasets. When supplied the component uses them instead of fetching
+    /// (and skips the stats call + the UserId requirement) — pass this when the parent already has the list.</summary>
+    [Parameter] public List<Dataset>? Datasets { get; set; }
+    [Parameter] public string DatasetLabel { get; set; } = "Dataset";
+    [Parameter] public string TableLabel { get; set; } = "Table";
+    [Parameter] public string DatasetPlaceholder { get; set; } = "Select a dataset…";
+    [Parameter] public string TablePlaceholder { get; set; } = "Select a table…";
+
+    // ── Internal state ──────────────────────────────────────────────────────
+    private enum Panel { None, Dataset, Table }
+    private Panel _open = Panel.None;
+
+    private List<DatasetOption> _datasets = new();
+    private List<TableOption> _tables = new();
+    private string _datasetFilter = string.Empty;
+    private string _tableFilter = string.Empty;
+    private int _activeIndex;
+
+    private bool _loadingDatasets;
+    private bool _loadingTables;
+    private bool _datasetsLoaded;
+    private string? _tablesLoadedFor;
+    private List<Dataset>? _providedRef;
+
+    private ElementReference _searchRef;
+    private bool _pendingFocus;
+
+    private DatasetOption? SelectedDatasetOption => _datasets.FirstOrDefault(d => d.Dataset.Id == DatasetId);
+    private TableOption? SelectedTableOption => _tables.FirstOrDefault(t => t.Name == TableName);
+    private bool IsExternal => SelectedDatasetOption?.Dataset.SourceType == DatasetSourceType.External;
+
+    private List<DatasetOption> FilteredDatasets =>
+        string.IsNullOrWhiteSpace(_datasetFilter)
+            ? _datasets
+            : _datasets.Where(d =>
+                (d.Dataset.Name?.Contains(_datasetFilter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (d.Dataset.Description?.Contains(_datasetFilter, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    private List<TableOption> FilteredTables =>
+        string.IsNullOrWhiteSpace(_tableFilter)
+            ? _tables
+            : _tables.Where(t =>
+                t.Name.Contains(_tableFilter, StringComparison.OrdinalIgnoreCase) ||
+                (t.Stats?.TypeSummary?.Contains(_tableFilter, StringComparison.OrdinalIgnoreCase) ?? false)).ToList();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // A parent-supplied dataset list wins over fetching (and skips the UserId requirement).
+        if (Datasets != null)
+        {
+            if (!ReferenceEquals(Datasets, _providedRef) || _datasets.Count != Datasets.Count)
+            {
+                _providedRef = Datasets;
+                _datasets = Datasets.Select(d => new DatasetOption(d, null)).ToList();
+            }
+            _datasetsLoaded = true;
+        }
+        else if (!_datasetsLoaded && !string.IsNullOrWhiteSpace(CompanyId))
+        {
+            await LoadDatasetsAsync();
+        }
+
+        // React to a dataset set from the outside (e.g. a deep link) that we haven't loaded tables for yet.
+        if (ShowTable && !string.IsNullOrWhiteSpace(CompanyId) && DatasetId != _tablesLoadedFor)
+            await LoadTablesAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_pendingFocus)
+        {
+            _pendingFocus = false;
+            try { await _searchRef.FocusAsync(); } catch { /* element may be gone */ }
+        }
+    }
+
+    // ── Data loading ────────────────────────────────────────────────────────
+    private void SetHeaders()
+    {
+        _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+        _httpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId);
+        // Only touch UserId when we actually have one — never strip a header the host page set on the
+        // shared client (removing it would break sibling calls that require it).
+        if (!string.IsNullOrEmpty(UserId))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("UserId");
+            _httpClient.DefaultRequestHeaders.Add("UserId", UserId);
+        }
+    }
+
+    private async Task LoadDatasetsAsync()
+    {
+        _datasetsLoaded = true;
+        _loadingDatasets = true;
+        SetHeaders();
+        try
+        {
+            var datasetsTask = _httpClient.GetFromJsonAsync<List<Dataset>>("api/datasets");
+            var statsTask = SafeGetAsync<List<DatasetStats>>("api/datasets/stats");
+            await Task.WhenAll(datasetsTask, statsTask);
+
+            var datasets = await datasetsTask ?? new();
+            var stats = (await statsTask ?? new()).ToDictionary(s => s.DatasetId, StringComparer.OrdinalIgnoreCase);
+
+            _datasets = datasets
+                .Select(d => new DatasetOption(d, d.Id != null && stats.TryGetValue(d.Id, out var s) ? s : null))
+                .ToList();
+        }
+        catch
+        {
+            _datasets = new();
+        }
+        finally
+        {
+            _loadingDatasets = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadTablesAsync()
+    {
+        _tablesLoadedFor = DatasetId;
+        _tables = new();
+        // When the host manages its own table list (ShowTable=false) we still own the dataset/mode, but
+        // there's nothing to fetch here.
+        if (!ShowTable || string.IsNullOrEmpty(DatasetId)) return;
+
+        _loadingTables = true;
+        SetHeaders();
+        try
+        {
+            // Live source-tables for an external dataset in source mode; otherwise the DuckDB tables.
+            var live = IsExternal && !SnapshotMode;
+            var namesUrl = live
+                ? $"api/datasets/{DatasetId}/source-tables"
+                : $"api/datasets/{DatasetId}/tables";
+            var names = await _httpClient.GetFromJsonAsync<List<string>>(namesUrl) ?? new();
+
+            // Table-level stats only exist for the DuckDB layer — skip for the live source.
+            Dictionary<string, TableStats>? stats = null;
+            if (!live)
+            {
+                var list = await SafeGetAsync<List<TableStats>>($"api/datasets/{DatasetId}/tables/stats");
+                if (list != null)
+                    stats = list.GroupBy(s => s.TableName, StringComparer.OrdinalIgnoreCase)
+                                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            }
+
+            _tables = names.Select(n => new TableOption(
+                n,
+                stats != null && stats.TryGetValue(n, out var ts) ? ts : null,
+                live)).ToList();
+        }
+        catch
+        {
+            _tables = new();
+        }
+        finally
+        {
+            _loadingTables = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task<T?> SafeGetAsync<T>(string url)
+    {
+        try { return await _httpClient.GetFromJsonAsync<T>(url); }
+        catch { return default; }
+    }
+
+    // ── Selection ───────────────────────────────────────────────────────────
+    private async Task SelectDataset(string? id)
+    {
+        Close();
+        var newId = id ?? string.Empty;
+        if (newId == DatasetId) return;
+
+        DatasetId = newId;
+        await DatasetIdChanged.InvokeAsync(DatasetId);
+
+        // Clear the table whenever the dataset changes.
+        if (!string.IsNullOrEmpty(TableName))
+        {
+            TableName = string.Empty;
+            await TableNameChanged.InvokeAsync(TableName);
+        }
+
+        // External datasets default to reading the live source; Local only have a DuckDB layer.
+        var snapshot = !IsExternal;
+        if (snapshot != SnapshotMode)
+        {
+            SnapshotMode = snapshot;
+            await SnapshotModeChanged.InvokeAsync(SnapshotMode);
+        }
+
+        if (ShowTable)
+            await LoadTablesAsync();
+    }
+
+    private async Task SelectTable(string name)
+    {
+        Close();
+        if (name == TableName) return;
+        TableName = name;
+        await TableNameChanged.InvokeAsync(TableName);
+    }
+
+    private async Task SetMode(bool snapshot)
+    {
+        if (snapshot == SnapshotMode) return;
+        SnapshotMode = snapshot;
+        await SnapshotModeChanged.InvokeAsync(SnapshotMode);
+
+        if (!string.IsNullOrEmpty(TableName))
+        {
+            TableName = string.Empty;
+            await TableNameChanged.InvokeAsync(TableName);
+        }
+        await LoadTablesAsync();
+    }
+
+    // ── Open/close + keyboard ────────────────────────────────────────────────
+    private void ToggleDataset() => TogglePanel(Panel.Dataset);
+    private void ToggleTable() => TogglePanel(Panel.Table);
+
+    private void TogglePanel(Panel panel)
+    {
+        if (_open == panel) { Close(); return; }
+        _open = panel;
+        _activeIndex = 0;
+        _datasetFilter = string.Empty;
+        _tableFilter = string.Empty;
+        _pendingFocus = true;
+    }
+
+    private void Close() => _open = Panel.None;
+
+    private void ResetActive() => _activeIndex = 0;
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        var count = _open == Panel.Dataset ? FilteredDatasets.Count
+                  : _open == Panel.Table ? FilteredTables.Count
+                  : 0;
+
+        switch (e.Key)
+        {
+            case "Escape":
+                Close();
+                break;
+            case "ArrowDown":
+                if (count > 0) _activeIndex = Math.Min(_activeIndex + 1, count - 1);
+                break;
+            case "ArrowUp":
+                if (count > 0) _activeIndex = Math.Max(_activeIndex - 1, 0);
+                break;
+            case "Enter":
+                await ActivateActiveAsync();
+                break;
+        }
+    }
+
+    private async Task ActivateActiveAsync()
+    {
+        if (_open == Panel.Dataset)
+        {
+            var list = FilteredDatasets;
+            if (_activeIndex >= 0 && _activeIndex < list.Count)
+                await SelectDataset(list[_activeIndex].Dataset.Id);
+        }
+        else if (_open == Panel.Table)
+        {
+            var list = FilteredTables;
+            if (_activeIndex >= 0 && _activeIndex < list.Count)
+                await SelectTable(list[_activeIndex].Name);
+        }
+    }
+
+    // ── Detail formatting ─────────────────────────────────────────────────────
+    private static string DatasetDetail(DatasetOption o)
+    {
+        var parts = new List<string> { o.Dataset.SourceType == DatasetSourceType.External ? "External" : "Local" };
+        if (o.Stats is { DatabaseExists: true } s)
+        {
+            parts.Add($"{s.TableCount} tables");
+            parts.Add($"{FmtCount(s.TotalRows)} rows");
+        }
+        return string.Join(" · ", parts);
+    }
+
+    private static string TableDetail(TableOption o)
+    {
+        if (o.Live) return "live source";
+        if (o.Stats is { } s)
+        {
+            var parts = new List<string> { $"{FmtCount(s.RowCount)} rows", $"{s.ColumnCount} cols" };
+            return string.Join(" · ", parts);
+        }
+        return string.Empty;
+    }
+
+    private static string FmtCount(long n) => n switch
+    {
+        >= 1_000_000_000 => $"{n / 1_000_000_000.0:0.#}B",
+        >= 1_000_000 => $"{n / 1_000_000.0:0.#}M",
+        >= 1_000 => $"{n / 1_000.0:0.#}K",
+        _ => n.ToString()
+    };
+
+    private static string FmtBytes(long b)
+    {
+        if (b <= 0) return "0 B";
+        string[] units = { "B", "KB", "MB", "GB", "TB" };
+        double v = b;
+        var i = 0;
+        while (v >= 1024 && i < units.Length - 1) { v /= 1024; i++; }
+        return $"{v:0.#} {units[i]}";
+    }
+
+    private record DatasetOption(Dataset Dataset, DatasetStats? Stats);
+    private record TableOption(string Name, TableStats? Stats, bool Live);
+}
+
+<style>
+    .dtp { display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end; }
+    .dtp-disabled { opacity: 0.7; pointer-events: none; }
+
+    /* Compact inline layout for header toolbars: no labels, shorter controls, auto width. */
+    .dtp-compact { gap: 0.5rem; align-items: center; }
+    .dtp-compact .dtp-label { display: none; }
+    .dtp-compact .dtp-field { min-width: 0; }
+    .dtp-compact .dtp-trigger { min-height: 34px; padding: 0.25rem 0.55rem; border-radius: 8px; }
+    .dtp-compact .dtp-combo { min-width: 190px; }
+    .dtp-compact .dtp-trigger-sub { display: none; }
+    .dtp-compact .dtp-seg { height: 34px; }
+    .dtp-compact .dtp-panel { width: min(320px, 92vw); }
+    .dtp-field { display: flex; flex-direction: column; gap: 0.3rem; min-width: 260px; }
+    .dtp-field-mode { min-width: 0; }
+    .dtp-label { font-size: 0.75rem; font-weight: 600; color: #52525b; }
+    .dtp-combo { position: relative; }
+
+    .dtp-trigger {
+        display: flex; align-items: center; gap: 0.5rem; width: 100%; min-height: 42px;
+        padding: 0.4rem 0.7rem; background: #fff; border: 1px solid #e4e4e7; border-radius: 9px;
+        cursor: pointer; text-align: left; transition: border-color .12s, box-shadow .12s;
+    }
+    .dtp-trigger:hover:not(:disabled) { border-color: #d4d4d8; }
+    .dtp-trigger:disabled { cursor: not-allowed; background: #fafafa; opacity: 0.65; }
+    .dtp-trigger-open { border-color: #18181b; box-shadow: 0 0 0 3px rgba(24,24,27,0.08); }
+    .dtp-trigger-main { display: flex; flex-direction: column; gap: 0.1rem; min-width: 0; flex: 1; }
+    .dtp-trigger-title { font-size: 0.875rem; font-weight: 600; color: #18181b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dtp-trigger-sub { font-size: 0.7rem; color: #a1a1aa; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dtp-trigger-placeholder { font-size: 0.875rem; color: #a1a1aa; }
+    .dtp-chevron { flex-shrink: 0; color: #a1a1aa; transition: transform .15s; }
+    .dtp-trigger-open .dtp-chevron { transform: rotate(180deg); color: #18181b; }
+    .dtp-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .dtp-backdrop { position: fixed; inset: 0; z-index: 900; background: transparent; }
+    .dtp-panel {
+        position: absolute; top: calc(100% + 5px); left: 0; z-index: 901; width: min(380px, 92vw);
+        background: #fff; border: 1px solid #e5e7eb; border-radius: 11px; overflow: hidden;
+        box-shadow: 0 14px 40px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.06);
+        animation: dtp-in .13s ease-out;
+    }
+    @@keyframes dtp-in { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
+
+    .dtp-search-wrap { position: relative; padding: 0.55rem 0.6rem; border-bottom: 1px solid #f4f4f5; }
+    .dtp-search-icon { position: absolute; left: 1.05rem; top: 50%; transform: translateY(-50%); color: #a1a1aa; pointer-events: none; }
+    .dtp-search {
+        width: 100%; padding: 0.45rem 0.6rem 0.45rem 2rem; font-size: 0.8125rem;
+        border: 1px solid #e4e4e7; border-radius: 7px; background: #fafafa; color: #18181b; outline: none;
+    }
+    .dtp-search:focus { border-color: #18181b; background: #fff; box-shadow: 0 0 0 2px rgba(24,24,27,0.08); }
+
+    .dtp-state { padding: 1.4rem; text-align: center; color: #a1a1aa; font-size: 0.8125rem; display: flex; align-items: center; justify-content: center; }
+    .dtp-list { max-height: 300px; overflow-y: auto; padding: 0.3rem; }
+
+    .dtp-opt {
+        display: flex; align-items: flex-start; gap: 0.55rem; width: 100%; padding: 0.5rem 0.55rem;
+        background: none; border: none; border-radius: 8px; cursor: pointer; text-align: left;
+    }
+    .dtp-opt-active { background: #f4f4f5; }
+    .dtp-opt-selected .dtp-opt-title { color: #4338ca; }
+    .dtp-opt-icon { flex-shrink: 0; font-size: 0.95rem; line-height: 1.4; width: 1.1rem; text-align: center; }
+    .dtp-opt-body { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; flex: 1; }
+    .dtp-opt-title { font-size: 0.8375rem; font-weight: 600; color: #27272a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dtp-opt-desc { font-size: 0.7375rem; color: #71717a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dtp-opt-meta { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.1rem; }
+    .dtp-check { flex-shrink: 0; color: #4338ca; margin-top: 0.15rem; }
+
+    .dtp-tag { font-size: 0.625rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; padding: 0.08rem 0.35rem; border-radius: 4px; }
+    .dtp-tag-local { color: #075985; background: #e0f2fe; }
+    .dtp-tag-ext { color: #9a3412; background: #ffedd5; }
+    .dtp-tag-live { color: #166534; background: #dcfce7; }
+    .dtp-stat { font-size: 0.6875rem; color: #71717a; font-variant-numeric: tabular-nums; }
+    .dtp-stat-dim { color: #a1a1aa; }
+
+    .dtp-seg { display: flex; border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden; width: fit-content; height: 42px; }
+    .dtp-seg-btn { padding: 0 0.85rem; font-size: 0.8125rem; font-weight: 600; color: #52525b; background: #fff; border: none; cursor: pointer; white-space: nowrap; }
+    .dtp-seg-btn + .dtp-seg-btn { border-left: 1px solid #e4e4e7; }
+    .dtp-seg-active { background: #eef2ff; color: #4338ca; }
+
+    /* ── Dark mode ─────────────────────────────────────────────────────── */
+    [data-theme="dark"] .dtp-label { color: #9aa1ac; }
+    [data-theme="dark"] .dtp-trigger { background: #12141a; border-color: #2b303b; }
+    [data-theme="dark"] .dtp-trigger:hover:not(:disabled) { border-color: #3b414f; }
+    [data-theme="dark"] .dtp-trigger:disabled { background: #16181e; }
+    [data-theme="dark"] .dtp-trigger-open { border-color: #818cf8; box-shadow: 0 0 0 3px rgba(129,140,248,0.18); }
+    [data-theme="dark"] .dtp-trigger-title { color: #f3f4f6; }
+    [data-theme="dark"] .dtp-trigger-sub, [data-theme="dark"] .dtp-trigger-placeholder { color: #6b7280; }
+    [data-theme="dark"] .dtp-chevron { color: #6b7280; }
+    [data-theme="dark"] .dtp-trigger-open .dtp-chevron { color: #f3f4f6; }
+    [data-theme="dark"] .dtp-panel { background: #181a20; border-color: #2b303b; box-shadow: 0 14px 40px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+    [data-theme="dark"] .dtp-search-wrap { border-bottom-color: #23272f; }
+    [data-theme="dark"] .dtp-search { background: #12141a; border-color: #2b303b; color: #f3f4f6; }
+    [data-theme="dark"] .dtp-search:focus { border-color: #818cf8; background: #12141a; box-shadow: 0 0 0 2px rgba(129,140,248,0.2); }
+    [data-theme="dark"] .dtp-search-icon { color: #6b7280; }
+    [data-theme="dark"] .dtp-state { color: #6b7280; }
+    [data-theme="dark"] .dtp-opt-active { background: #20242c; }
+    [data-theme="dark"] .dtp-opt-title { color: #e4e4e7; }
+    [data-theme="dark"] .dtp-opt-selected .dtp-opt-title { color: #a5b4fc; }
+    [data-theme="dark"] .dtp-opt-desc { color: #9aa1ac; }
+    [data-theme="dark"] .dtp-stat { color: #9aa1ac; }
+    [data-theme="dark"] .dtp-stat-dim { color: #6b7280; }
+    [data-theme="dark"] .dtp-check { color: #a5b4fc; }
+    [data-theme="dark"] .dtp-tag-local { color: #bae6fd; background: rgba(14,165,233,0.18); }
+    [data-theme="dark"] .dtp-tag-ext { color: #fed7aa; background: rgba(234,88,12,0.20); }
+    [data-theme="dark"] .dtp-tag-live { color: #bbf7d0; background: rgba(22,163,74,0.22); }
+    [data-theme="dark"] .dtp-seg { border-color: #2b303b; }
+    [data-theme="dark"] .dtp-seg-btn { background: #181a20; color: #9aa1ac; }
+    [data-theme="dark"] .dtp-seg-btn + .dtp-seg-btn { border-left-color: #2b303b; }
+    [data-theme="dark"] .dtp-seg-active { background: rgba(99,102,241,0.18); color: #a5b4fc; }
+</style>

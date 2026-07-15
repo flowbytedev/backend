@@ -43,4 +43,13 @@ public class DataAppLogEntry
 
     /// <summary>JSON blob with request arguments / extra context.</summary>
     public string Details { get; set; } = string.Empty;
+
+    /// <summary>Debug-log severity: <c>Debug</c> | <c>Info</c> | <c>Warn</c> | <c>Error</c>. Empty for ordinary audit rows.</summary>
+    public string Level { get; set; } = string.Empty;
+
+    /// <summary>Debug-log category, e.g. <c>DataDocs</c>. Empty for ordinary audit rows.</summary>
+    public string Category { get; set; } = string.Empty;
+
+    /// <summary>Human-readable debug message. Empty for ordinary audit rows.</summary>
+    public string Message { get; set; } = string.Empty;
 }

@@ -31,6 +31,8 @@ public class ActivityLogController : ControllerBase
         [FromQuery] string? userId = null,
         [FromQuery] string? datasetId = null,
         [FromQuery] string? tableName = null,
+        [FromQuery] string? level = null,
+        [FromQuery] string? category = null,
         [FromQuery] string? search = null,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
@@ -54,6 +56,8 @@ public class ActivityLogController : ControllerBase
             UserId = userId,
             DatasetId = datasetId,
             TableName = tableName,
+            Level = level,
+            Category = category,
             Search = search,
             Page = page,
             PageSize = pageSize

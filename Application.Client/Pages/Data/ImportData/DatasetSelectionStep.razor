@@ -15,13 +15,11 @@
     {
         <div class="ds-field">
             <label class="ds-label">Select an existing dataset</label>
-            <select class="ds-select" @bind="selectedDatasetId">
-                <option value="">— Choose a dataset —</option>
-                @foreach (var dataset in datasets)
-                {
-                    <option value="@dataset.Id">@dataset.Name</option>
-                }
-            </select>
+            <DatasetTablePicker CompanyId="@CompanyId"
+                                Datasets="@datasets"
+                                ShowTable="false"
+                                DatasetPlaceholder="— Choose a dataset —"
+                                @bind-DatasetId="selectedDatasetId" />
         </div>
 
         <hr class="ds-divider" style="margin:1.25rem 0" />

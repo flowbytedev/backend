@@ -27,6 +27,19 @@ public interface IDatabaseTableService
     /// connection/query failures are returned via <see cref="SqlQueryResult.Error"/>, never thrown.</summary>
     Task<SqlQueryResult> ExecuteQueryAsync(string entityId, string companyId, string sql, int maxRows, CancellationToken ct = default);
 
+    /// <summary>Reads up to <paramref name="maxRows"/> sample rows from a source table/view using a
+    /// <b>server-side</b> row limit (dialect-correct <c>TOP</c>/<c>LIMIT</c>), so a heavy view isn't fully
+    /// evaluated just to return a handful of rows. Columns + rows land in the result; failures are returned
+    /// via <see cref="SqlQueryResult.Error"/>, never thrown.</summary>
+    Task<SqlQueryResult> GetTableSampleAsync(string entityId, string companyId, string tableName, int maxRows, CancellationToken ct = default);
+
+    /// <summary>Reads only the column shape (name + type) of a source table/view <b>without executing the
+    /// query or transferring rows</b> — a schema-only describe (<c>CommandBehavior.SchemaOnly</c> for ADO
+    /// engines, <c>DESCRIBE TABLE</c> for ClickHouse). Far cheaper than SELECT-ing a row for schema discovery,
+    /// especially against heavy views. Columns land in <see cref="SqlQueryResult.Columns"/>; failures are
+    /// returned via <see cref="SqlQueryResult.Error"/>, never thrown.</summary>
+    Task<SqlQueryResult> GetTableSchemaAsync(string entityId, string companyId, string tableName, CancellationToken ct = default);
+
     /// <summary>Creates/updates Table entities for the chosen tables and wires each Table → Database dependency.</summary>
     Task<DatabaseTableCommitResult> CommitTablesAsync(string entityId, string companyId, DatabaseTableCommitRequest request, string? modifiedBy, CancellationToken ct = default);
 

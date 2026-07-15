@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +9,7 @@ using Application.Shared.Enums;
 using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Application.Shared.Services;
+using Application.Shared.Services.Logging;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Shared.Services.Data;
@@ -54,12 +56,14 @@ public class DatasetDocService : IDatasetDocService
     private readonly ApplicationDbContext _db;
     private readonly IDuckdbService _duckdb;
     private readonly IDatabaseTableService _dbTables;
+    private readonly IDebugLogService _debug;
 
-    public DatasetDocService(ApplicationDbContext db, IDuckdbService duckdb, IDatabaseTableService dbTables)
+    public DatasetDocService(ApplicationDbContext db, IDuckdbService duckdb, IDatabaseTableService dbTables, IDebugLogService debug)
     {
         _db = db;
         _duckdb = duckdb;
         _dbTables = dbTables;
+        _debug = debug;
     }
 
     public async Task<TableDocDto> GetTableDocsAsync(string companyId, string datasetId, string tableName, bool snapshotMode, CancellationToken ct = default)
@@ -121,18 +125,48 @@ public class DatasetDocService : IDatasetDocService
     public async Task<List<Column>> GetLiveColumnsAsync(string companyId, string datasetId, string tableName, bool snapshotMode, CancellationToken ct = default)
     {
         if (snapshotMode)
-            return await _duckdb.GetTableColumnsAsync(datasetId, tableName);
+        {
+            var swDuck = Stopwatch.StartNew();
+            var cols = await _duckdb.GetTableColumnsAsync(datasetId, tableName);
+            swDuck.Stop();
+            await _debug.LogAsync(companyId, DebugLevel.Debug, "DataDocs",
+                $"Read {cols.Count} column(s) from DuckDB snapshot for '{tableName}'.",
+                datasetId: datasetId, tableName: tableName, durationMs: swDuck.ElapsedMilliseconds,
+                context: new { source = "duckdb", columns = cols.Count }, ct: ct);
+            return cols;
+        }
 
-        // Source mode: read the column shape from the External dataset's live source. A bounded SELECT is
-        // enough — ExecuteQueryAsync caps rows at the reader and populates Columns from the result schema
-        // even when the table is empty, so no dialect-specific LIMIT/TOP is needed.
+        // Source mode: read only the column shape from the External dataset's live source. This is a
+        // schema-only describe that never executes the query or transfers rows, so it stays fast even when
+        // the source "table" is actually a heavy view (a plain SELECT * would force the source to evaluate
+        // it just to hand back the first row).
         var dataset = await _db.Dataset.AsNoTracking()
             .FirstOrDefaultAsync(d => d.Id == datasetId && d.CompanyId == companyId, ct);
         if (dataset?.SourceType != DatasetSourceType.External || string.IsNullOrWhiteSpace(dataset.SourceEntityId))
+        {
+            await _debug.LogAsync(companyId, DebugLevel.Warn, "DataDocs",
+                $"No live columns for '{tableName}': dataset is not External or has no source entity.",
+                datasetId: datasetId, tableName: tableName, ct: ct);
             return new List<Column>();
+        }
 
-        var preview = await _dbTables.ExecuteQueryAsync(dataset.SourceEntityId!, companyId, $"SELECT * FROM {tableName}", 1, ct);
-        return preview.Error == null ? preview.Columns : new List<Column>();
+        var swSource = Stopwatch.StartNew();
+        var schema = await _dbTables.GetTableSchemaAsync(dataset.SourceEntityId!, companyId, tableName, ct);
+        swSource.Stop();
+        if (schema.Error != null)
+        {
+            await _debug.LogAsync(companyId, DebugLevel.Warn, "DataDocs",
+                $"Failed to read live columns for '{tableName}' from source: {schema.Error}",
+                datasetId: datasetId, tableName: tableName, durationMs: swSource.ElapsedMilliseconds,
+                error: schema.Error, ct: ct);
+            return new List<Column>();
+        }
+
+        await _debug.LogAsync(companyId, DebugLevel.Debug, "DataDocs",
+            $"Read {schema.Columns.Count} column(s) from external source for '{tableName}'.",
+            datasetId: datasetId, tableName: tableName, durationMs: swSource.ElapsedMilliseconds,
+            context: new { source = "external", columns = schema.Columns.Count }, ct: ct);
+        return schema.Columns;
     }
 
     private async Task UpsertAsync(string companyId, string datasetId, string tableName, bool snapshotMode, List<SaveColumnDocRequest> items, bool aiGenerated, string? userId, CancellationToken ct)

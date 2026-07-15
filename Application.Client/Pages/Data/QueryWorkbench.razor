@@ -30,13 +30,14 @@ else
             <p class="ds-subtitle">Run SQL against a dataset's tables — join, aggregate, visualize, and save.</p>
         </div>
         <div style="display:flex;align-items:center;gap:0.5rem">
-            <select class="ds-input" style="min-width:200px" value="@selectedDatasetId" @onchange="OnDatasetChanged">
-                <option value="">Select dataset…</option>
-                @foreach (var ds in datasets)
-                {
-                    <option value="@ds.Id">@ds.Name@(ds.SourceType == DatasetSourceType.External ? " (external)" : "")</option>
-                }
-            </select>
+            <DatasetTablePicker Compact="true"
+                                ShowTable="false"
+                                ShowModeToggle="false"
+                                CompanyId="@(companyId ?? string.Empty)"
+                                Datasets="@datasets"
+                                DatasetPlaceholder="Select dataset…"
+                                @bind-DatasetId="selectedDatasetId"
+                                @bind-DatasetId:after="OnDatasetSelected" />
             @if (IsExternal)
             {
                 <div class="qw-modes" title="Query the live source database or its saved local snapshots">
@@ -369,12 +370,6 @@ else
                 datasets = await response.Content.ReadFromJsonAsync<List<Dataset>>() ?? new();
         }
         catch (Exception ex) { _toastService.ShowError($"Error loading datasets: {ex.Message}"); }
-    }
-
-    private async Task OnDatasetChanged(ChangeEventArgs e)
-    {
-        selectedDatasetId = e.Value?.ToString() ?? string.Empty;
-        await OnDatasetSelected();
     }
 
     private async Task OnDatasetSelected()

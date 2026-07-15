@@ -41,7 +41,7 @@ Multi-project **.NET 9 + Blazor** solution (`Application.sln`):
 
 **Real-time**: SignalR hubs at `/notification/datajob` (`NotificationHub<DataJob>`) and `/realtime/salesdata` (`SalesDataHub`).
 
-**AI chat**: Azure OpenAI via `IChatService`, configured from the `AzureOpenAI` appsettings section. Chat history uses an in-memory repository (`InMemoryChatMessageRepository`); a local Ollama fallback is configured under `ExternalChatbot`.
+**AI**: Azure OpenAI, configured from the `AzureOpenAI` appsettings section (bound to `AzureOpenAIConfiguration`). It is used directly by feature-specific agent services — `DashboardAgentService`, `NotebookAgentService`, `IngestionAgentService`, `ColumnDocGenerationService`, `SchemaInferenceService`.
 
 ### DbContexts (all SQL Server, separate connection strings)
 - `ApplicationDbContext` — primary app data. Migrations in `Application/Migrations/`.

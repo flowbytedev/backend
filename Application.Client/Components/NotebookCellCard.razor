@@ -35,20 +35,15 @@
             @if (Cell.CellType == "sql")
             {
                 <input class="ds-input nc-name" placeholder="cell_name" @bind="_name" @bind:event="oninput" />
-                <select class="ds-input nc-dataset" value="@_datasetId" @onchange="OnDatasetChanged">
-                    <option value="">Dataset…</option>
-                    @foreach (var d in Datasets)
-                    {
-                        <option value="@d.Id">@d.Name@(d.SourceType == DatasetSourceType.External ? " (external)" : "")</option>
-                    }
-                </select>
-                @if (IsExternalDataset)
-                {
-                    <div class="nc-modes" title="Query the live source database or its saved local snapshot">
-                        <button type="button" class="nc-tab @(!_snapshotMode ? "nc-tab-active" : "")" @onclick="() => SetSnapshotMode(false)">Source</button>
-                        <button type="button" class="nc-tab @(_snapshotMode ? "nc-tab-active" : "")" @onclick="() => SetSnapshotMode(true)">Snapshot</button>
-                    </div>
-                }
+                <DatasetTablePicker Compact="true"
+                                    ShowTable="false"
+                                    CompanyId="@(CompanyId ?? string.Empty)"
+                                    Datasets="@Datasets"
+                                    DatasetPlaceholder="Dataset…"
+                                    DatasetId="@(_datasetId ?? string.Empty)"
+                                    DatasetIdChanged="OnDatasetPicked"
+                                    @bind-SnapshotMode="_snapshotMode"
+                                    @bind-SnapshotMode:after="LoadTablesAsync" />
             }
             else
             {
@@ -594,16 +589,11 @@
         catch { _columnsByTable = new(); }
     }
 
-    private async Task OnDatasetChanged(ChangeEventArgs e)
+    // The picker owns dataset + Source/Snapshot mode selection; reload this cell's table/column autocomplete
+    // when the dataset changes. A mode change reloads via @bind-SnapshotMode:after="LoadTablesAsync".
+    private async Task OnDatasetPicked(string value)
     {
-        _datasetId = e.Value?.ToString();
-        await LoadTablesAsync();
-    }
-
-    private async Task SetSnapshotMode(bool value)
-    {
-        if (_snapshotMode == value) return;
-        _snapshotMode = value;
+        _datasetId = string.IsNullOrEmpty(value) ? null : value;
         await LoadTablesAsync();
     }
 

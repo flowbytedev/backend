@@ -1,0 +1,92 @@
+@page "/admin/settings"
+@inject DebugLogClientService _debugLogClient
+@inject AuthenticationStateProvider _authenticationStateProvider
+@inject IToastService _toastService
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize]
+
+<AuthorizeView Roles="@($"{companyId}_ADMIN")">
+    <Authorized>
+        <Toolbar Title="Settings" />
+        <div class="settings-page">
+            <div class="settings-card">
+                <div class="settings-row">
+                    <div class="settings-text">
+                        <div class="settings-title">Debug logging</div>
+                        <div class="settings-desc">
+                            Capture debug entries for this company (for example, the Data Docs flow).
+                            When enabled, admins get a debug-log panel in the top bar. Requires the
+                            central log store to be configured.
+                        </div>
+                    </div>
+                    <FluentSwitch @bind-Value="_debugEnabled"
+                                  @bind-Value:after="OnToggleAsync"
+                                  Disabled="@(_loading || _saving)" />
+                </div>
+            </div>
+        </div>
+    </Authorized>
+    <NotAuthorized>
+        <FluentMessageBar Title="Unauthorized" Intent="@MessageIntent.Warning">
+            You are not authorized to view this page.
+        </FluentMessageBar>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    [SupplyParameterFromQuery(Name = "c")]
+    private string? companyId { get; set; }
+
+    private bool _debugEnabled;
+    private bool _loading = true;
+    private bool _saving;
+    private string? _userId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        _userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (!string.IsNullOrWhiteSpace(companyId))
+        {
+            var settings = await _debugLogClient.GetSettingsAsync(companyId);
+            _debugEnabled = settings?.DebugLoggingEnabled ?? false;
+        }
+        _loading = false;
+    }
+
+    private async Task OnToggleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(companyId)) return;
+
+        _saving = true;
+        var ok = await _debugLogClient.SetDebugLoggingAsync(companyId, _userId, _debugEnabled);
+        _saving = false;
+
+        if (ok)
+        {
+            _toastService.ShowSuccess($"Debug logging {(_debugEnabled ? "enabled" : "disabled")}.");
+        }
+        else
+        {
+            _toastService.ShowError("Couldn't update debug logging.");
+            _debugEnabled = !_debugEnabled; // revert the switch on failure
+        }
+    }
+}
+
+<style>
+    .settings-page { padding: 1rem 1.25rem; }
+    .settings-card {
+        max-width: 720px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fff;
+        padding: 1rem 1.15rem;
+    }
+    .settings-row { display: flex; align-items: flex-start; gap: 1rem; justify-content: space-between; }
+    .settings-text { display: flex; flex-direction: column; gap: 0.25rem; }
+    .settings-title { font-size: 0.9375rem; font-weight: 600; color: #18181b; }
+    .settings-desc { font-size: 0.8125rem; color: #52525b; line-height: 1.45; max-width: 560px; }
+
+    [data-theme="dark"] .settings-card { background: #181a20; border-color: #2b303b; }
+    [data-theme="dark"] .settings-title { color: #f3f4f6; }
+    [data-theme="dark"] .settings-desc { color: #c5cad4; }
+</style>

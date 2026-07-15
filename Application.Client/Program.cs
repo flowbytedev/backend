@@ -24,6 +24,7 @@ builder.Services.AddScoped(http => new HttpClient { BaseAddress = new Uri(builde
 builder.Services.AddScoped<ClientAuthenticationDetail>();
 builder.Services.AddScoped<StateContainer>();
 builder.Services.AddScoped<Application.Client.Services.ActivityLogClient>();
+builder.Services.AddScoped<Application.Client.Services.DebugLogClientService>();
 
 // Status Module Client Services
 builder.Services.AddScoped<Application.Client.Services.MonitoredAssetClientService>();

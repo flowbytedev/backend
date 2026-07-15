@@ -48,36 +48,15 @@ else
     </div>
 
     <div class="dd-pickers">
-        <label class="dd-field">
-            <span class="dd-label">Dataset</span>
-            <select class="ds-input" value="@selectedDatasetId" @onchange="OnDatasetChanged">
-                <option value="">Select a dataset…</option>
-                @foreach (var d in datasets)
-                {
-                    <option value="@d.Id">@d.Name</option>
-                }
-            </select>
-        </label>
-        @if (IsExternal)
-        {
-            <div class="dd-field">
-                <span class="dd-label">Documenting</span>
-                <div class="dd-seg">
-                    <button type="button" class="dd-seg-btn @(snapshotMode ? "" : "dd-seg-active")" @onclick="() => SetMode(false)">Source (live)</button>
-                    <button type="button" class="dd-seg-btn @(snapshotMode ? "dd-seg-active" : "")" @onclick="() => SetMode(true)">Snapshot</button>
-                </div>
-            </div>
-        }
-        <label class="dd-field">
-            <span class="dd-label">Table</span>
-            <select class="ds-input" value="@selectedTable" @onchange="OnTableChanged" disabled="@(string.IsNullOrEmpty(selectedDatasetId))">
-                <option value="">Select a table…</option>
-                @foreach (var t in tables)
-                {
-                    <option value="@t">@t</option>
-                }
-            </select>
-        </label>
+        <DatasetTablePicker CompanyId="@(companyId ?? string.Empty)"
+                            UserId="@userId"
+                            TableLabel="Table"
+                            @bind-DatasetId="selectedDatasetId"
+                            @bind-DatasetId:after="OnDatasetPicked"
+                            @bind-TableName="selectedTable"
+                            @bind-TableName:after="OnTablePicked"
+                            @bind-SnapshotMode="snapshotMode"
+                            @bind-SnapshotMode:after="OnModePicked" />
     </div>
 
     @if (loadingDocs)
@@ -148,19 +127,17 @@ else
     public string? t { get; set; }
 
     private string? companyId;
+    private string? userId;
     private bool isLoading = true;
     private bool canView, canEdit;
 
-    private List<Dataset> datasets = new();
-    private List<string> tables = new();
     private string selectedDatasetId = string.Empty;
     private string selectedTable = string.Empty;
 
     // For External datasets: true documents the DuckDB snapshot, false documents the live source. Local
-    // datasets only have a DuckDB layer, so this stays true (and the toggle is hidden).
+    // datasets only have a DuckDB layer, so this stays true (and the toggle is hidden). The picker owns the
+    // Source/Snapshot toggle and keeps this in sync via @bind-SnapshotMode.
     private bool snapshotMode = true;
-    private Dataset? SelectedDataset => datasets.FirstOrDefault(x => x.Id == selectedDatasetId);
-    private bool IsExternal => SelectedDataset?.SourceType == DatasetSourceType.External;
     private string SnapshotFlag => snapshotMode ? "true" : "false";
 
     private TableDocDto? doc;
@@ -183,26 +160,22 @@ else
 
         _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
         _httpClient.DefaultRequestHeaders.Add("X-Company-Id", companyId);
-        var userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         if (!string.IsNullOrEmpty(userId))
         {
             _httpClient.DefaultRequestHeaders.Remove("UserId");
             _httpClient.DefaultRequestHeaders.Add("UserId", userId);
         }
 
-        try { datasets = await _httpClient.GetFromJsonAsync<List<Dataset>>("api/datasets") ?? new(); }
-        catch { datasets = new(); }
         isLoading = false;
 
-        // Deep link from the Tables page: preselect the dataset + table and load docs right away.
-        if (!string.IsNullOrEmpty(d) && datasets.Any(ds => ds.Id == d))
+        // Deep link from the Tables page: preselect the dataset + table (the picker loads its own lists) and
+        // load docs right away. Deep links reference DuckDB snapshot tables.
+        if (!string.IsNullOrEmpty(d))
         {
             selectedDatasetId = d;
-            // Deep links from the Tables page reference DuckDB snapshot tables.
             snapshotMode = true;
-            await LoadTables();
-
-            if (!string.IsNullOrEmpty(t) && tables.Contains(t))
+            if (!string.IsNullOrEmpty(t))
             {
                 selectedTable = t;
                 await LoadDocs();
@@ -210,45 +183,17 @@ else
         }
     }
 
-    private async Task OnDatasetChanged(ChangeEventArgs e)
+    // The picker owns dataset/table/mode selection and keeps the bound fields in sync; these :after hooks
+    // just react. Changing the dataset or mode clears the table (via the picker) and any loaded docs.
+    private void OnDatasetPicked() => doc = null;
+
+    private void OnModePicked() => doc = null;
+
+    private async Task OnTablePicked()
     {
-        selectedDatasetId = e.Value?.ToString() ?? string.Empty;
-        selectedTable = string.Empty;
-        tables = new();
         doc = null;
-        if (string.IsNullOrEmpty(selectedDatasetId)) return;
-
-        // External datasets default to documenting the live source; Local datasets only have a DuckDB layer.
-        snapshotMode = !IsExternal;
-        await LoadTables();
-    }
-
-    private async Task LoadTables()
-    {
-        if (string.IsNullOrEmpty(selectedDatasetId)) { tables = new(); return; }
-        // Source mode lists the external database's live tables; snapshot mode lists the DuckDB tables.
-        var url = (IsExternal && !snapshotMode)
-            ? $"api/datasets/{selectedDatasetId}/source-tables"
-            : $"api/datasets/{selectedDatasetId}/tables";
-        try { tables = await _httpClient.GetFromJsonAsync<List<string>>(url) ?? new(); }
-        catch { tables = new(); }
-    }
-
-    private async Task SetMode(bool snapshot)
-    {
-        if (snapshotMode == snapshot) return;
-        snapshotMode = snapshot;
-        selectedTable = string.Empty;
-        doc = null;
-        await LoadTables();
-    }
-
-    private async Task OnTableChanged(ChangeEventArgs e)
-    {
-        selectedTable = e.Value?.ToString() ?? string.Empty;
-        doc = null;
-        if (string.IsNullOrEmpty(selectedTable)) return;
-        await LoadDocs();
+        if (!string.IsNullOrEmpty(selectedTable))
+            await LoadDocs();
     }
 
     private async Task LoadDocs()

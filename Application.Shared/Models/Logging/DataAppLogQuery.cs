@@ -8,12 +8,15 @@ public class DataAppLogQuery
     public DateTime? From { get; set; }
     public DateTime? To { get; set; }
 
-    public string? Source { get; set; }     // 'api' | 'client'
+    public string? Source { get; set; }     // 'api' | 'client' | 'debug'
     public string? Area { get; set; }       // dataset | table | ingestion | sharing
     public string? Action { get; set; }
     public string? UserId { get; set; }
     public string? DatasetId { get; set; }
     public string? TableName { get; set; }
+
+    public string? Level { get; set; }      // Debug | Info | Warn | Error (debug logs)
+    public string? Category { get; set; }   // e.g. DataDocs (debug logs)
 
     /// <summary>Substring match across user, action, table, query text and details.</summary>
     public string? Search { get; set; }

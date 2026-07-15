@@ -1,0 +1,233 @@
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@using Application.Shared.Models.Logging
+@implements IDisposable
+@inject DebugLogClientService _debugLogClient
+@inject AuthenticationStateProvider _authenticationStateProvider
+@inject StateContainer _stateContainer
+
+@if (_visible)
+{
+    <div class="dbg-anchor">
+        <button class="dbg-trigger" type="button" @onclick="TogglePanel" title="Debug log" aria-label="Debug log">
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 2 1.88 1.88M14.12 3.88 16 2M9 7.13v-1a3.003 3.003 0 1 1 6 0v1M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6M3 13h3M18 13h3M4.5 8.5 6 10M18 10l1.5-1.5M4.5 19.5 6.5 17M17.5 17l2 2.5"/></svg>
+        </button>
+
+        @if (_open)
+        {
+            <div class="dbg-backdrop" @onclick="ClosePanel"></div>
+            <div class="dbg-panel" @onclick:stopPropagation="true">
+                <div class="dbg-panel-head">
+                    <span>Debug Log</span>
+                    <button class="dbg-refresh" type="button" @onclick="LoadAsync" title="Refresh" aria-label="Refresh" disabled="@_loading">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6"/></svg>
+                    </button>
+                </div>
+                @if (_loading)
+                {
+                    <div class="dbg-loading"><span class="ds-spinner" style="width:16px;height:16px;border-width:2px"></span></div>
+                }
+                else if (_items.Count == 0)
+                {
+                    <div class="dbg-empty">No debug entries yet.</div>
+                }
+                else
+                {
+                    <div class="dbg-list">
+                        @foreach (var item in _items)
+                        {
+                            <div class="dbg-item">
+                                <div class="dbg-item-head">
+                                    <span class="dbg-level dbg-@(item.Level.ToLowerInvariant())">@item.Level</span>
+                                    @if (!string.IsNullOrWhiteSpace(item.Category))
+                                    {
+                                        <span class="dbg-tag">@item.Category</span>
+                                    }
+                                    @if (item.DurationMs > 0)
+                                    {
+                                        <span class="dbg-duration" title="Duration">@FormatDuration(item.DurationMs)</span>
+                                    }
+                                    <span class="dbg-time">@RelativeTime(item.EventTime)</span>
+                                </div>
+                                <div class="dbg-msg">@item.Message</div>
+                                @if (!string.IsNullOrWhiteSpace(item.TableName))
+                                {
+                                    <div class="dbg-meta">
+                                        <span>@item.TableName</span>
+                                    </div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(item.Error))
+                                {
+                                    <div class="dbg-err">@item.Error</div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _visible;   // shown only when the user is {company}_ADMIN AND debug logging is enabled
+    private bool _open;
+    private bool _loading;
+    private List<DataAppLogRecord> _items = new();
+    private string? _companyId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _stateContainer.OnChange += OnStateChanged;
+        await EvaluateVisibilityAsync();
+    }
+
+    private async void OnStateChanged()
+    {
+        // The active company is resolved asynchronously by MainLayout; re-check when it changes.
+        await EvaluateVisibilityAsync();
+        StateHasChanged();
+    }
+
+    private async Task EvaluateVisibilityAsync()
+    {
+        var wasVisible = _visible;
+        _companyId = _stateContainer.Company?.Id;
+
+        if (string.IsNullOrWhiteSpace(_companyId))
+        {
+            _visible = false;
+        }
+        else
+        {
+            var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+            if (!authState.User.IsInRole($"{_companyId}_ADMIN"))
+            {
+                _visible = false;
+            }
+            else
+            {
+                var settings = await _debugLogClient.GetSettingsAsync(_companyId);
+                _visible = settings?.DebugLoggingEnabled ?? false;
+            }
+        }
+
+        if (wasVisible && !_visible) _open = false;
+    }
+
+    private async Task TogglePanel()
+    {
+        _open = !_open;
+        if (_open) await LoadAsync();
+    }
+
+    private void ClosePanel() => _open = false;
+
+    private async Task LoadAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_companyId)) return;
+        _loading = true;
+        StateHasChanged();
+        var result = await _debugLogClient.QueryDebugLogAsync(_companyId, 100);
+        _items = result.Items;
+        _loading = false;
+        StateHasChanged();
+    }
+
+    public void Dispose() => _stateContainer.OnChange -= OnStateChanged;
+
+    private static string RelativeTime(DateTime utc)
+    {
+        var span = DateTime.UtcNow - utc;
+        if (span.TotalSeconds < 60) return "just now";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m ago";
+        if (span.TotalHours < 24) return $"{(int)span.TotalHours}h ago";
+        if (span.TotalDays < 30) return $"{(int)span.TotalDays}d ago";
+        return $"{(int)(span.TotalDays / 30)}mo ago";
+    }
+
+    private static string FormatDuration(long ms)
+        => ms >= 1000 ? $"{ms / 1000.0:0.##} s" : $"{ms} ms";
+}
+
+<style>
+    .dbg-anchor { position: relative; display: flex; align-items: center; }
+    .dbg-trigger {
+        position: relative; display: flex; align-items: center; justify-content: center;
+        width: 36px; height: 36px; border: none; background: none; cursor: pointer;
+        border-radius: 7px; color: #374151; transition: background 0.12s;
+    }
+    .dbg-trigger:hover { background: #f3f4f6; }
+    .dbg-backdrop { position: fixed; inset: 0; z-index: 900; background: transparent; }
+    .dbg-panel {
+        position: absolute; top: calc(100% + 6px); right: 0; z-index: 901;
+        width: 400px; max-width: calc(100vw - 2rem); max-height: 460px; overflow-y: auto;
+        background: #fff; border: 1px solid #e5e7eb; border-radius: 10px;
+        box-shadow: 0 12px 32px rgba(0,0,0,0.16), 0 2px 8px rgba(0,0,0,0.06);
+        animation: dbg-fade-in 0.14s ease-out;
+    }
+    @@keyframes dbg-fade-in {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .dbg-panel-head {
+        display: flex; align-items: center; justify-content: space-between;
+        font-size: 0.8125rem; font-weight: 700; color: #18181b; padding: 0.6rem 0.9rem 0.5rem;
+        position: sticky; top: 0; background: #fff; border-bottom: 1px solid #f4f4f5;
+    }
+    .dbg-refresh {
+        display: flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+        border: none; background: none; cursor: pointer; border-radius: 6px; color: #6b7280;
+    }
+    .dbg-refresh:hover { background: #f3f4f6; color: #18181b; }
+    .dbg-refresh:disabled { opacity: 0.5; cursor: default; }
+    .dbg-loading, .dbg-empty { display: flex; align-items: center; justify-content: center; padding: 1.5rem; color: #a1a1aa; font-size: 0.8125rem; }
+    .dbg-list { display: flex; flex-direction: column; }
+    .dbg-item { padding: 0.6rem 0.9rem; border-bottom: 1px solid #f4f4f5; }
+    .dbg-item:last-child { border-bottom: none; }
+    .dbg-item-head { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.25rem; }
+    .dbg-level {
+        font-size: 0.625rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+        padding: 0.1rem 0.4rem; border-radius: 4px;
+    }
+    .dbg-debug { color: #3730a3; background: #e0e7ff; }
+    .dbg-info { color: #075985; background: #e0f2fe; }
+    .dbg-warn { color: #92400e; background: #fef3c7; }
+    .dbg-error { color: #991b1b; background: #fee2e2; }
+    .dbg-tag {
+        font-size: 0.625rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+        color: #4338ca; background: #eef2ff; padding: 0.1rem 0.4rem; border-radius: 9999px;
+    }
+    .dbg-time { font-size: 0.6875rem; color: #a1a1aa; margin-left: auto; flex-shrink: 0; }
+    .dbg-duration {
+        flex-shrink: 0; font-size: 0.6875rem; font-weight: 600; color: #3f3f46;
+        background: #f4f4f5; padding: 0.1rem 0.4rem; border-radius: 4px; font-variant-numeric: tabular-nums;
+    }
+    .dbg-msg { font-size: 0.8125rem; color: #27272a; line-height: 1.4; }
+    .dbg-meta { display: flex; gap: 0.6rem; margin-top: 0.2rem; font-size: 0.6875rem; color: #71717a; }
+    .dbg-err { margin-top: 0.25rem; font-size: 0.75rem; color: #b91c1c; white-space: pre-wrap; word-break: break-word; }
+
+    @@media (max-width: 640px) {
+        .dbg-panel { position: fixed; top: 58px; left: 12px; right: 12px; width: auto; max-width: none; }
+    }
+
+    /* ── Dark mode ─────────────────────────────────────────────────────── */
+    [data-theme="dark"] .dbg-trigger { color: #9aa1ac; }
+    [data-theme="dark"] .dbg-trigger:hover { background: #20242c; color: #f3f4f6; }
+    [data-theme="dark"] .dbg-panel { background: #181a20; border-color: #2b303b; box-shadow: 0 12px 32px rgba(0,0,0,0.6), 0 2px 8px rgba(0,0,0,0.4); }
+    [data-theme="dark"] .dbg-panel-head { color: #f3f4f6; background: #181a20; border-bottom-color: #23272f; }
+    [data-theme="dark"] .dbg-refresh { color: #9aa1ac; }
+    [data-theme="dark"] .dbg-refresh:hover { background: #20242c; color: #f3f4f6; }
+    [data-theme="dark"] .dbg-loading,
+    [data-theme="dark"] .dbg-empty { color: #9aa1ac; }
+    [data-theme="dark"] .dbg-item { border-bottom-color: #23272f; }
+    [data-theme="dark"] .dbg-msg { color: #e4e4e7; }
+    [data-theme="dark"] .dbg-meta { color: #9aa1ac; }
+    [data-theme="dark"] .dbg-tag { color: #c7d2fe; background: rgba(99,102,241,0.15); }
+    [data-theme="dark"] .dbg-time { color: #6b7280; }
+    [data-theme="dark"] .dbg-duration { color: #d4d4d8; background: #26272e; }
+    [data-theme="dark"] .dbg-debug { color: #c7d2fe; background: rgba(99,102,241,0.18); }
+    [data-theme="dark"] .dbg-info { color: #bae6fd; background: rgba(14,165,233,0.18); }
+    [data-theme="dark"] .dbg-warn { color: #fde68a; background: rgba(217,119,6,0.20); }
+    [data-theme="dark"] .dbg-error { color: #fecaca; background: rgba(220,38,38,0.20); }
+    [data-theme="dark"] .dbg-err { color: #fca5a5; }
+</style>

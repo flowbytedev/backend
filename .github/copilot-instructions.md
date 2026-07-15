@@ -39,7 +39,7 @@ This is a **multi-project .NET 9 + Blazor solution**:
 
 **Real-time**: SignalR hubs at `/notification/datajob` (`NotificationHub<DataJob>`) and `/realtime/salesdata` (`SalesDataHub`).
 
-**AI chat**: Azure OpenAI (`IChatService`) configured via `AzureOpenAI` appsettings section; also supports a local Ollama fallback.
+**AI**: Azure OpenAI (bound to `AzureOpenAIConfiguration`) configured via `AzureOpenAI` appsettings section; used directly by feature-specific agent services (`DashboardAgentService`, `NotebookAgentService`, `IngestionAgentService`, etc.).
 
 ## Key Conventions
 

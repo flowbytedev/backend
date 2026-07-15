@@ -22,6 +22,9 @@ public class DataAppLogRecord
     public long DurationMs { get; set; }
     public string ClientIp { get; set; } = string.Empty;
     public string Details { get; set; } = string.Empty;
+    public string Level { get; set; } = string.Empty;
+    public string Category { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
 }
 
 /// <summary>A page of audit-log rows plus the total matching count.</summary>

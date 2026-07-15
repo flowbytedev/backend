@@ -212,6 +212,44 @@ public class DatabaseTableService : IDatabaseTableService
         }
 
         var cap = maxRows > 0 ? Math.Min(maxRows, MaxExternalRows) : MaxExternalRows;
+        await RunGridAsync(connection, sql, cap, result, ct);
+        return result;
+    }
+
+    public async Task<SqlQueryResult> GetTableSampleAsync(string entityId, string companyId, string tableName, int maxRows, CancellationToken ct = default)
+    {
+        var result = new SqlQueryResult { IsSelect = true };
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            result.Error = "Table name is required.";
+            return result;
+        }
+
+        var connection = await LoadDecryptedAsync(entityId, companyId, ct);
+        if (connection == null)
+        {
+            result.Error = "No connection is configured for this database source.";
+            return result;
+        }
+
+        var cap = maxRows > 0 ? Math.Min(maxRows, MaxExternalRows) : MaxExternalRows;
+        // Push the row limit INTO the SQL (server-side) so a heavy view/table isn't fully evaluated just to
+        // hand back a few rows — the ADO reader's client-side cap alone can't prevent that.
+        var sql = BuildSampleSql(connection.DatabaseType, tableName, cap);
+        await RunGridAsync(connection, sql, cap, result, ct);
+        return result;
+    }
+
+    // Dialect-correct "first N rows" query. SQL Server has no LIMIT (uses TOP); the others take LIMIT.
+    private static string BuildSampleSql(DataSourceType type, string tableName, int limit) => type switch
+    {
+        DataSourceType.SQLServer => $"SELECT TOP {limit} * FROM {tableName}",
+        _ => $"SELECT * FROM {tableName} LIMIT {limit}",
+    };
+
+    private async Task RunGridAsync(DatabaseConnection connection, string sql, int cap, SqlQueryResult result, CancellationToken ct)
+    {
         var sw = Stopwatch.StartNew();
         try
         {
@@ -228,7 +266,76 @@ public class DatabaseTableService : IDatabaseTableService
         sw.Stop();
         result.ElapsedMs = (long)sw.Elapsed.TotalMilliseconds;
         result.RowsReturned = result.Rows.Count;
+    }
+
+    public async Task<SqlQueryResult> GetTableSchemaAsync(string entityId, string companyId, string tableName, CancellationToken ct = default)
+    {
+        var result = new SqlQueryResult { IsSelect = true };
+
+        if (string.IsNullOrWhiteSpace(tableName))
+        {
+            result.Error = "Table name is required.";
+            return result;
+        }
+
+        var connection = await LoadDecryptedAsync(entityId, companyId, ct);
+        if (connection == null)
+        {
+            result.Error = "No connection is configured for this database source.";
+            return result;
+        }
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            if (connection.DatabaseType == DataSourceType.ClickHouse)
+                await ReadClickHouseSchemaAsync(connection, tableName, result, ct);
+            else
+                await ReadAdoSchemaAsync(connection, tableName, result, ct);
+        }
+        catch (Exception ex)
+        {
+            result.Error = Truncate(ex.Message);
+        }
+
+        sw.Stop();
+        result.ElapsedMs = (long)sw.Elapsed.TotalMilliseconds;
         return result;
+    }
+
+    // Reads column metadata with CommandBehavior.SchemaOnly: the provider returns the result-set shape
+    // (SQL Server via sp_describe_first_result_set, etc.) WITHOUT running the query or fetching any rows.
+    // This is what keeps schema discovery cheap even when the "table" is a heavy view.
+    private async Task ReadAdoSchemaAsync(DatabaseConnection c, string tableName, SqlQueryResult result, CancellationToken ct)
+    {
+        await using var connection = CreateAdoConnection(c);
+        await connection.OpenAsync(ct);
+        await ApplyReadOnlySetupAsync(connection, c, ct);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT * FROM {tableName}";
+        await using var reader = await command.ExecuteReaderAsync(System.Data.CommandBehavior.SchemaOnly, ct);
+
+        for (int i = 0; i < reader.FieldCount; i++)
+            result.Columns.Add(new Column { Name = reader.GetName(i), DataType = SafeTypeName(reader, i) });
+    }
+
+    // ClickHouse has no ADO reader; DESCRIBE returns one row per column (name, type, ...) — cheap metadata.
+    private async Task ReadClickHouseSchemaAsync(DatabaseConnection c, string tableName, SqlQueryResult result, CancellationToken ct)
+    {
+        var table = QuoteQualified(DataSourceType.ClickHouse, tableName);
+        var body = await QueryClickHouseAsync(c, $"DESCRIBE TABLE {table} FORMAT JSON", ct);
+
+        using var doc = JsonDocument.Parse(body);
+        if (doc.RootElement.TryGetProperty("data", out var data) && data.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var col in data.EnumerateArray())
+                result.Columns.Add(new Column
+                {
+                    Name = col.TryGetProperty("name", out var n) ? n.GetString() ?? string.Empty : string.Empty,
+                    DataType = col.TryGetProperty("type", out var t) ? t.GetString() ?? "VARCHAR" : "VARCHAR"
+                });
+        }
     }
 
     /// <summary>Allows only a single read-only statement (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA).

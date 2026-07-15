@@ -64,12 +64,19 @@ CREATE TABLE IF NOT EXISTS {table}
     duration_ms   Int64  DEFAULT 0,
     client_ip     String,
     user_agent    String,
-    details       String
+    details       String,
+    level         LowCardinality(String),
+    category      LowCardinality(String),
+    message       String
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(event_time)
 ORDER BY (company_id, event_time, action)
-TTL toDateTime(event_time) + INTERVAL 180 DAY;";
+TTL toDateTime(event_time) + INTERVAL 180 DAY;
+
+ALTER TABLE {table} ADD COLUMN IF NOT EXISTS level LowCardinality(String);
+ALTER TABLE {table} ADD COLUMN IF NOT EXISTS category LowCardinality(String);
+ALTER TABLE {table} ADD COLUMN IF NOT EXISTS message String;";
     }
 
     public void Enqueue(DataAppLogEntry entry)
@@ -159,7 +166,7 @@ TTL toDateTime(event_time) + INTERVAL 180 DAY;";
         sb.Append("INSERT INTO ").Append(_settings.Table).Append(' ')
           .Append("(event_time, company_id, user_id, user_name, source, area, action, dataset_id, table_name, ")
           .Append("http_method, route, query_string, query_text, row_count, status_code, success, error, ")
-          .Append("duration_ms, client_ip, user_agent, details) VALUES ");
+          .Append("duration_ms, client_ip, user_agent, details, level, category, message) VALUES ");
 
         for (var i = 0; i < batch.Count; i++)
         {
@@ -186,7 +193,10 @@ TTL toDateTime(event_time) + INTERVAL 180 DAY;";
               .Append(e.DurationMs.ToString(CultureInfo.InvariantCulture)).Append(',')
               .Append(S(e.ClientIp)).Append(',')
               .Append(S(e.UserAgent)).Append(',')
-              .Append(S(e.Details))
+              .Append(S(e.Details)).Append(',')
+              .Append(S(e.Level)).Append(',')
+              .Append(S(e.Category)).Append(',')
+              .Append(S(e.Message))
               .Append(')');
         }
 
@@ -195,7 +205,8 @@ TTL toDateTime(event_time) + INTERVAL 180 DAY;";
 
     private const string ReadColumns =
         "event_time, company_id, user_id, user_name, source, area, action, dataset_id, table_name, " +
-        "http_method, route, query_text, row_count, status_code, success, error, duration_ms, client_ip, details";
+        "http_method, route, query_text, row_count, status_code, success, error, duration_ms, client_ip, details, " +
+        "level, category, message";
 
     public async Task<DataAppLogQueryResult> QueryAsync(DataAppLogQuery query, CancellationToken cancellationToken = default)
     {
@@ -253,6 +264,9 @@ TTL toDateTime(event_time) + INTERVAL 180 DAY;";
                     DurationMs = ToLong(reader.GetValue(16)),
                     ClientIp = ToStr(reader.GetValue(17)),
                     Details = ToStr(reader.GetValue(18)),
+                    Level = ToStr(reader.GetValue(19)),
+                    Category = ToStr(reader.GetValue(20)),
+                    Message = ToStr(reader.GetValue(21)),
                 });
             }
         }
@@ -276,13 +290,16 @@ TTL toDateTime(event_time) + INTERVAL 180 DAY;";
         if (!string.IsNullOrWhiteSpace(q.UserId)) clauses.Add($"user_id = '{Esc(q.UserId)}'");
         if (!string.IsNullOrWhiteSpace(q.DatasetId)) clauses.Add($"dataset_id = '{Esc(q.DatasetId)}'");
         if (!string.IsNullOrWhiteSpace(q.TableName)) clauses.Add($"table_name = '{Esc(q.TableName)}'");
+        if (!string.IsNullOrWhiteSpace(q.Level)) clauses.Add($"level = '{Esc(q.Level)}'");
+        if (!string.IsNullOrWhiteSpace(q.Category)) clauses.Add($"category = '{Esc(q.Category)}'");
 
         if (!string.IsNullOrWhiteSpace(q.Search))
         {
             var s = Esc(q.Search);
             clauses.Add(
                 $"(user_name ILIKE '%{s}%' OR user_id ILIKE '%{s}%' OR action ILIKE '%{s}%' " +
-                $"OR table_name ILIKE '%{s}%' OR query_text ILIKE '%{s}%' OR details ILIKE '%{s}%')");
+                $"OR table_name ILIKE '%{s}%' OR query_text ILIKE '%{s}%' OR details ILIKE '%{s}%' " +
+                $"OR message ILIKE '%{s}%')");
         }
 
         return "WHERE " + string.Join(" AND ", clauses);

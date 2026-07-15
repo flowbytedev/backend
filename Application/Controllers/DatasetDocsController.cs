@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Application.Shared.Authorization;
@@ -6,6 +7,7 @@ using Application.Shared.Enums;
 using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Application.Shared.Services.Data;
+using Application.Shared.Services.Logging;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -25,12 +27,14 @@ public class DatasetDocsController : ControllerBase
     private readonly IDatasetDocService _docs;
     private readonly IColumnDocGenerationService _generator;
     private readonly IDatasetService _datasetService;
+    private readonly IDebugLogService _debug;
 
-    public DatasetDocsController(IDatasetDocService docs, IColumnDocGenerationService generator, IDatasetService datasetService)
+    public DatasetDocsController(IDatasetDocService docs, IColumnDocGenerationService generator, IDatasetService datasetService, IDebugLogService debug)
     {
         _docs = docs;
         _generator = generator;
         _datasetService = datasetService;
+        _debug = debug;
     }
 
     // GET: live columns merged with saved docs. snapshot=false (only honored for External datasets)
@@ -46,7 +50,23 @@ public class DatasetDocsController : ControllerBase
         if (dataset == null) return NotFound($"Dataset '{datasetId}' not found.");
         var snapshotMode = ResolveSnapshotMode(dataset, snapshot);
 
-        return Ok(await _docs.GetTableDocsAsync(companyId, datasetId, tableName, snapshotMode, HttpContext.RequestAborted));
+        await _debug.LogAsync(companyId, DebugLevel.Info, "DataDocs",
+            $"Loading docs for table '{tableName}' (snapshot={snapshotMode}).",
+            datasetId: datasetId, tableName: tableName, userId: userId,
+            context: new { snapshotMode, sourceType = dataset.SourceType.ToString() },
+            ct: HttpContext.RequestAborted);
+
+        var sw = Stopwatch.StartNew();
+        var docs = await _docs.GetTableDocsAsync(companyId, datasetId, tableName, snapshotMode, HttpContext.RequestAborted);
+        sw.Stop();
+
+        await _debug.LogAsync(companyId, DebugLevel.Info, "DataDocs",
+            $"Loaded docs for '{tableName}': {docs.Columns.Count} column(s).",
+            datasetId: datasetId, tableName: tableName, userId: userId,
+            durationMs: sw.ElapsedMilliseconds, context: new { columns = docs.Columns.Count },
+            ct: HttpContext.RequestAborted);
+
+        return Ok(docs);
     }
 
     // POST generate: run the AI generator, persist, return the updated docs.
@@ -61,8 +81,30 @@ public class DatasetDocsController : ControllerBase
         if (dataset == null) return NotFound($"Dataset '{datasetId}' not found.");
         var snapshotMode = ResolveSnapshotMode(dataset, snapshot);
 
+        await _debug.LogAsync(companyId, DebugLevel.Info, "DataDocs",
+            $"Generating docs for '{tableName}' (snapshot={snapshotMode}).",
+            datasetId: datasetId, tableName: tableName, userId: userId,
+            ct: HttpContext.RequestAborted);
+
+        var sw = Stopwatch.StartNew();
         var result = await _generator.GenerateAsync(companyId, datasetId, tableName, snapshotMode, HttpContext.RequestAborted);
-        if (result.Error != null) return BadRequest(result.Error);
+        sw.Stop();
+
+        if (result.Error != null)
+        {
+            await _debug.LogAsync(companyId, DebugLevel.Error, "DataDocs",
+                $"Generation failed for '{tableName}': {result.Error}",
+                datasetId: datasetId, tableName: tableName, userId: userId,
+                durationMs: sw.ElapsedMilliseconds, error: result.Error,
+                ct: HttpContext.RequestAborted);
+            return BadRequest(result.Error);
+        }
+
+        await _debug.LogAsync(companyId, DebugLevel.Info, "DataDocs",
+            $"Generated docs for '{tableName}': {result.ColumnsDocumented} column(s) documented.",
+            datasetId: datasetId, tableName: tableName, userId: userId,
+            durationMs: sw.ElapsedMilliseconds, context: new { result.ColumnsDocumented },
+            ct: HttpContext.RequestAborted);
 
         return Ok(await _docs.GetTableDocsAsync(companyId, datasetId, tableName, snapshotMode, HttpContext.RequestAborted));
     }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -10,6 +11,7 @@ using Application.Shared.Enums;
 using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Application.Shared.Services;
+using Application.Shared.Services.Logging;
 using Azure;
 using Azure.AI.OpenAI;
 using Microsoft.EntityFrameworkCore;
@@ -50,6 +52,7 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
     private readonly ApplicationDbContext _db;
     private readonly IDatasetDocService _docService;
     private readonly ILogger<ColumnDocGenerationService> _logger;
+    private readonly IDebugLogService _debug;
 
     public ColumnDocGenerationService(
         IOptions<AzureOpenAIConfiguration> config,
@@ -57,7 +60,8 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
         IDatabaseTableService dbTables,
         ApplicationDbContext db,
         IDatasetDocService docService,
-        ILogger<ColumnDocGenerationService> logger)
+        ILogger<ColumnDocGenerationService> logger,
+        IDebugLogService debug)
     {
         _config = config.Value;
         _client = new AzureOpenAIClient(new Uri(_config.Endpoint), new AzureKeyCredential(_config.ApiKey));
@@ -66,6 +70,7 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
         _db = db;
         _docService = docService;
         _logger = logger;
+        _debug = debug;
     }
 
     public async Task<ColumnDocGenerationResult> GenerateAsync(string companyId, string datasetId, string tableName, bool snapshotMode, CancellationToken ct = default)
@@ -80,15 +85,26 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "[ColumnDoc] Failed to read columns for {Dataset}/{Table}.", datasetId, tableName);
+            await _debug.LogAsync(companyId, DebugLevel.Error, "DataDocs",
+                $"Couldn't read columns for '{tableName}': {ex.Message}",
+                datasetId: datasetId, tableName: tableName, error: ex.Message, ct: ct);
             result.Error = "Couldn't read the table's columns.";
             return result;
         }
 
         if (columns.Count == 0)
         {
+            await _debug.LogAsync(companyId, DebugLevel.Warn, "DataDocs",
+                $"Nothing to document for '{tableName}': the table has no columns.",
+                datasetId: datasetId, tableName: tableName, ct: ct);
             result.Error = "This table has no columns to document.";
             return result;
         }
+
+        await _debug.LogAsync(companyId, DebugLevel.Debug, "DataDocs",
+            $"Documenting '{tableName}': {columns.Count} column(s), snapshot={snapshotMode}.",
+            datasetId: datasetId, tableName: tableName,
+            context: new { columns = columns.Count, snapshotMode }, ct: ct);
 
         // A small, read-only sample gives the model real values to reason about. Failure here is
         // non-fatal — we can still describe from names + types. In snapshot mode we read the dataset's
@@ -107,8 +123,8 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
                 var dataset = await _db.Dataset.AsNoTracking()
                     .FirstOrDefaultAsync(d => d.Id == datasetId && d.CompanyId == companyId, ct);
                 if (dataset?.SourceType == DatasetSourceType.External && !string.IsNullOrWhiteSpace(dataset.SourceEntityId))
-                    // ExecuteQueryAsync caps rows at the reader, so no dialect-specific LIMIT/TOP is needed.
-                    sample = await _dbTables.ExecuteQueryAsync(dataset.SourceEntityId!, companyId, $"SELECT * FROM {tableName}", MaxSampleRows, ct);
+                    // Server-side TOP/LIMIT so a heavy source view isn't fully evaluated just for a few rows.
+                    sample = await _dbTables.GetTableSampleAsync(dataset.SourceEntityId!, companyId, tableName, MaxSampleRows, ct);
             }
 
             if (sample != null && sample.Error == null)
@@ -117,7 +133,15 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[ColumnDoc] Sample fetch failed for {Dataset}/{Table}; continuing without samples.", datasetId, tableName);
+            await _debug.LogAsync(companyId, DebugLevel.Warn, "DataDocs",
+                $"Sample fetch failed for '{tableName}'; continuing without samples: {ex.Message}",
+                datasetId: datasetId, tableName: tableName, error: ex.Message, ct: ct);
         }
+
+        await _debug.LogAsync(companyId, DebugLevel.Debug, "DataDocs",
+            $"Sample fetch for '{tableName}': {sampleRows.Count} row(s) collected.",
+            datasetId: datasetId, tableName: tableName,
+            context: new { sampleRows = sampleRows.Count }, ct: ct);
 
         try
         {
@@ -134,12 +158,26 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
             };
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(_config.TimeoutSeconds, 45)));
+            // Documenting a wide table means the model must emit JSON for every column, which can take a
+            // while — allow more headroom than the interactive agents, but stay under the Blazor client's
+            // ~100s HttpClient timeout so the browser doesn't abort the request first.
+            cts.CancelAfter(TimeSpan.FromSeconds(Math.Max(_config.TimeoutSeconds, 90)));
 
+            var sw = Stopwatch.StartNew();
             var response = await chatClient.CompleteChatAsync(messages, options, cts.Token);
+            sw.Stop();
+
+            await _debug.LogAsync(companyId, DebugLevel.Info, "DataDocs",
+                $"Azure OpenAI ({_config.DeploymentName}) responded in {sw.ElapsedMilliseconds} ms for '{tableName}'.",
+                datasetId: datasetId, tableName: tableName, durationMs: sw.ElapsedMilliseconds,
+                context: new { deployment = _config.DeploymentName }, ct: ct);
+
             var content = response.Value.Content.Count > 0 ? response.Value.Content[0].Text : null;
             if (string.IsNullOrWhiteSpace(content))
             {
+                await _debug.LogAsync(companyId, DebugLevel.Error, "DataDocs",
+                    $"AI returned an empty response for '{tableName}'.",
+                    datasetId: datasetId, tableName: tableName, ct: ct);
                 result.Error = "The AI service returned an empty response.";
                 return result;
             }
@@ -147,22 +185,35 @@ public class ColumnDocGenerationService : IColumnDocGenerationService
             var docs = ParseDocs(content, columns);
             if (docs.Count == 0)
             {
+                await _debug.LogAsync(companyId, DebugLevel.Warn, "DataDocs",
+                    $"AI response for '{tableName}' contained no usable column documentation.",
+                    datasetId: datasetId, tableName: tableName, ct: ct);
                 result.Error = "The AI service didn't return any usable column documentation.";
                 return result;
             }
 
             await _docService.ApplyGeneratedDocsAsync(companyId, datasetId, tableName, snapshotMode, docs, ct);
             result.ColumnsDocumented = docs.Count;
+
+            await _debug.LogAsync(companyId, DebugLevel.Info, "DataDocs",
+                $"Applied {docs.Count} generated column doc(s) for '{tableName}'.",
+                datasetId: datasetId, tableName: tableName, context: new { documented = docs.Count }, ct: ct);
             return result;
         }
         catch (OperationCanceledException)
         {
+            await _debug.LogAsync(companyId, DebugLevel.Warn, "DataDocs",
+                $"AI request timed out for '{tableName}'.",
+                datasetId: datasetId, tableName: tableName, ct: ct);
             result.Error = "The AI request timed out. Please try again.";
             return result;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[ColumnDoc] Generation failed for {Dataset}/{Table}.", datasetId, tableName);
+            await _debug.LogAsync(companyId, DebugLevel.Error, "DataDocs",
+                $"Generation failed for '{tableName}': {ex.GetType().Name}: {ex.Message}",
+                datasetId: datasetId, tableName: tableName, error: ex.Message, ct: ct);
             result.Error = $"AI service error: {ex.GetType().Name}: {ex.Message}";
             return result;
         }

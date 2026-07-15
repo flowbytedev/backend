@@ -258,6 +258,10 @@ builder.Services.AddSingleton(dataAppLogSettings);
 builder.Services.AddSingleton<Application.Shared.Services.Logging.IDataAppLogService, Application.Shared.Services.Logging.DataAppLogService>();
 builder.Services.AddHostedService<Application.Logging.DataAppLogHostedService>();
 
+// Per-company settings (the debug-logging toggle) + the gated debug-log emit helper (writes into data_app_log).
+builder.Services.AddScoped<Application.Shared.Services.ICompanySettingsService, Application.Shared.Services.CompanySettingsService>();
+builder.Services.AddScoped<Application.Shared.Services.Logging.IDebugLogService, Application.Shared.Services.Logging.DebugLogService>();
+
 // Dashboards (OOS dashboard + dashboard/table links) — Application.Dashboard feature project.
 Application.Dashboard.DashboardServiceExtensions.AddDashboard(builder.Services, builder.Configuration);
 
