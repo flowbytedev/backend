@@ -90,6 +90,10 @@ else
                                 @oncontextmenu="e => OnRowContextMenu(e, dataset)" @oncontextmenu:preventDefault="true">
                                 <td class="ds-td ds-td-name">
                                     <span class="ds-dataset-name">@dataset.Name</span>
+                                    @if (IsDefaultDataset(dataset.Id))
+                                    {
+                                        <span title="Your default dataset" style="margin-left:0.4rem;font-size:0.625rem;font-weight:700;color:#b45309;background:#fef3c7;border-radius:9999px;padding:0.05rem 0.4rem;text-transform:uppercase;letter-spacing:0.03em">Default</span>
+                                    }
                                 </td>
                                 <td class="ds-td">
                                     <span class="ds-dataset-desc">@dataset.Description</span>
@@ -155,6 +159,12 @@ else
                                 <td class="ds-td ds-td-date">@dataset.CreatedAt.ToString("MMM dd, yyyy")</td>
                                 <td class="ds-td ds-td-actions-cell" @onclick:stopPropagation="true">
                                     <div class="ds-actions">
+                                        <button class="btn-icon" title="@(IsPinned(dataset.Id) ? "Unpin" : "Pin to top")" @onclick="() => TogglePin(dataset)" style="@(IsPinned(dataset.Id) ? "color:#4f46e5" : "")">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsPinned(dataset.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+                                        </button>
+                                        <button class="btn-icon" title="@(IsDefaultDataset(dataset.Id) ? "Default dataset (click to clear)" : "Set as default")" @onclick="() => ToggleDefault(dataset)" style="@(IsDefaultDataset(dataset.Id) ? "color:#f59e0b" : "")">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsDefaultDataset(dataset.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                        </button>
                                         <button class="btn-icon btn-icon-open" title="Open dataset" @onclick="() => OpenDataset(dataset)">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
                                         </button>
@@ -358,6 +368,18 @@ else
     private DatasetStats? StatsFor(string? id) =>
         !string.IsNullOrEmpty(id) && statsLookup.TryGetValue(id, out var v) ? v : null;
 
+    // Per-user pins + default dataset. Pinned datasets float to the top; a star marks the default.
+    private HashSet<string> pinnedIds = new(StringComparer.Ordinal);
+    private string? defaultDatasetId;
+    private bool IsPinned(string? id) => id != null && pinnedIds.Contains(id);
+    private bool IsDefaultDataset(string? id) => id != null && id == defaultDatasetId;
+
+    private sealed class DatasetPreferences
+    {
+        public List<string>? PinnedDatasetIds { get; set; }
+        public string? DefaultDatasetId { get; set; }
+    }
+
     private static string FormatBytes(long bytes)
     {
         if (bytes <= 0) return "0 B";
@@ -427,6 +449,7 @@ else
             if (response.IsSuccessStatusCode)
             {
                 allItems = await response.Content.ReadFromJsonAsync<List<Dataset>>();
+                await LoadPreferences();
                 ApplyFilterAndSort();
 
                 // Only fetch the database lookup when at least one dataset is external.
@@ -576,9 +599,58 @@ else
             _ => sortAsc ? query.OrderBy(d => d.Name) : query.OrderByDescending(d => d.Name),
         };
 
-        filteredItems = query.ToList();
+        // Pinned datasets float to the top (OrderByDescending is stable, so the sort above holds within groups).
+        filteredItems = query.OrderByDescending(d => d.Id != null && pinnedIds.Contains(d.Id)).ToList();
         pagedItems = filteredItems.Skip(currentPage * pageSize).Take(pageSize);
         StateHasChanged();
+    }
+
+    private async Task LoadPreferences()
+    {
+        try
+        {
+            var prefs = await _httpClient.GetFromJsonAsync<DatasetPreferences>("api/datasets/preferences");
+            pinnedIds = prefs?.PinnedDatasetIds?.ToHashSet(StringComparer.Ordinal) ?? new(StringComparer.Ordinal);
+            defaultDatasetId = prefs?.DefaultDatasetId;
+        }
+        catch { /* preferences are supplementary — the list still renders without them */ }
+    }
+
+    private async Task TogglePin(Dataset dataset)
+    {
+        if (string.IsNullOrEmpty(dataset.Id)) return;
+        var pin = !pinnedIds.Contains(dataset.Id);
+        try
+        {
+            var resp = await _httpClient.PutAsync($"api/datasets/{dataset.Id}/pin?pinned={(pin ? "true" : "false")}", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                if (pin) pinnedIds.Add(dataset.Id); else pinnedIds.Remove(dataset.Id);
+                ApplyFilterAndSort();
+            }
+            else _toastService.ShowError("Couldn't update pin.");
+        }
+        catch (Exception ex) { _toastService.ShowError($"Pin failed: {ex.Message}"); }
+    }
+
+    private async Task ToggleDefault(Dataset dataset)
+    {
+        if (string.IsNullOrEmpty(dataset.Id)) return;
+        var clearing = defaultDatasetId == dataset.Id;
+        try
+        {
+            var resp = clearing
+                ? await _httpClient.DeleteAsync("api/datasets/default")
+                : await _httpClient.PutAsync($"api/datasets/{dataset.Id}/default", null);
+            if (resp.IsSuccessStatusCode)
+            {
+                defaultDatasetId = clearing ? null : dataset.Id;
+                _toastService.ShowSuccess(clearing ? "Default cleared." : "Default dataset set.");
+                StateHasChanged();
+            }
+            else _toastService.ShowError("Couldn't update default.");
+        }
+        catch (Exception ex) { _toastService.ShowError($"Update failed: {ex.Message}"); }
     }
 
     private RenderFragment SortIcon(string field) => __builder =>

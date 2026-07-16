@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Application.Shared.Data;
 using Application.Shared.Models;
 using Application.Shared.Models.User;
@@ -61,6 +62,18 @@ public class DatasetSharingService : IDatasetSharingService
             .GroupBy(t => t.UserId)
             .ToDictionary(g => g.Key, g => g.Select(x => x.TableName).OrderBy(n => n).ToList());
 
+        // Per-user, per-table column scopes (a table absent here = all columns of that table).
+        var columnRows = await _context.DatasetUserColumn
+            .Where(c => c.DatasetId == datasetId)
+            .Select(c => new { c.UserId, c.TableName, c.ColumnName })
+            .ToListAsync();
+        var columnsByUser = columnRows
+            .GroupBy(c => c.UserId)
+            .ToDictionary(
+                g => g.Key,
+                g => g.GroupBy(x => x.TableName)
+                      .ToDictionary(tg => tg.Key, tg => tg.Select(x => x.ColumnName).OrderBy(n => n).ToList()));
+
         // Populate user details using IUserService
         foreach (var du in datasetUsers)
         {
@@ -72,6 +85,8 @@ public class DatasetSharingService : IDatasetSharingService
             }
             if (tablesByUser.TryGetValue(du.UserId, out var tables))
                 du.Tables = tables;
+            if (columnsByUser.TryGetValue(du.UserId, out var columns))
+                du.Columns = columns;
         }
 
         return datasetUsers;
@@ -138,6 +153,51 @@ public class DatasetSharingService : IDatasetSharingService
                 });
             }
 
+            // Reconcile the user's per-table column scope. A table absent from request.Columns = all columns.
+            // Diff (rather than remove-then-re-add) so identical keys aren't tracked twice in one SaveChanges.
+            var desiredColumnKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase); // "table\ncolumn"
+            if (request.Columns != null)
+            {
+                foreach (var (table, columns) in request.Columns)
+                {
+                    var tbl = table?.Trim();
+                    if (string.IsNullOrWhiteSpace(tbl) || columns == null) continue;
+                    foreach (var col in columns
+                                 .Where(c => !string.IsNullOrWhiteSpace(c))
+                                 .Select(c => c.Trim())
+                                 .Distinct(StringComparer.OrdinalIgnoreCase))
+                    {
+                        desiredColumnKeys.Add($"{tbl}\n{col}");
+                    }
+                }
+            }
+
+            var existingColumnRows = await _context.DatasetUserColumn
+                .Where(c => c.DatasetId == request.DatasetId && c.UserId == user.Id)
+                .ToListAsync();
+            var existingColumnKeys = existingColumnRows
+                .Select(r => $"{r.TableName}\n{r.ColumnName}")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var row in existingColumnRows)
+                if (!desiredColumnKeys.Contains($"{row.TableName}\n{row.ColumnName}"))
+                    _context.DatasetUserColumn.Remove(row);
+
+            foreach (var key in desiredColumnKeys)
+            {
+                if (existingColumnKeys.Contains(key)) continue;
+                var parts = key.Split('\n', 2);
+                _context.DatasetUserColumn.Add(new DatasetUserColumn
+                {
+                    CompanyId = dataset.CompanyId,
+                    UserId = user.Id,
+                    DatasetId = request.DatasetId,
+                    TableName = parts[0],
+                    ColumnName = parts[1],
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+
             await _context.SaveChangesAsync();
 
             // Get the user who shared the dataset
@@ -177,6 +237,7 @@ public class DatasetSharingService : IDatasetSharingService
             var existingShare = await _context.DatasetUser
                 .FirstOrDefaultAsync(du => du.DatasetId == request.DatasetId && du.UserId == user.Id);
 
+            bool tableScoped;
             if (existingShare == null)
             {
                 // New share → restricted to just this table.
@@ -194,6 +255,7 @@ public class DatasetSharingService : IDatasetSharingService
                     TableName = tableName,
                     CreatedAt = DateTime.UtcNow
                 });
+                tableScoped = true;
             }
             else if (existingShare.Type != DatasetUserType.Admin)
             {
@@ -212,8 +274,48 @@ public class DatasetSharingService : IDatasetSharingService
                         CreatedAt = DateTime.UtcNow
                     });
                 }
+                // Column scope only makes sense for a table-scoped user, not one with full dataset access.
+                tableScoped = rows.Count > 0;
             }
-            // existingShare.Type == Admin → already full access; nothing to do.
+            else
+            {
+                // existingShare.Type == Admin → already full access; nothing to do.
+                tableScoped = false;
+            }
+
+            // Optional per-column restriction for this table. Columns null = leave column scope untouched;
+            // empty = all columns (clears any restriction); non-empty = restrict to exactly those columns.
+            // Diff (not remove-then-re-add) so identical keys aren't tracked twice in one SaveChanges.
+            if (tableScoped && request.Columns != null)
+            {
+                var desiredColumns = request.Columns
+                    .Where(c => !string.IsNullOrWhiteSpace(c))
+                    .Select(c => c.Trim())
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                var existingColumns = await _context.DatasetUserColumn
+                    .Where(c => c.DatasetId == request.DatasetId && c.UserId == user.Id && c.TableName == tableName)
+                    .ToListAsync();
+
+                foreach (var row in existingColumns)
+                    if (!desiredColumns.Contains(row.ColumnName))
+                        _context.DatasetUserColumn.Remove(row);
+
+                var existingColumnNames = existingColumns
+                    .Select(r => r.ColumnName)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                foreach (var col in desiredColumns)
+                    if (!existingColumnNames.Contains(col))
+                        _context.DatasetUserColumn.Add(new DatasetUserColumn
+                        {
+                            CompanyId = dataset.CompanyId,
+                            UserId = user.Id,
+                            DatasetId = request.DatasetId,
+                            TableName = tableName,
+                            ColumnName = col,
+                            CreatedAt = DateTime.UtcNow
+                        });
+            }
 
             await _context.SaveChangesAsync();
 
@@ -267,11 +369,16 @@ public class DatasetSharingService : IDatasetSharingService
             if (datasetUser == null)
                 return false;
 
-            // No cascade deletes in this codebase — remove the user's table scopes explicitly first.
+            // No cascade deletes in this codebase — remove the user's table + column scopes explicitly first.
             var tableRows = await _context.DatasetUserTable
                 .Where(t => t.DatasetId == datasetId && t.UserId == userId)
                 .ToListAsync();
             _context.DatasetUserTable.RemoveRange(tableRows);
+
+            var columnRows = await _context.DatasetUserColumn
+                .Where(c => c.DatasetId == datasetId && c.UserId == userId)
+                .ToListAsync();
+            _context.DatasetUserColumn.RemoveRange(columnRows);
 
             _context.DatasetUser.Remove(datasetUser);
             await _context.SaveChangesAsync();
@@ -307,10 +414,22 @@ public class DatasetSharingService : IDatasetSharingService
 
             _context.DatasetUserTable.Remove(row);
 
+            // Drop any column scope for the revoked table too.
+            var colRows = await _context.DatasetUserColumn
+                .Where(c => c.DatasetId == datasetId && c.UserId == userId && c.TableName == tableName)
+                .ToListAsync();
+            _context.DatasetUserColumn.RemoveRange(colRows);
+
             // If this was their only scoped table, removing it would leave them with "no scope" = full
             // access, which is wrong — their access existed only for this table, so drop the share entirely.
             if (tableRows.Count == 1)
+            {
+                var allColRows = await _context.DatasetUserColumn
+                    .Where(c => c.DatasetId == datasetId && c.UserId == userId)
+                    .ToListAsync();
+                _context.DatasetUserColumn.RemoveRange(allColRows);
                 _context.DatasetUser.Remove(datasetUser);
+            }
 
             await _context.SaveChangesAsync();
             return true;
@@ -396,5 +515,143 @@ public class DatasetSharingService : IDatasetSharingService
         }
 
         return result;
+    }
+
+    public async Task<UserDatasetAccessDto> GetUserDatasetAccessAsync(string datasetId, string userId)
+    {
+        var dto = new UserDatasetAccessDto();
+
+        var datasetUser = await _context.DatasetUser
+            .FirstOrDefaultAsync(du => du.DatasetId == datasetId && du.UserId == userId);
+        if (datasetUser == null)
+            return dto; // HasAccess = false
+
+        dto.HasAccess = true;
+        dto.Type = datasetUser.Type;
+
+        dto.Tables = await _context.DatasetUserTable
+            .Where(t => t.DatasetId == datasetId && t.UserId == userId)
+            .Select(t => t.TableName)
+            .OrderBy(n => n)
+            .ToListAsync();
+
+        var columnRows = await _context.DatasetUserColumn
+            .Where(c => c.DatasetId == datasetId && c.UserId == userId)
+            .Select(c => new { c.TableName, c.ColumnName })
+            .ToListAsync();
+        dto.Columns = columnRows
+            .GroupBy(c => c.TableName)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.ColumnName).OrderBy(n => n).ToList());
+
+        var rlsRows = await _context.UserRlsFilter
+            .Where(r => r.DatasetId == datasetId && r.UserId == userId)
+            .ToListAsync();
+        dto.Rls = rlsRows
+            .OrderBy(r => r.ColumnName)
+            .Select(r => new RlsFilterItem { ColumnName = r.ColumnName, AllowedValues = r.GetAllowedValuesList() })
+            .ToList();
+
+        return dto;
+    }
+
+    public async Task<bool> SetUserDatasetAccessAsync(string companyId, string datasetId, string userId, SetUserAccessRequest request)
+    {
+        try
+        {
+            var dataset = await _context.Dataset.FindAsync(datasetId);
+            if (dataset == null) return false;
+
+            var datasetUser = await _context.DatasetUser
+                .FirstOrDefaultAsync(du => du.DatasetId == datasetId && du.UserId == userId);
+
+            // Remove-all path: drop the share and every scope row.
+            if (request.Remove)
+            {
+                _context.DatasetUserTable.RemoveRange(await _context.DatasetUserTable
+                    .Where(t => t.DatasetId == datasetId && t.UserId == userId).ToListAsync());
+                _context.DatasetUserColumn.RemoveRange(await _context.DatasetUserColumn
+                    .Where(c => c.DatasetId == datasetId && c.UserId == userId).ToListAsync());
+                _context.UserRlsFilter.RemoveRange(await _context.UserRlsFilter
+                    .Where(r => r.DatasetId == datasetId && r.UserId == userId).ToListAsync());
+                if (datasetUser != null) _context.DatasetUser.Remove(datasetUser);
+                await _context.SaveChangesAsync();
+                return true;
+            }
+
+            // Upsert the dataset-level share.
+            if (datasetUser == null)
+            {
+                datasetUser = new DatasetUser { DatasetId = datasetId, UserId = userId, Type = request.Type, CreatedAt = DateTime.UtcNow };
+                _context.DatasetUser.Add(datasetUser);
+            }
+            else
+            {
+                datasetUser.Type = request.Type;
+                datasetUser.ModifiedAt = DateTime.UtcNow;
+            }
+
+            // Reconcile table scope (null/empty = all tables → no rows). Diff to avoid re-tracking keys.
+            var desiredTables = (request.Tables ?? new List<string>())
+                .Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingTables = await _context.DatasetUserTable
+                .Where(t => t.DatasetId == datasetId && t.UserId == userId).ToListAsync();
+            foreach (var row in existingTables)
+                if (!desiredTables.Contains(row.TableName)) _context.DatasetUserTable.Remove(row);
+            var existingTableNames = existingTables.Select(r => r.TableName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in desiredTables)
+                if (!existingTableNames.Contains(t))
+                    _context.DatasetUserTable.Add(new DatasetUserTable { DatasetId = datasetId, UserId = userId, TableName = t, CreatedAt = DateTime.UtcNow });
+
+            // Reconcile per-table column scope (diff on "table\ncolumn").
+            var desiredColumnKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (request.Columns != null)
+                foreach (var (table, columns) in request.Columns)
+                {
+                    var tbl = table?.Trim();
+                    if (string.IsNullOrWhiteSpace(tbl) || columns == null) continue;
+                    foreach (var col in columns.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim()).Distinct(StringComparer.OrdinalIgnoreCase))
+                        desiredColumnKeys.Add($"{tbl}\n{col}");
+                }
+            var existingColumns = await _context.DatasetUserColumn
+                .Where(c => c.DatasetId == datasetId && c.UserId == userId).ToListAsync();
+            foreach (var row in existingColumns)
+                if (!desiredColumnKeys.Contains($"{row.TableName}\n{row.ColumnName}")) _context.DatasetUserColumn.Remove(row);
+            var existingColumnKeys = existingColumns.Select(r => $"{r.TableName}\n{r.ColumnName}").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in desiredColumnKeys)
+                if (!existingColumnKeys.Contains(key))
+                {
+                    var parts = key.Split('\n', 2);
+                    _context.DatasetUserColumn.Add(new DatasetUserColumn { CompanyId = companyId, UserId = userId, DatasetId = datasetId, TableName = parts[0], ColumnName = parts[1], CreatedAt = DateTime.UtcNow });
+                }
+
+            // Reconcile RLS (upsert by column; remove columns no longer present).
+            var desiredRls = (request.Rls ?? new List<RlsFilterItem>())
+                .Where(r => !string.IsNullOrWhiteSpace(r.ColumnName))
+                .GroupBy(r => r.ColumnName.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(
+                    g => g.Key,
+                    g => g.Last().AllowedValues.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim()).Distinct().ToList(),
+                    StringComparer.OrdinalIgnoreCase);
+            var existingRls = await _context.UserRlsFilter
+                .Where(r => r.DatasetId == datasetId && r.UserId == userId).ToListAsync();
+            foreach (var row in existingRls)
+                if (!desiredRls.ContainsKey(row.ColumnName)) _context.UserRlsFilter.Remove(row);
+            foreach (var (col, values) in desiredRls)
+            {
+                var json = JsonSerializer.Serialize(values);
+                var existing = existingRls.FirstOrDefault(r => string.Equals(r.ColumnName, col, StringComparison.OrdinalIgnoreCase));
+                if (existing == null)
+                    _context.UserRlsFilter.Add(new UserRlsFilter { CompanyId = companyId, UserId = userId, DatasetId = datasetId, ColumnName = col, AllowedValues = json, CreatedAt = DateTime.UtcNow });
+                else { existing.AllowedValues = json; existing.ModifiedAt = DateTime.UtcNow; }
+            }
+
+            await _context.SaveChangesAsync();
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 }

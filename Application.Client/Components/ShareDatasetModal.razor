@@ -81,13 +81,54 @@
                             }
                             else
                             {
-                                <div class="sd-tables-box" style="max-height:180px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;padding:0.5rem;display:flex;flex-direction:column;gap:0.25rem">
+                                <div class="sd-tables-box" style="max-height:280px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;padding:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
                                     @foreach (var t in datasetTables)
                                     {
-                                        <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.8125rem;cursor:pointer">
-                                            <input type="checkbox" checked="@selectedTables.Contains(t)" @onchange="e => ToggleTable(t, (bool)e.Value!)" />
-                                            <span style="font-family:ui-monospace,Consolas,monospace">@t</span>
-                                        </label>
+                                        var table = t;
+                                        var isSel = selectedTables.Contains(table);
+                                        <div>
+                                            <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.8125rem;cursor:pointer">
+                                                <input type="checkbox" checked="@isSel" @onchange="e => ToggleTable(table, (bool)e.Value!)" />
+                                                <span style="font-family:ui-monospace,Consolas,monospace">@table</span>
+                                            </label>
+                                            @if (isSel)
+                                            {
+                                                <div style="margin:0.3rem 0 0 1.6rem;display:flex;flex-direction:column;gap:0.3rem">
+                                                    <div style="display:flex;gap:1rem;font-size:0.75rem;color:#52525b">
+                                                        <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer">
+                                                            <input type="radio" name="cols-@table" checked="@(!restrictColumns.Contains(table))" @onchange="() => SetColumnMode(table, false)" /> All columns
+                                                        </label>
+                                                        <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer">
+                                                            <input type="radio" name="cols-@table" checked="@restrictColumns.Contains(table)" @onchange="() => SetColumnMode(table, true)" /> Specific columns
+                                                        </label>
+                                                    </div>
+                                                    @if (restrictColumns.Contains(table))
+                                                    {
+                                                        @if (loadingColumns.Contains(table))
+                                                        {
+                                                            <span class="ds-hint" style="display:flex;align-items:center;gap:0.4rem"><span class="ds-spinner" style="width:12px;height:12px;border-width:1.5px"></span> Loading columns…</span>
+                                                        }
+                                                        else if (columnsByTable.TryGetValue(table, out var cols) && cols.Count > 0)
+                                                        {
+                                                            <div style="display:flex;flex-wrap:wrap;gap:0.3rem 0.9rem;max-height:130px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;padding:0.4rem 0.5rem">
+                                                                @foreach (var col in cols)
+                                                                {
+                                                                    var column = col;
+                                                                    <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;cursor:pointer;font-family:ui-monospace,Consolas,monospace">
+                                                                        <input type="checkbox" checked="@(selectedColumns.TryGetValue(table, out var sc) && sc.Contains(column))" @onchange="e => ToggleColumn(table, column, (bool)e.Value!)" />
+                                                                        @column
+                                                                    </label>
+                                                                }
+                                                            </div>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="ds-hint">No columns available to scope for this table.</span>
+                                                        }
+                                                    }
+                                                </div>
+                                            }
+                                        </div>
                                     }
                                 </div>
                             }
@@ -135,6 +176,11 @@
                                         <span style="margin-left:0.375rem" title="@(user.Tables.Count == 0 ? "All tables" : string.Join(", ", user.Tables))">
                                             · @(user.Tables.Count == 0 ? "All tables" : $"{user.Tables.Count} table{(user.Tables.Count == 1 ? "" : "s")}")
                                         </span>
+                                        @if (user.Columns.Count > 0)
+                                        {
+                                            var totalCols = user.Columns.Sum(kv => kv.Value.Count);
+                                            <span style="margin-left:0.375rem" title="@string.Join("; ", user.Columns.Select(kv => $"{kv.Key}: {string.Join(", ", kv.Value)}"))">· @totalCols column@(totalCols == 1 ? "" : "s") scoped</span>
+                                        }
                                     </p>
                                 </div>
                                 <button class="btn-icon btn-icon-delete" title="Remove access" @onclick="() => RemoveUserAccess(user.UserId)">
@@ -197,6 +243,13 @@
     private List<string> datasetTables = new();
     private HashSet<string> selectedTables = new(StringComparer.OrdinalIgnoreCase);
 
+    // Per-table column scoping. columnsByTable is lazy-loaded when a table switches to "Specific columns";
+    // restrictColumns holds tables in specific-column mode; selectedColumns holds the chosen columns.
+    private Dictionary<string, List<string>> columnsByTable = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> restrictColumns = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, HashSet<string>> selectedColumns = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> loadingColumns = new(StringComparer.OrdinalIgnoreCase);
+
     private List<UserMention> memberSuggestions = new();
     private bool showSuggestions = false;
     private CancellationTokenSource? suggestCts;
@@ -253,8 +306,73 @@
 
     private void ToggleTable(string table, bool on)
     {
-        if (on) selectedTables.Add(table);
-        else selectedTables.Remove(table);
+        if (on)
+        {
+            selectedTables.Add(table);
+        }
+        else
+        {
+            selectedTables.Remove(table);
+            restrictColumns.Remove(table);
+            selectedColumns.Remove(table);
+        }
+    }
+
+    private async Task SetColumnMode(string table, bool specific)
+    {
+        if (specific)
+        {
+            restrictColumns.Add(table);
+            await EnsureColumnsLoaded(table);
+            // Start "Specific" as a full grant the sharer trims down.
+            if (!selectedColumns.ContainsKey(table))
+                selectedColumns[table] = columnsByTable.TryGetValue(table, out var cols)
+                    ? new HashSet<string>(cols, StringComparer.OrdinalIgnoreCase)
+                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        else
+        {
+            restrictColumns.Remove(table);
+        }
+    }
+
+    private void ToggleColumn(string table, string column, bool on)
+    {
+        if (!selectedColumns.TryGetValue(table, out var set))
+        {
+            set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            selectedColumns[table] = set;
+        }
+        if (on) set.Add(column); else set.Remove(column);
+    }
+
+    private async Task EnsureColumnsLoaded(string table)
+    {
+        if (columnsByTable.ContainsKey(table)) return;
+        loadingColumns.Add(table);
+        StateHasChanged();
+        try
+        {
+            await EnsureHeadersAsync();
+            var cols = await _httpClient.GetFromJsonAsync<List<Column>>(
+                $"api/datasets/{DatasetId}/tables/{Uri.EscapeDataString(table)}/columns");
+            columnsByTable[table] = cols?.Select(c => c.Name).Where(n => !string.IsNullOrWhiteSpace(n)).ToList() ?? new();
+        }
+        catch { columnsByTable[table] = new(); }
+        finally { loadingColumns.Remove(table); StateHasChanged(); }
+    }
+
+    private async Task EnsureHeadersAsync()
+    {
+        if (!string.IsNullOrEmpty(CompanyId) && !_httpClient.DefaultRequestHeaders.Contains("X-Company-ID"))
+            _httpClient.DefaultRequestHeaders.Add("X-Company-ID", CompanyId);
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        var uid = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrEmpty(uid))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("UserId");
+            _httpClient.DefaultRequestHeaders.Add("UserId", uid);
+        }
     }
 
     protected override async Task OnParametersSetAsync()
@@ -269,6 +387,10 @@
             selectedUserTypeString = "Viewer";
             shareAllTables = true;
             selectedTables.Clear();
+            restrictColumns.Clear();
+            selectedColumns.Clear();
+            columnsByTable.Clear();
+            loadingColumns.Clear();
             await LoadDatasetTables();
             await LoadSharedUsers();
         }
@@ -367,6 +489,26 @@
                 shareRequest.Tables = selectedTables.ToList();
             }
 
+            // Per-table column restrictions (only offered in specific-tables mode).
+            shareRequest.Columns = null;
+            if (!shareAllTables && restrictColumns.Count > 0)
+            {
+                var columnMap = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+                foreach (var t in selectedTables)
+                {
+                    if (!restrictColumns.Contains(t)) continue;
+                    var cols = selectedColumns.TryGetValue(t, out var set) ? set : null;
+                    if (cols == null || cols.Count == 0)
+                    {
+                        _toastService.ShowWarning($"Select at least one column for '{t}', or set it to All columns.");
+                        isSharing = false;
+                        return;
+                    }
+                    columnMap[t] = cols.ToList();
+                }
+                if (columnMap.Count > 0) shareRequest.Columns = columnMap;
+            }
+
             var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
             var user = authState.User;
             if (user.Identity?.IsAuthenticated == true)
@@ -386,9 +528,12 @@
                 shareRequest.Email = string.Empty;
                 shareRequest.UserType = DatasetUserType.Viewer;
                 shareRequest.Tables = null;
+                shareRequest.Columns = null;
                 selectedUserTypeString = "Viewer";
                 shareAllTables = true;
                 selectedTables.Clear();
+                restrictColumns.Clear();
+                selectedColumns.Clear();
                 await LoadSharedUsers();
             }
             else

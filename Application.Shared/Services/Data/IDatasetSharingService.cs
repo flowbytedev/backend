@@ -27,4 +27,12 @@ public interface IDatasetSharingService
     /// <summary>Number of users who can access each of the given tables, keyed by table name. A user with
     /// full dataset access counts for every table; a table-scoped user counts only for their scoped tables.</summary>
     Task<Dictionary<string, int>> GetTableShareCountsAsync(string datasetId, IEnumerable<string> tableNames, CancellationToken ct = default);
+
+    /// <summary>The current per-user access to a dataset (type + tables + columns + RLS), for the data-admin
+    /// User Access editor. <see cref="UserDatasetAccessDto.HasAccess"/> is false when the user has no share.</summary>
+    Task<UserDatasetAccessDto> GetUserDatasetAccessAsync(string datasetId, string userId);
+
+    /// <summary>Atomically applies a user's full access to a dataset by user id (upserts the share + reconciles
+    /// table, column and RLS scope). When <see cref="SetUserAccessRequest.Remove"/> is true, all access is removed.</summary>
+    Task<bool> SetUserDatasetAccessAsync(string companyId, string datasetId, string userId, SetUserAccessRequest request);
 }

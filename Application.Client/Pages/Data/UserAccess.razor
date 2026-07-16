@@ -1,0 +1,600 @@
+@page "/data/user-access"
+@using System.Net.Http.Json
+@using Application.Shared.Models
+@using Application.Shared.Models.Data
+@using Application.Shared.Enums
+@using Application.Shared.Authorization
+@inject HttpClient _httpClient
+@inject IToastService _toastService
+@inject AuthenticationStateProvider _authenticationStateProvider
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize(Policy = PolicyNames.DataAdminAccess)]
+
+<PageTitle>User Access</PageTitle>
+
+@if (!canAccess && !isLoading)
+{
+    <div class="flex flex-col items-center justify-center h-64 text-gray-500 gap-2">
+        <p class="text-sm font-semibold text-gray-700">Access Denied</p>
+        <p class="text-xs text-gray-400">You need the Data Admin role to manage user access.</p>
+    </div>
+}
+else
+{
+<div class="ds-page">
+    <div class="ds-header">
+        <div>
+            <h1 class="ds-title">User Access</h1>
+            <p class="ds-subtitle">Grant a user access to a dataset's tables and columns, and set row-level security.</p>
+        </div>
+    </div>
+
+    <div class="ua-grid">
+        <!-- Users -->
+        <div class="ds-card ua-users">
+            <div class="ds-card-toolbar">
+                <div class="ds-search-wrap" style="flex:1">
+                    <svg class="ds-search-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                    <input class="ds-search" type="search" placeholder="Search users…" @bind="userSearch" @bind:event="oninput" @bind:after="SearchUsers" />
+                </div>
+            </div>
+            @if (loadingUsers)
+            {
+                <div class="ds-loading" style="padding:1.5rem 0"><div class="ds-spinner"></div></div>
+            }
+            else
+            {
+                <div class="ua-user-list">
+                    @foreach (var u in users)
+                    {
+                        var member = u;
+                        <button type="button" class="ua-user @(selectedUser?.Id == member.Id ? "ua-user-active" : "")" @onclick="() => SelectUser(member)">
+                            <div class="ua-avatar">@(string.IsNullOrEmpty(member.Email) ? "?" : member.Email[..1].ToUpper())</div>
+                            <div style="min-width:0;text-align:left">
+                                <div class="ua-user-name">@(string.IsNullOrWhiteSpace(member.FullName) ? member.Email : member.FullName)</div>
+                                <div class="ua-user-email">@member.Email</div>
+                            </div>
+                        </button>
+                    }
+                    @if (users.Count == 0)
+                    {
+                        <div class="ds-hint" style="padding:1rem">No users found.</div>
+                    }
+                </div>
+            }
+        </div>
+
+        <!-- Editor -->
+        <div class="ds-card ua-editor">
+            @if (selectedUser == null)
+            {
+                <div class="ua-empty">Select a user to manage their access.</div>
+            }
+            else
+            {
+                <div class="ua-editor-head">
+                    <div class="ua-avatar ua-avatar-lg">@(string.IsNullOrEmpty(selectedUser.Email) ? "?" : selectedUser.Email[..1].ToUpper())</div>
+                    <div style="min-width:0">
+                        <div class="ua-user-name" style="font-size:0.95rem">@(string.IsNullOrWhiteSpace(selectedUser.FullName) ? selectedUser.Email : selectedUser.FullName)</div>
+                        <div class="ua-user-email">@selectedUser.Email</div>
+                    </div>
+                </div>
+
+                <div class="ds-field">
+                    <label class="ds-label">Dataset</label>
+                    <select class="ds-select" @bind="selectedDatasetId" @bind:after="OnDatasetChanged">
+                        <option value="">Select a dataset…</option>
+                        @foreach (var d in datasets)
+                        {
+                            <option value="@d.Id">@d.Name</option>
+                        }
+                    </select>
+                </div>
+
+                @if (!string.IsNullOrEmpty(selectedDatasetId))
+                {
+                    @if (loadingAccess)
+                    {
+                        <div class="ds-loading" style="padding:1.5rem 0"><div class="ds-spinner"></div><span>Loading access…</span></div>
+                    }
+                    else
+                    {
+                        <div class="ds-field">
+                            <label class="ds-label">Access Level</label>
+                            <select class="ds-select" @bind="accessLevel">
+                                <option value="Viewer">Viewer — Can view and query data</option>
+                                <option value="Editor">Editor — Can modify dataset structure</option>
+                                <option value="Admin">Admin — Full access including sharing</option>
+                            </select>
+                        </div>
+
+                        <div class="ds-field">
+                            <label class="ds-label">Tables</label>
+                            <div style="display:flex;gap:1.25rem;margin-bottom:0.5rem">
+                                <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.875rem;cursor:pointer">
+                                    <input type="radio" name="uaTables" checked="@shareAllTables" @onchange="@(() => shareAllTables = true)" /> All tables
+                                </label>
+                                <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.875rem;cursor:pointer">
+                                    <input type="radio" name="uaTables" checked="@(!shareAllTables)" @onchange="@(() => shareAllTables = false)" disabled="@(datasetTables.Count == 0)" /> Specific tables
+                                </label>
+                            </div>
+                            @if (!shareAllTables)
+                            {
+                                @if (datasetTables.Count == 0)
+                                {
+                                    <span class="ds-hint">This dataset has no tables to scope.</span>
+                                }
+                                else
+                                {
+                                    <div style="max-height:280px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;padding:0.5rem;display:flex;flex-direction:column;gap:0.35rem">
+                                        @foreach (var t in datasetTables)
+                                        {
+                                            var table = t;
+                                            var isSel = selectedTables.Contains(table);
+                                            <div>
+                                                <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.8125rem;cursor:pointer">
+                                                    <input type="checkbox" checked="@isSel" @onchange="e => ToggleTable(table, (bool)e.Value!)" />
+                                                    <span style="font-family:ui-monospace,Consolas,monospace">@table</span>
+                                                </label>
+                                                @if (isSel)
+                                                {
+                                                    <div style="margin:0.3rem 0 0 1.6rem;display:flex;flex-direction:column;gap:0.3rem">
+                                                        <div style="display:flex;gap:1rem;font-size:0.75rem;color:#52525b">
+                                                            <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer">
+                                                                <input type="radio" name="uaCols-@table" checked="@(!restrictColumns.Contains(table))" @onchange="() => SetColumnMode(table, false)" /> All columns
+                                                            </label>
+                                                            <label style="display:flex;align-items:center;gap:0.3rem;cursor:pointer">
+                                                                <input type="radio" name="uaCols-@table" checked="@restrictColumns.Contains(table)" @onchange="() => SetColumnMode(table, true)" /> Specific columns
+                                                            </label>
+                                                        </div>
+                                                        @if (restrictColumns.Contains(table))
+                                                        {
+                                                            @if (loadingColumns.Contains(table))
+                                                            {
+                                                                <span class="ds-hint" style="display:flex;align-items:center;gap:0.4rem"><span class="ds-spinner" style="width:12px;height:12px;border-width:1.5px"></span> Loading columns…</span>
+                                                            }
+                                                            else if (columnsByTable.TryGetValue(table, out var cols) && cols.Count > 0)
+                                                            {
+                                                                <div style="display:flex;flex-wrap:wrap;gap:0.3rem 0.9rem;max-height:130px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;padding:0.4rem 0.5rem">
+                                                                    @foreach (var col in cols)
+                                                                    {
+                                                                        var column = col;
+                                                                        <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;cursor:pointer;font-family:ui-monospace,Consolas,monospace">
+                                                                            <input type="checkbox" checked="@(selectedColumns.TryGetValue(table, out var sc) && sc.Contains(column))" @onchange="e => ToggleColumn(table, column, (bool)e.Value!)" />
+                                                                            @column
+                                                                        </label>
+                                                                    }
+                                                                </div>
+                                                            }
+                                                            else
+                                                            {
+                                                                <span class="ds-hint">No columns available to scope for this table.</span>
+                                                            }
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            }
+                        </div>
+
+                        <div class="ds-field">
+                            <label class="ds-label">Row-Level Security</label>
+                            <span class="ds-hint" style="display:block;margin-bottom:0.4rem">Restrict which rows the user sees: for a column, list the values they're allowed. Matched across the dataset's tables.</span>
+                            <div style="display:flex;flex-direction:column;gap:0.4rem">
+                                @foreach (var row in rlsRows)
+                                {
+                                    var r = row;
+                                    <div style="display:flex;gap:0.5rem;align-items:center">
+                                        <input class="ds-input" style="flex:0 0 34%;font-family:ui-monospace,Consolas,monospace" placeholder="column name" @bind="r.Column" />
+                                        <input class="ds-input" style="flex:1" placeholder="allowed values, comma-separated (e.g. FOOD, BEVERAGE)" @bind="r.ValuesCsv" />
+                                        <button type="button" class="btn-icon btn-icon-delete" title="Remove filter" @onclick="() => rlsRows.Remove(r)">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                            <button type="button" class="btn btn-outline" style="margin-top:0.5rem" @onclick="() => rlsRows.Add(new RlsRow())">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                                Add filter
+                            </button>
+                        </div>
+
+                        <div class="ds-form-actions" style="display:flex;gap:0.5rem;margin-top:0.5rem">
+                            <button type="button" class="btn btn-default" @onclick="Save" disabled="@saving">
+                                @if (saving) { <span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px"></span><span>Saving…</span> }
+                                else { <span>Save Access</span> }
+                            </button>
+                            @if (hasExistingAccess)
+                            {
+                                <button type="button" class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca" @onclick="RemoveAccess" disabled="@saving">Remove all access</button>
+                            }
+                        </div>
+                    }
+                }
+            }
+        </div>
+    </div>
+</div>
+}
+
+<style>
+    .ua-grid { display:grid; grid-template-columns: 320px 1fr; gap:1rem; align-items:start; }
+    .ua-users { padding:0; overflow:hidden; }
+    .ua-user-list { max-height:70vh; overflow-y:auto; display:flex; flex-direction:column; }
+    .ua-user { display:flex; align-items:center; gap:0.6rem; padding:0.6rem 0.8rem; background:none; border:none; border-bottom:1px solid #f4f4f5; cursor:pointer; text-align:left; }
+    .ua-user:hover { background:#f9fafb; }
+    .ua-user-active { background:#eef2ff; }
+    .ua-avatar { flex:0 0 auto; width:30px; height:30px; border-radius:50%; background:#e4e4e7; color:#3f3f46; font-size:0.8125rem; font-weight:600; display:flex; align-items:center; justify-content:center; }
+    .ua-avatar-lg { width:38px; height:38px; font-size:0.95rem; }
+    .ua-user-name { font-size:0.8125rem; font-weight:600; color:#18181b; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ua-user-email { font-size:0.6875rem; color:#71717a; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .ua-editor { padding:1.1rem 1.25rem; }
+    .ua-editor-head { display:flex; align-items:center; gap:0.6rem; margin-bottom:1rem; padding-bottom:0.75rem; border-bottom:1px solid #f4f4f5; }
+    .ua-empty { padding:3rem 1rem; text-align:center; color:#a1a1aa; font-size:0.875rem; }
+
+    @@media (max-width: 860px) { .ua-grid { grid-template-columns: 1fr; } }
+
+    [data-theme="dark"] .ua-user { border-bottom-color:#23272f; }
+    [data-theme="dark"] .ua-user:hover { background:#20242c; }
+    [data-theme="dark"] .ua-user-active { background:rgba(99,102,241,0.16); }
+    [data-theme="dark"] .ua-avatar { background:#2b303b; color:#e6e9ef; }
+    [data-theme="dark"] .ua-user-name { color:#f3f4f6; }
+    [data-theme="dark"] .ua-user-email { color:#9aa1ac; }
+    [data-theme="dark"] .ua-editor-head { border-bottom-color:#23272f; }
+    [data-theme="dark"] .ua-empty { color:#6b7280; }
+</style>
+
+@code {
+    [SupplyParameterFromQuery(Name = "c")]
+    public string? c { get; set; }
+
+    private string? companyId;
+    private string? actingUserId;
+    private bool canAccess;
+    private bool isLoading = true;
+
+    private List<UserMention> users = new();
+    private string userSearch = string.Empty;
+    private bool loadingUsers;
+    private UserMention? selectedUser;
+    private CancellationTokenSource? searchCts;
+
+    private List<Dataset> datasets = new();
+    private string selectedDatasetId = string.Empty;
+
+    private bool loadingAccess;
+    private bool hasExistingAccess;
+    private string accessLevel = "Viewer";
+
+    private bool shareAllTables = true;
+    private List<string> datasetTables = new();
+    private HashSet<string> selectedTables = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, List<string>> columnsByTable = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> restrictColumns = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, HashSet<string>> selectedColumns = new(StringComparer.OrdinalIgnoreCase);
+    private HashSet<string> loadingColumns = new(StringComparer.OrdinalIgnoreCase);
+
+    private List<RlsRow> rlsRows = new();
+    private bool saving;
+
+    private class RlsRow
+    {
+        public string Column { get; set; } = string.Empty;
+        public string ValuesCsv { get; set; } = string.Empty;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        companyId = c;
+        if (string.IsNullOrEmpty(companyId))
+        {
+            _toastService.ShowWarning("Company ID is required");
+            isLoading = false;
+            return;
+        }
+
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        actingUserId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        canAccess = user.HasCompanyRole(companyId, "DATA_ADMIN");
+        if (!canAccess) { isLoading = false; return; }
+
+        await LoadDatasets();
+        await SearchUsers();
+        isLoading = false;
+    }
+
+    private void SetHeaders()
+    {
+        _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+        _httpClient.DefaultRequestHeaders.Add("X-Company-Id", companyId!);
+        if (!string.IsNullOrEmpty(actingUserId))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("UserId");
+            _httpClient.DefaultRequestHeaders.Add("UserId", actingUserId);
+        }
+    }
+
+    private async Task LoadDatasets()
+    {
+        SetHeaders();
+        try { datasets = await _httpClient.GetFromJsonAsync<List<Dataset>>("api/datasets") ?? new(); }
+        catch { datasets = new(); }
+    }
+
+    private async Task SearchUsers()
+    {
+        searchCts?.Cancel();
+        var cts = searchCts = new CancellationTokenSource();
+        loadingUsers = true;
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(200, cts.Token);
+            SetHeaders();
+            var url = "api/DataViews/users/search?maxResults=100";
+            if (!string.IsNullOrWhiteSpace(userSearch))
+                url += $"&searchTerm={Uri.EscapeDataString(userSearch)}";
+            var result = await _httpClient.GetFromJsonAsync<List<UserMention>>(url, cts.Token);
+            if (cts.IsCancellationRequested) return;
+            users = result ?? new();
+        }
+        catch (OperationCanceledException) { return; }
+        catch { users = new(); }
+        finally
+        {
+            if (!cts.IsCancellationRequested) { loadingUsers = false; StateHasChanged(); }
+        }
+    }
+
+    private async Task SelectUser(UserMention user)
+    {
+        selectedUser = user;
+        if (!string.IsNullOrEmpty(selectedDatasetId))
+            await LoadAccess();
+    }
+
+    private async Task OnDatasetChanged()
+    {
+        if (string.IsNullOrEmpty(selectedDatasetId)) return;
+        await LoadTables();
+        await LoadAccess();
+    }
+
+    private async Task LoadTables()
+    {
+        datasetTables = new();
+        SetHeaders();
+        try
+        {
+            var response = await _httpClient.GetAsync($"api/datasets/{selectedDatasetId}/tables");
+            if (!response.IsSuccessStatusCode)
+                response = await _httpClient.GetAsync($"api/datasets/{selectedDatasetId}/source-tables");
+            if (response.IsSuccessStatusCode)
+                datasetTables = await response.Content.ReadFromJsonAsync<List<string>>() ?? new();
+        }
+        catch { datasetTables = new(); }
+    }
+
+    private async Task LoadAccess()
+    {
+        if (selectedUser == null || string.IsNullOrEmpty(selectedDatasetId)) return;
+        loadingAccess = true;
+        StateHasChanged();
+
+        // Reset editor state.
+        accessLevel = "Viewer";
+        shareAllTables = true;
+        selectedTables = new(StringComparer.OrdinalIgnoreCase);
+        restrictColumns = new(StringComparer.OrdinalIgnoreCase);
+        selectedColumns = new(StringComparer.OrdinalIgnoreCase);
+        columnsByTable = new(StringComparer.OrdinalIgnoreCase);
+        loadingColumns = new(StringComparer.OrdinalIgnoreCase);
+        rlsRows = new();
+        hasExistingAccess = false;
+
+        try
+        {
+            SetHeaders();
+            var access = await _httpClient.GetFromJsonAsync<UserDatasetAccessDto>(
+                $"api/user-access/{selectedDatasetId}/{selectedUser.Id}");
+            if (access != null && access.HasAccess)
+            {
+                hasExistingAccess = true;
+                accessLevel = access.Type.ToString();
+                shareAllTables = access.Tables.Count == 0;
+                selectedTables = new HashSet<string>(access.Tables, StringComparer.OrdinalIgnoreCase);
+
+                foreach (var kv in access.Columns)
+                {
+                    restrictColumns.Add(kv.Key);
+                    selectedColumns[kv.Key] = new HashSet<string>(kv.Value, StringComparer.OrdinalIgnoreCase);
+                    await EnsureColumnsLoaded(kv.Key);
+                }
+
+                rlsRows = access.Rls
+                    .Select(r => new RlsRow { Column = r.ColumnName, ValuesCsv = string.Join(", ", r.AllowedValues) })
+                    .ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Failed to load access: {ex.Message}");
+        }
+        finally
+        {
+            loadingAccess = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ToggleTable(string table, bool on)
+    {
+        if (on)
+        {
+            selectedTables.Add(table);
+        }
+        else
+        {
+            selectedTables.Remove(table);
+            restrictColumns.Remove(table);
+            selectedColumns.Remove(table);
+        }
+    }
+
+    private async Task SetColumnMode(string table, bool specific)
+    {
+        if (specific)
+        {
+            restrictColumns.Add(table);
+            await EnsureColumnsLoaded(table);
+            if (!selectedColumns.ContainsKey(table))
+                selectedColumns[table] = columnsByTable.TryGetValue(table, out var cols)
+                    ? new HashSet<string>(cols, StringComparer.OrdinalIgnoreCase)
+                    : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+        else
+        {
+            restrictColumns.Remove(table);
+        }
+    }
+
+    private void ToggleColumn(string table, string column, bool on)
+    {
+        if (!selectedColumns.TryGetValue(table, out var set))
+        {
+            set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            selectedColumns[table] = set;
+        }
+        if (on) set.Add(column); else set.Remove(column);
+    }
+
+    private async Task EnsureColumnsLoaded(string table)
+    {
+        if (columnsByTable.ContainsKey(table)) return;
+        loadingColumns.Add(table);
+        StateHasChanged();
+        try
+        {
+            SetHeaders();
+            var cols = await _httpClient.GetFromJsonAsync<List<Column>>(
+                $"api/datasets/{selectedDatasetId}/tables/{Uri.EscapeDataString(table)}/columns");
+            columnsByTable[table] = cols?.Select(cc => cc.Name).Where(n => !string.IsNullOrWhiteSpace(n)).ToList() ?? new();
+        }
+        catch { columnsByTable[table] = new(); }
+        finally { loadingColumns.Remove(table); StateHasChanged(); }
+    }
+
+    private async Task Save()
+    {
+        if (selectedUser == null || string.IsNullOrEmpty(selectedDatasetId)) return;
+
+        if (!shareAllTables && selectedTables.Count == 0)
+        {
+            _toastService.ShowWarning("Select at least one table, or choose 'All tables'.");
+            return;
+        }
+
+        Dictionary<string, List<string>>? columnMap = null;
+        if (!shareAllTables && restrictColumns.Count > 0)
+        {
+            columnMap = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var t in selectedTables)
+            {
+                if (!restrictColumns.Contains(t)) continue;
+                var cols = selectedColumns.TryGetValue(t, out var set) ? set : null;
+                if (cols == null || cols.Count == 0)
+                {
+                    _toastService.ShowWarning($"Select at least one column for '{t}', or set it to All columns.");
+                    return;
+                }
+                columnMap[t] = cols.ToList();
+            }
+            if (columnMap.Count == 0) columnMap = null;
+        }
+
+        var request = new SetUserAccessRequest
+        {
+            Type = accessLevel switch
+            {
+                "Admin" => DatasetUserType.Admin,
+                "Editor" => DatasetUserType.Editor,
+                _ => DatasetUserType.Viewer
+            },
+            Tables = shareAllTables ? null : selectedTables.ToList(),
+            Columns = columnMap,
+            Rls = rlsRows
+                .Where(r => !string.IsNullOrWhiteSpace(r.Column))
+                .Select(r => new RlsFilterItem
+                {
+                    ColumnName = r.Column.Trim(),
+                    AllowedValues = (r.ValuesCsv ?? string.Empty)
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Distinct()
+                        .ToList()
+                })
+                .ToList()
+        };
+
+        saving = true;
+        StateHasChanged();
+        try
+        {
+            SetHeaders();
+            var response = await _httpClient.PutAsJsonAsync(
+                $"api/user-access/{selectedDatasetId}/{selectedUser.Id}", request);
+            if (response.IsSuccessStatusCode)
+            {
+                _toastService.ShowSuccess("Access updated.");
+                hasExistingAccess = true;
+            }
+            else
+            {
+                _toastService.ShowError($"Failed to update access: {await response.Content.ReadAsStringAsync()}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Error updating access: {ex.Message}");
+        }
+        finally
+        {
+            saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RemoveAccess()
+    {
+        if (selectedUser == null || string.IsNullOrEmpty(selectedDatasetId)) return;
+        saving = true;
+        StateHasChanged();
+        try
+        {
+            SetHeaders();
+            var response = await _httpClient.PutAsJsonAsync(
+                $"api/user-access/{selectedDatasetId}/{selectedUser.Id}", new SetUserAccessRequest { Remove = true });
+            if (response.IsSuccessStatusCode)
+            {
+                _toastService.ShowSuccess("Access removed.");
+                await LoadAccess();
+            }
+            else
+            {
+                _toastService.ShowError("Failed to remove access.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Error removing access: {ex.Message}");
+        }
+        finally
+        {
+            saving = false;
+            StateHasChanged();
+        }
+    }
+}

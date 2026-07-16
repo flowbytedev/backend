@@ -30,6 +30,7 @@ public class DatasetsController : ControllerBase
     private readonly Application.Shared.Services.Org.IUserService _userService;
     private readonly IDatasetSharingService _sharingService;
     private readonly IDatasetTableMoveService _tableMoveService;
+    private readonly Application.Shared.Services.Data.IUserDatasetPreferenceService _preferences;
 
     public DatasetsController(
         IDatasetService datasetService,
@@ -39,7 +40,8 @@ public class DatasetsController : ControllerBase
         IIngestionService ingestionService,
         Application.Shared.Services.Org.IUserService userService,
         IDatasetSharingService sharingService,
-        IDatasetTableMoveService tableMoveService)
+        IDatasetTableMoveService tableMoveService,
+        Application.Shared.Services.Data.IUserDatasetPreferenceService preferences)
     {
         _datasetService = datasetService;
         _duckdbService = duckdbService;
@@ -49,6 +51,7 @@ public class DatasetsController : ControllerBase
         _userService = userService;
         _sharingService = sharingService;
         _tableMoveService = tableMoveService;
+        _preferences = preferences;
     }
 
     // GET: api/Datasets/{companyId}
@@ -67,6 +70,72 @@ public class DatasetsController : ControllerBase
 
         var datasets = await _datasetService.GetDatasetsByCompanyAsync(companyId, userId);
         return Ok(datasets);
+    }
+
+    // ---- Per-user pins + default dataset ----------------------------------------------------------
+
+    private (string companyId, string userId, ActionResult? error) PreferenceHeaders()
+    {
+        var companyId = Request.Headers["X-Company-ID"].FirstOrDefault();
+        var userId = Request.Headers["UserId"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(companyId)) return ("", "", BadRequest("Company ID is required"));
+        if (string.IsNullOrWhiteSpace(userId)) return ("", "", BadRequest("User ID is required in headers"));
+        return (companyId, userId, null);
+    }
+
+    // GET: pinned dataset ids + the user's default dataset id.
+    [HttpGet("preferences")]
+    public async Task<ActionResult> GetPreferences(CancellationToken ct)
+    {
+        var (companyId, userId, error) = PreferenceHeaders();
+        if (error != null) return error;
+        var (pinned, defaultId) = await _preferences.GetDatasetPreferencesAsync(companyId, userId, ct);
+        return Ok(new { pinnedDatasetIds = pinned, defaultDatasetId = defaultId });
+    }
+
+    [HttpPut("{id}/pin")]
+    public async Task<ActionResult> SetDatasetPin(string id, [FromQuery] bool pinned, CancellationToken ct)
+    {
+        var (companyId, userId, error) = PreferenceHeaders();
+        if (error != null) return error;
+        await _preferences.SetDatasetPinnedAsync(companyId, userId, id, pinned, ct);
+        return NoContent();
+    }
+
+    [HttpPut("{id}/default")]
+    public async Task<ActionResult> SetDefaultDataset(string id, CancellationToken ct)
+    {
+        var (companyId, userId, error) = PreferenceHeaders();
+        if (error != null) return error;
+        await _preferences.SetDefaultDatasetAsync(companyId, userId, id, ct);
+        return NoContent();
+    }
+
+    [HttpDelete("default")]
+    public async Task<ActionResult> ClearDefaultDataset(CancellationToken ct)
+    {
+        var (companyId, userId, error) = PreferenceHeaders();
+        if (error != null) return error;
+        await _preferences.ClearDefaultDatasetAsync(companyId, userId, ct);
+        return NoContent();
+    }
+
+    [HttpGet("{id}/table-pins")]
+    public async Task<ActionResult<List<string>>> GetTablePins(string id, CancellationToken ct)
+    {
+        var (companyId, userId, error) = PreferenceHeaders();
+        if (error != null) return error;
+        var pins = await _preferences.GetPinnedTablesAsync(companyId, userId, id, ct);
+        return Ok(pins.ToList());
+    }
+
+    [HttpPut("{id}/tables/{tableName}/pin")]
+    public async Task<ActionResult> SetTablePin(string id, string tableName, [FromQuery] bool pinned, CancellationToken ct)
+    {
+        var (companyId, userId, error) = PreferenceHeaders();
+        if (error != null) return error;
+        await _preferences.SetTablePinnedAsync(companyId, userId, id, tableName, pinned, ct);
+        return NoContent();
     }
 
     // GET: api/Datasets/item/{id}
@@ -566,11 +635,30 @@ public class DatasetsController : ControllerBase
             if (!string.IsNullOrWhiteSpace(userId) && !await IsTableAllowedAsync(datasetId, userId, tableName))
                 return Forbid();
 
-            return await _duckdbService.GetTableColumnsAsync(datasetId, tableName);
+            // Prefer the DuckDB (local/snapshot) columns. For an External dataset whose live source table
+            // has no local snapshot, DuckDB returns nothing — fall back to reading the source schema live.
+            List<Column> columns;
+            try { columns = await _duckdbService.GetTableColumnsAsync(datasetId, tableName); }
+            catch { columns = new List<Column>(); }
+
+            if (columns == null || columns.Count == 0)
+            {
+                var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);
+                if (dataset?.SourceType == Application.Shared.Enums.DatasetSourceType.External
+                    && !string.IsNullOrWhiteSpace(dataset.SourceEntityId))
+                {
+                    var schema = await _databaseTableService.GetTableSchemaAsync(
+                        dataset.SourceEntityId!, companyId, tableName, HttpContext.RequestAborted);
+                    if (string.IsNullOrEmpty(schema.Error))
+                        columns = schema.Columns;
+                }
+            }
+
+            return Ok(columns ?? new List<Column>());
         }
         catch (Exception ex)
         {
-            return BadRequest($"Error retrieving tables: {ex.Message}");
+            return BadRequest($"Error retrieving columns: {ex.Message}");
         }
     }
 

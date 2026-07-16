@@ -233,6 +233,8 @@ builder.Services.AddScoped<Application.Shared.Services.Data.IDashboardAgentServi
 // Semantic layer (AI dataset documentation): per-column doc CRUD + the AI generator.
 builder.Services.AddScoped<Application.Shared.Services.Data.IDatasetDocService, Application.Shared.Services.Data.DatasetDocService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.IColumnDocGenerationService, Application.Shared.Services.Data.ColumnDocGenerationService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.IPublicDatasetApiService, Application.Shared.Services.Data.PublicDatasetApiService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.IUserDatasetPreferenceService, Application.Shared.Services.Data.UserDatasetPreferenceService>();
 
 // Query notebooks (MotherDuck-style): notebook/cell CRUD + execution engine + the AI-assist planner.
 builder.Services.AddScoped<Application.Shared.Services.Data.IQueryNotebookService, Application.Shared.Services.Data.QueryNotebookService>();

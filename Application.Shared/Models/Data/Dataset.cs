@@ -51,6 +51,9 @@ public class Dataset
     [MaxLength(500)]
     public string? Path { get; set; } = "C:/duckdb";
 
+    // True for datasets created by an end-user through the app (vs system/seeded). Defaults to true.
+    public bool IsUserDataset { get; set; } = true;
+
     // User who created the dataset
     public string? CreatedBy { get; set; }
     
