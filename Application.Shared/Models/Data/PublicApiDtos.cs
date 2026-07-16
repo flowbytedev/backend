@@ -95,13 +95,31 @@ public class UserRlsFilterDto
     public string CompanyId { get; set; } = string.Empty;
 }
 
-/// <summary>Decrypted connection credentials for a dataset's external source. Server-to-server only.</summary>
+/// <summary>Everything needed to connect to a dataset's source, server-to-server only. For an External
+/// dataset these are the decrypted DB connection details; for a Local dataset it's the DuckDB file path.
+/// <see cref="Password"/> is decrypted — never expose this to a browser.</summary>
 public class DatasetCredentialDto
 {
     public string Id { get; set; } = string.Empty;
     public string DatasetId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Engine as the chat's DatasetType number (0=MSSQL,1=DUCKDB,2=CLICKHOUSE,3=POSTGRESQL,4=MYSQL).</summary>
+    public int Type { get; set; }
+
+    public string Host { get; set; } = string.Empty;
+    public int Port { get; set; }
+    public string DatabaseName { get; set; } = string.Empty;
+    public bool UseSsl { get; set; }
     public string Username { get; set; } = string.Empty;
     public string Password { get; set; } = string.Empty;
+
+    /// <summary>Optional driver hint; empty when the consumer derives it from <see cref="Type"/>.</summary>
+    public string Driver { get; set; } = string.Empty;
+
+    /// <summary>DuckDB file path for a Local dataset (or a DuckDB-file external source); empty otherwise.</summary>
+    public string FilePath { get; set; } = string.Empty;
+
     public string? ApiKey { get; set; }
     public string? ConnectionString { get; set; }
 }

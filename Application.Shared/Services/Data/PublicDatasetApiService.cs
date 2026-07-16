@@ -32,19 +32,22 @@ public class PublicDatasetApiService : IPublicDatasetApiService
     private readonly IDuckdbService _duckdb;
     private readonly IDatabaseTableService _dbTables;
     private readonly IDatasetDocService _docs;
+    private readonly DuckdbOption _duckdbOption;
 
     public PublicDatasetApiService(
         ApplicationDbContext db,
         IDatasetService datasets,
         IDuckdbService duckdb,
         IDatabaseTableService dbTables,
-        IDatasetDocService docs)
+        IDatasetDocService docs,
+        DuckdbOption duckdbOption)
     {
         _db = db;
         _datasets = datasets;
         _duckdb = duckdb;
         _dbTables = dbTables;
         _docs = docs;
+        _duckdbOption = duckdbOption;
     }
 
     public async Task<List<PublicDatasetDto>> GetUserDatasetsAsync(string companyId, string userId, CancellationToken ct = default)
@@ -102,13 +105,20 @@ public class PublicDatasetApiService : IPublicDatasetApiService
         var catalog = new DataCatalogDto();
         foreach (var table in tables)
         {
-            TableDocDto doc;
-            try { doc = await _docs.GetTableDocsAsync(companyId, datasetId, table, snapshotMode, ct); }
+            // Live columns carry the real structural flags (nullable / primary key / type); saved docs carry
+            // the human descriptions. Merging both gives the AI usable column metadata, not stubbed defaults.
+            List<Column> liveColumns;
+            Dictionary<string, ColumnDocDto> savedDocs;
+            try
+            {
+                liveColumns = await _docs.GetLiveColumnsAsync(companyId, datasetId, table, snapshotMode, ct);
+                savedDocs = await _docs.GetSavedColumnDocsAsync(companyId, datasetId, table, snapshotMode, ct);
+            }
             catch { continue; } // unreadable/locked table → skip rather than fail the whole catalog
 
-            IEnumerable<ColumnDocDto> columns = doc.Columns;
+            IEnumerable<Column> columns = liveColumns;
             if (columnRestrictions.TryGetValue(table, out var allowed))
-                columns = columns.Where(c => allowed.Contains(c.ColumnName));
+                columns = columns.Where(c => allowed.Contains(c.Name));
 
             catalog.TableMetadata.Add(new TableMetadataDto
             {
@@ -116,17 +126,21 @@ public class PublicDatasetApiService : IPublicDatasetApiService
                 TableName = table,
                 TableDescription = string.Empty, // no table-level description stored in this backend yet
                 CompanyId = companyId,
-                Columns = columns.Select(c => new ColumnMetadataDto
+                Columns = columns.Select(c =>
                 {
-                    DatasetId = datasetId,
-                    TableName = table,
-                    ColumnName = c.ColumnName,
-                    ColumnDescription = c.Description ?? string.Empty,
-                    DataType = c.DataType ?? string.Empty,
-                    MaxLength = null,
-                    IsNullable = true,
-                    IsPrimaryKey = false,
-                    TableRelations = new() // no FK/relationship catalog in this backend yet
+                    savedDocs.TryGetValue(c.Name, out var doc);
+                    return new ColumnMetadataDto
+                    {
+                        DatasetId = datasetId,
+                        TableName = table,
+                        ColumnName = c.Name,
+                        ColumnDescription = doc?.Description ?? string.Empty,
+                        DataType = c.DataType ?? string.Empty,
+                        MaxLength = null,                       // not captured by the current schema reads
+                        IsNullable = c.IsNullable,              // real for DuckDB/local; defaults true for live external
+                        IsPrimaryKey = c.IsPrimaryKey ?? false, // real for DuckDB/local; false for live external
+                        TableRelations = new()                  // no FK/relationship catalog in this backend yet
+                    };
                 }).ToList()
             });
         }
@@ -205,8 +219,21 @@ public class PublicDatasetApiService : IPublicDatasetApiService
     {
         var dataset = await _datasets.GetDatasetAsync(datasetId, userId);
         if (dataset == null || dataset.CompanyId != companyId) return null;
+
+        // Local dataset: no external DB connection — hand back the DuckDB file location + engine so a
+        // co-located consumer can open it directly (a remote consumer should route queries via the backend).
         if (dataset.SourceType != DatasetSourceType.External || string.IsNullOrWhiteSpace(dataset.SourceEntityId))
-            return null; // Local datasets have no external connection credentials
+        {
+            var dir = string.IsNullOrWhiteSpace(dataset.Path) ? _duckdbOption.DuckdbFilePath : dataset.Path!;
+            return new DatasetCredentialDto
+            {
+                Id = datasetId,
+                DatasetId = datasetId,
+                Name = dataset.Name ?? string.Empty,
+                Type = DuckDbType,
+                FilePath = $"{(dir ?? string.Empty).TrimEnd('/', '\\')}/{datasetId}.duckdb"
+            };
+        }
 
         var conn = await _dbTables.GetDecryptedConnectionAsync(dataset.SourceEntityId!, companyId, ct);
         if (conn == null) return null;
@@ -215,8 +242,15 @@ public class PublicDatasetApiService : IPublicDatasetApiService
         {
             Id = conn.Id,
             DatasetId = datasetId,
+            Name = dataset.Name ?? string.Empty,
+            Type = (int)conn.DatabaseType, // aligns 1:1 with the chat's DatasetType for these engines
+            Host = conn.Host ?? string.Empty,
+            Port = conn.Port,
+            DatabaseName = conn.DatabaseName ?? string.Empty,
+            UseSsl = conn.UseSsl,
             Username = conn.Username ?? string.Empty,
             Password = conn.SecretEncrypted ?? string.Empty, // decrypted in-memory by GetDecryptedConnectionAsync
+            FilePath = conn.FilePath ?? string.Empty,         // set for a DuckDB-file external source
             ApiKey = null,
             ConnectionString = null
         };
