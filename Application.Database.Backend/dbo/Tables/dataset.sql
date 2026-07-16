@@ -7,7 +7,8 @@ CREATE TABLE [dbo].[dataset] (
     [created_by]  NVARCHAR (MAX) NULL,
     [modified_at] DATETIME2 (7)  NULL,
     [source_type]      INT            DEFAULT ((0)) NOT NULL,
-    [source_entity_id] NVARCHAR (450) NULL
+    [source_entity_id] NVARCHAR (450) NULL,
+    [path]             NVARCHAR (500) DEFAULT ('C:/duckdb') NULL
 );
 GO
 

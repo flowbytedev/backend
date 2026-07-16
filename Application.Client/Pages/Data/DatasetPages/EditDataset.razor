@@ -64,6 +64,12 @@ else
                         <ValidationMessage For="() => datasetModel.Description" class="ds-error" />
                     </div>
 
+                    <div class="ds-field">
+                        <label class="ds-label" for="ds-path">Storage Path</label>
+                        <InputText id="ds-path" class="ds-input" @bind-Value="datasetModel.Path" placeholder="C:/duckdb" />
+                        <span class="ds-hint">Folder where this dataset's DuckDB file is stored. Defaults to C:/duckdb.</span>
+                    </div>
+
                     <div class="ds-form-actions">
                         <button type="submit" class="btn btn-default" disabled="@isSubmitting">
                             @if (isSubmitting)

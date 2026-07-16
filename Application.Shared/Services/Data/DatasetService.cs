@@ -5,6 +5,7 @@ using Azure.Core;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
+using System.IO;
 
 namespace Application.Shared.Services.Data;
 public class DatasetService : IDatasetService
@@ -83,7 +84,11 @@ public class DatasetService : IDatasetService
         dataset.Id = Guid.NewGuid().ToString(); // DuckDB won't auto-gen string Id
         dataset.CreatedBy = userId;
         dataset.CreatedAt = DateTime.UtcNow;
-        
+
+        // Fall back to the app-wide DuckDB folder when the user didn't specify a storage path.
+        if (string.IsNullOrWhiteSpace(dataset.Path))
+            dataset.Path = _option.DuckdbFilePath;
+
         _context.Dataset.Add(dataset);
 
         // Create an admin entry in DatasetUser for the creator
@@ -127,6 +132,14 @@ public class DatasetService : IDatasetService
         if (!hasAccess)
             return null;
 
+        // Capture the current stored path first — if the user changes it we move the DuckDB file so the
+        // dataset's data follows the new location instead of being orphaned.
+        var oldPath = await _context.Dataset.AsNoTracking()
+            .Where(d => d.Id == id).Select(d => d.Path).FirstOrDefaultAsync();
+
+        if (string.IsNullOrWhiteSpace(dataset.Path))
+            dataset.Path = string.IsNullOrWhiteSpace(oldPath) ? _option.DuckdbFilePath : oldPath;
+
         dataset.ModifiedAt = DateTime.UtcNow;
         _context.Entry(dataset).State = EntityState.Modified;
 
@@ -141,7 +154,32 @@ public class DatasetService : IDatasetService
             throw;
         }
 
+        MoveDatasetFileIfNeeded(oldPath, dataset.Path, id);
+
         return dataset;
+    }
+
+    // Relocates a dataset's DuckDB file ({dir}/{id}.duckdb) when its storage directory changes on edit.
+    // Best-effort: the dataset row already points at the new path, so a locked/open file just skips the
+    // move rather than failing the update.
+    private void MoveDatasetFileIfNeeded(string? oldPath, string? newPath, string datasetId)
+    {
+        var oldDir = string.IsNullOrWhiteSpace(oldPath) ? _option.DuckdbFilePath : oldPath!;
+        var newDir = string.IsNullOrWhiteSpace(newPath) ? _option.DuckdbFilePath : newPath!;
+        if (string.Equals(oldDir, newDir, StringComparison.OrdinalIgnoreCase)) return;
+
+        try
+        {
+            var oldFile = $"{oldDir}/{datasetId}.duckdb";
+            var newFile = $"{newDir}/{datasetId}.duckdb";
+            if (!File.Exists(oldFile) || File.Exists(newFile)) return;
+            Directory.CreateDirectory(newDir);
+            File.Move(oldFile, newFile);
+        }
+        catch
+        {
+            // Swallow — never fail the dataset update over a file relocation.
+        }
     }
 
     public async Task<bool> DeleteDatasetAsync(string id, string userId)

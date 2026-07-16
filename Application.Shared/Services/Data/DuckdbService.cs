@@ -1,8 +1,9 @@
-﻿using Application.Shared.Models;
+﻿using Application.Shared.Data;
+using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Azure.Core;
 using DuckDB.NET.Data;
-//using Microsoft.EntityFrameworkCore.Metadata.Internal;
+using Microsoft.EntityFrameworkCore;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -20,23 +21,74 @@ namespace Application.Shared.Services.Data;
 public class DuckdbService : IDuckdbService
 {
     private readonly DuckdbOption _option;
-    //private readonly IDatasetService _datasetService;
+    private readonly ApplicationDbContext _db;
 
-    public DuckdbService(DuckdbOption option)
+    // Per-request (scoped) cache of datasetId -> storage directory, so a loop over many tables/datasets
+    // doesn't re-query the dataset row for every DuckDB call. Safe because path changes happen in a
+    // separate request; this instance never outlives one.
+    private readonly Dictionary<string, string> _dirCache = new();
+
+    public DuckdbService(DuckdbOption option, ApplicationDbContext db)
     {
         _option = option;
-        //_datasetService = datasetService;
+        _db = db;
     }
 
     public DatasetService? DatasetService { get; set; }
 
+    // ---- Per-dataset storage path resolution -------------------------------------------------------
+    // Each dataset stores its files under its own Path (chosen at create/edit); when unset we fall back
+    // to the app-wide Duckdb:DuckdbFilePath. The DuckDB file itself is always "{dir}/{datasetId}.duckdb".
+
+    /// <summary>The storage directory for a dataset id, from the dataset's Path (else the app default).</summary>
+    private string ResolveDir(string datasetId)
+    {
+        if (string.IsNullOrWhiteSpace(datasetId)) return NormalizeDir(_option.DuckdbFilePath);
+        if (_dirCache.TryGetValue(datasetId, out var cached)) return cached;
+
+        string dir;
+        try
+        {
+            var path = _db.Dataset.AsNoTracking()
+                .Where(d => d.Id == datasetId)
+                .Select(d => d.Path)
+                .FirstOrDefault();
+            dir = string.IsNullOrWhiteSpace(path) ? _option.DuckdbFilePath : path!;
+        }
+        catch
+        {
+            // Column not deployed yet / lookup failed — never hard-break DuckDB over a schema lag.
+            dir = _option.DuckdbFilePath;
+        }
+
+        dir = NormalizeDir(dir);
+        _dirCache[datasetId] = dir;
+        return dir;
+    }
+
+    private static string DirFor(Dataset dataset, string fallback)
+        => NormalizeDir(string.IsNullOrWhiteSpace(dataset.Path) ? fallback : dataset.Path!);
+
+    // A user-typed path can carry trailing spaces or a trailing separator ("C:/duckdb/", "C:/duckdb ")
+    // that would make "{dir}/{id}.duckdb" miss the file — trim both so resolution is exact.
+    private static string NormalizeDir(string dir) => (dir ?? string.Empty).Trim().TrimEnd('/', '\\');
+
+    /// <summary>The full DuckDB file path for a dataset id.</summary>
+    private string ResolveDbPath(string datasetId) => $"{ResolveDir(datasetId)}/{datasetId}.duckdb";
+
+    /// <summary>The full DuckDB file path for a loaded dataset (no DB lookup — uses its own Path).</summary>
+    private string ResolveDbPath(Dataset dataset) => $"{DirFor(dataset, _option.DuckdbFilePath)}/{dataset.Id}.duckdb";
+
     public async Task CreateDatabaseAsync(Dataset dataset)
     {
-
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{dataset.Id}.duckdb";
+        var dir = DirFor(dataset, _option.DuckdbFilePath);
+        var duckdbFilePath = ResolveDbPath(dataset);
 
         if (File.Exists(duckdbFilePath))
             throw new InvalidOperationException("Database already exists.");
+
+        // Ensure the chosen directory exists — a user-picked path may not exist yet.
+        Directory.CreateDirectory(dir);
 
         // Create a new DuckDB database file
         // openning a connection will create the file
@@ -47,23 +99,20 @@ public class DuckdbService : IDuckdbService
             // close the connection
             await duckDBConnection.CloseAsync();
         }
-
-
-
     }
 
     public bool DatabaseExists(string datasetId)
-        => File.Exists($"{_option.DuckdbFilePath}/{datasetId}.duckdb");
+        => File.Exists(ResolveDbPath(datasetId));
 
     public async Task EnsureDatabaseAsync(string datasetId)
     {
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
 
         if (File.Exists(duckdbFilePath))
             return;
 
-        // Make sure the configured folder exists, then open a connection — that creates the file.
-        Directory.CreateDirectory(_option.DuckdbFilePath);
+        // Make sure the dataset's folder exists, then open a connection — that creates the file.
+        Directory.CreateDirectory(ResolveDir(datasetId));
         using var duckDBConnection = new DuckDBConnection($"Data Source={duckdbFilePath}");
         await duckDBConnection.OpenAsync();
         await duckDBConnection.CloseAsync();
@@ -71,10 +120,10 @@ public class DuckdbService : IDuckdbService
 
     public async Task DeleteDatabaseAsync(Dataset dataset)
     {
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{dataset.Id}.duckdb";
+        var duckdbFilePath = ResolveDbPath(dataset);
 
         if (!File.Exists(duckdbFilePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
 
         await Task.Run(() => File.Delete(duckdbFilePath));
     }
@@ -82,10 +131,10 @@ public class DuckdbService : IDuckdbService
     public async Task UpdateDatabaseAsync(string datasetId, string updateQuery)
     {
 
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
 
         if (!File.Exists(duckdbFilePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
 
         using var connection = new DuckDBConnection($"DataSource={duckdbFilePath}");
         await connection.OpenAsync();
@@ -100,7 +149,7 @@ public class DuckdbService : IDuckdbService
     public async Task<List<T>> ExecuteQueryAsync<T>(string databasePath, string query, Func<IDataReader, T> mapFunction)
     {
         if (!File.Exists(databasePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{databasePath}'.");
 
         var results = new List<T>();
         
@@ -122,10 +171,10 @@ public class DuckdbService : IDuckdbService
 
     public async Task<List<T>> ExecuteQueryAsync<T>(Dataset dataset, string query, Func<IDataReader, T> mapFunction)
     {
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{dataset.Id}.duckdb";
+        var duckdbFilePath = ResolveDbPath(dataset);
 
         if (!File.Exists(duckdbFilePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
 
         var results = new List<T>();
         
@@ -147,10 +196,10 @@ public class DuckdbService : IDuckdbService
 
     public async Task<string> ExecuteQueryAsync(Dataset dataset, string query)
     {
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{dataset.Id}.duckdb";
+        var duckdbFilePath = ResolveDbPath(dataset);
 
         if (!File.Exists(duckdbFilePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
 
         // var results = new List<T>();
 
@@ -182,10 +231,10 @@ public class DuckdbService : IDuckdbService
     public async Task<IEnumerable<string>> GetTablesAsync(string datasetId)
     {
 
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
 
         if (!File.Exists(duckdbFilePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
 
         try
         {
@@ -210,13 +259,13 @@ public class DuckdbService : IDuckdbService
 
     public long GetDatabaseFileSize(string datasetId)
     {
-        var path = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var path = ResolveDbPath(datasetId);
         return File.Exists(path) ? new FileInfo(path).Length : 0;
     }
 
     public async Task<(int TableCount, long TotalRows)> GetDatasetTableSummaryAsync(string datasetId, CancellationToken ct = default)
     {
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath))
             return (0, 0);
 
@@ -247,7 +296,7 @@ public class DuckdbService : IDuckdbService
     public async Task<List<TableStats>> GetTableStatsAsync(string datasetId, CancellationToken ct = default)
     {
         var result = new List<TableStats>();
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath))
             return result;
 
@@ -377,7 +426,7 @@ public class DuckdbService : IDuckdbService
 
         try
         {
-            var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+            var duckdbFilePath = ResolveDbPath(datasetId);
 
             // Escape embedded quotes — this table name comes straight from the request route.
             var safeTableName = tableName.Replace("'", "''");
@@ -423,10 +472,10 @@ public class DuckdbService : IDuckdbService
 
     public async Task<Table> CreateTableAsync(Table table)
     {
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{table.DatasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(table.DatasetId);
 
         if (!File.Exists(duckdbFilePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
 
         try
         {
@@ -474,8 +523,8 @@ public class DuckdbService : IDuckdbService
     public async Task<MoveTableResult> MoveTableAsync(string sourceDatasetId, string tableName, string targetDatasetId, CancellationToken ct = default)
     {
         var result = new MoveTableResult();
-        var sourceDbPath = $"{_option.DuckdbFilePath}/{sourceDatasetId}.duckdb";
-        var targetDbPath = $"{_option.DuckdbFilePath}/{targetDatasetId}.duckdb";
+        var sourceDbPath = ResolveDbPath(sourceDatasetId);
+        var targetDbPath = ResolveDbPath(targetDatasetId);
 
         if (!File.Exists(sourceDbPath))
         {
@@ -550,10 +599,10 @@ public class DuckdbService : IDuckdbService
     // create a function that returns the list of the columns from a table in the database
     public async Task<List<Column>> GetTableColumnsAsync(string datasetId, string tableName)
     {
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
 
         if (!File.Exists(duckdbFilePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
 
         List<Column> columns = new List<Column>();
 
@@ -618,10 +667,10 @@ public class DuckdbService : IDuckdbService
 
     public async Task<bool> ImportCsvDataAsync(string datasetId, string tableName, Stream csvStream)
     {
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
 
         if (!File.Exists(duckdbFilePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
 
         try
         {
@@ -689,7 +738,7 @@ public class DuckdbService : IDuckdbService
 
     public async Task<bool> ImportCsvDataAsync(string companyId, string datasetId, string tableName, Stream csvStream, bool createDataset = false, bool createTable = false)
     {
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
 
         if (createDataset)
         {
@@ -706,7 +755,7 @@ public class DuckdbService : IDuckdbService
         else
         {
             if (!File.Exists(duckdbFilePath))
-                throw new FileNotFoundException("Database not found.");
+                throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
         }
 
         
@@ -789,10 +838,10 @@ public class DuckdbService : IDuckdbService
     public async Task<TableDataResult> QueryTableDataAsync(TableDataQuery query)
     {
 
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{query.DatasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(query.DatasetId);
         Console.WriteLine($"------- DuckDB file path: {duckdbFilePath}");
         if (!File.Exists(duckdbFilePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
 
 
         // var dataset = DatasetService != null ? await DatasetService.GetDatasetAsync(query.DatasetId) : null;
@@ -926,7 +975,7 @@ public class DuckdbService : IDuckdbService
             return result;
         }
 
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath))
         {
             result.Error = "Dataset database not found.";
@@ -996,7 +1045,7 @@ public class DuckdbService : IDuckdbService
             return result;
         }
 
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath))
         {
             result.Error = "Dataset database not found.";
@@ -1049,7 +1098,7 @@ public class DuckdbService : IDuckdbService
             return result;
         }
 
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath))
         {
             result.Error = "Dataset database not found.";
@@ -1149,7 +1198,7 @@ public class DuckdbService : IDuckdbService
         Func<DuckDBConnection, Task<List<(string Name, string Type)>>> resolveTargetColumns, CancellationToken ct)
     {
         var result = new ImportValidationResult();
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath))
         {
             result.Error = "Dataset database not found.";
@@ -1248,7 +1297,7 @@ public class DuckdbService : IDuckdbService
     public async Task<FilePeekResult> PeekFileAsync(string datasetId, Stream fileStream, ImportFileFormat format, CancellationToken ct = default)
     {
         var result = new FilePeekResult();
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath))
         {
             result.Error = "Dataset database not found.";
@@ -1323,7 +1372,7 @@ public class DuckdbService : IDuckdbService
     public async Task<ImportResult> ImportFileAsync(string datasetId, string tableName, Stream fileStream, ImportFileFormat format, ImportMode mode, List<string> keyColumns, bool skipInvalidRows, bool createIfMissing = false, CancellationToken ct = default)
     {
         var result = new ImportResult();
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath))
         {
             // Include the resolved path: an empty/leading-slash path means the process's Duckdb:DuckdbFilePath
@@ -1735,9 +1784,9 @@ public class DuckdbService : IDuckdbService
         // if (dataset == null)
         //     throw new FileNotFoundException("Dataset not found.");
 
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath))
-            throw new FileNotFoundException("Database not found.");
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
 
         try
         {
@@ -1789,7 +1838,7 @@ public class DuckdbService : IDuckdbService
     public async Task<RowMutationResult> UpdateRowAsync(string datasetId, string tableName, long rowId, Dictionary<string, string?> values, CancellationToken ct = default)
     {
         var result = new RowMutationResult();
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath)) { result.Error = "Dataset database not found."; return result; }
         if (values == null || values.Count == 0) { result.Error = "No values to update."; return result; }
 
@@ -1824,7 +1873,7 @@ public class DuckdbService : IDuckdbService
     public async Task<RowMutationResult> InsertRowAsync(string datasetId, string tableName, Dictionary<string, string?> values, CancellationToken ct = default)
     {
         var result = new RowMutationResult();
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath)) { result.Error = "Dataset database not found."; return result; }
 
         try
@@ -1857,7 +1906,7 @@ public class DuckdbService : IDuckdbService
     public async Task<RowMutationResult> DeleteRowAsync(string datasetId, string tableName, long rowId, CancellationToken ct = default)
     {
         var result = new RowMutationResult();
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath)) { result.Error = "Dataset database not found."; return result; }
 
         try
@@ -1880,7 +1929,7 @@ public class DuckdbService : IDuckdbService
     public async Task<BulkRowEditResult> ApplyRowChangesAsync(string datasetId, string tableName, BulkRowEditRequest changes, CancellationToken ct = default)
     {
         var result = new BulkRowEditResult();
-        var duckdbFilePath = $"{_option.DuckdbFilePath}/{datasetId}.duckdb";
+        var duckdbFilePath = ResolveDbPath(datasetId);
         if (!File.Exists(duckdbFilePath)) { result.Error = "Dataset database not found."; return result; }
         if (changes == null) { result.Error = "No changes provided."; return result; }
 

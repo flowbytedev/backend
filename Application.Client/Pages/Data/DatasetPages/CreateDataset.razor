@@ -54,6 +54,12 @@ else
                 </div>
 
                 <div class="ds-field">
+                    <label class="ds-label" for="ds-path">Storage Path</label>
+                    <InputText id="ds-path" class="ds-input" @bind-Value="datasetModel.Path" placeholder="C:/duckdb" />
+                    <span class="ds-hint">Folder where this dataset's DuckDB file is stored. Defaults to C:/duckdb.</span>
+                </div>
+
+                <div class="ds-field">
                     <label class="ds-label">Data Source <span style="color:#ef4444">*</span></label>
                     <div style="display:flex;gap:1.25rem;margin-top:0.25rem">
                         <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.875rem;cursor:pointer">
