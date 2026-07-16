@@ -75,6 +75,9 @@ Data,Dashboard Links,(in Data pages),View links for table,GET,GMRL_VIEW_DATA,
 Data,Dashboard Links,(in Data pages),Connect/Disconnect link,POST/DELETE,GMRL_EDIT_DATA,
 Data,Dataset Sharing,(in Data pages),View dataset users,GET,GMRL_VIEW_DATA,
 Data,Dataset Sharing,(in Data pages),Share/Grant/Update/Revoke/Remove access,POST/PUT/DELETE,GMRL_EDIT_DATA,
+Data,User Access,/data/user-access,View user access management page,GET,GMRL_DATA_ADMIN,Page access via DataAdminAccess policy; ADMIN always
+Data,User Access,/data/user-access,Get/Set a user's dataset+table+column access and RLS,GET/PUT,GMRL_DATA_ADMIN,api/user-access - DATA_ADMIN only (ADMIN always); does NOT require EDIT_DATA
+Data,User Access,/data/user-access,Search company users for the picker,GET,GMRL_DATA_ADMIN,api/DataViews/users/search (VIEW_DATA/QUERY/DATA_ADMIN)
 Sales,Real-Time Sales Dashboard,/realtime/sales-dashboard,View real-time sales,GET,GMRL_SALES,Page access via SalesRead policy
 Sales,Real-Time Sales Dashboard,/realtime/sales-dashboard,Ingest sales data,POST,GMRL_SALES,Endpoint is AllowAnonymous (external POS ingest)
 Sales,Real-Time Sales Dashboard,/realtime/sales-dashboard,Get sales / by store / by scheme / analytics,GET,GMRL_SALES,
