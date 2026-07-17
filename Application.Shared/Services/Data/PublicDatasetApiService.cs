@@ -54,6 +54,20 @@ public class PublicDatasetApiService : IPublicDatasetApiService
     {
         var datasets = await _datasets.GetDatasetsByCompanyAsync(companyId, userId);
 
+        // Only surface datasets that have data docs — i.e. at least one documented table for the dataset's
+        // mode (Local reads snapshot docs, External reads live-source docs). Keeps the list consistent with
+        // what the catalog will actually return.
+        var documentedDatasetKeys = (await _db.DatasetColumnDoc
+                .Where(d => d.CompanyId == companyId)
+                .Select(d => new { d.DatasetId, d.IsSnapshot })
+                .Distinct()
+                .ToListAsync(ct))
+            .Select(x => $"{x.DatasetId}|{x.IsSnapshot}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        datasets = datasets
+            .Where(d => documentedDatasetKeys.Contains($"{d.Id}|{d.SourceType != DatasetSourceType.External}"))
+            .ToList();
+
         // One lookup gives entityId -> engine for every connected external DB, so we can map the chat's
         // numeric `type` without a per-dataset cross-context query. Our (reordered) DataSourceType aligns
         // 1:1 with the chat's DatasetType for these engines, so (int)DatabaseType is the value.
@@ -93,6 +107,16 @@ public class PublicDatasetApiService : IPublicDatasetApiService
 
         var snapshotMode = dataset.SourceType != DatasetSourceType.External; // Local→DuckDB; External→live source
         var tables = await ListAccessibleTablesAsync(userId, dataset, ct);
+
+        // Only include tables that have data docs for this mode (documented in DatasetColumnDoc). Curated
+        // tables only — undocumented tables are hidden from the catalog even if the user can access them.
+        var documentedTables = (await _db.DatasetColumnDoc
+                .Where(d => d.CompanyId == companyId && d.DatasetId == datasetId && d.IsSnapshot == snapshotMode)
+                .Select(d => d.TableName)
+                .Distinct()
+                .ToListAsync(ct))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        tables = tables.Where(t => documentedTables.Contains(t)).ToList();
 
         // Per-user column restrictions for this dataset: table -> allowed column set (absent = all columns).
         var columnRestrictions = (await _db.DatasetUserColumn
