@@ -165,21 +165,9 @@ else
                                         <button class="btn-icon" title="@(IsDefaultDataset(dataset.Id) ? "Default dataset (click to clear)" : "Set as default")" @onclick="() => ToggleDefault(dataset)" style="@(IsDefaultDataset(dataset.Id) ? "color:#f59e0b" : "")">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsDefaultDataset(dataset.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                                         </button>
-                                        <button class="btn-icon btn-icon-open" title="Open dataset" @onclick="() => OpenDataset(dataset)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
+                                        <button class="btn-icon" title="More actions" @onclick="e => OpenActionsMenu(e, dataset)">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
                                         </button>
-                                        <button class="btn-icon btn-icon-share" title="Share dataset" @onclick="() => ShareDataset(dataset)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
-                                        </button>
-                                        @if (canEdit)
-                                        {
-                                        <button class="btn-icon btn-icon-edit" title="Edit dataset" @onclick="() => EditDataset(dataset)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                                        </button>
-                                        <button class="btn-icon btn-icon-delete" title="Delete dataset" @onclick="() => DeleteDataset(dataset)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                                        </button>
-                                        }
                                     </div>
                                 </td>
                             </tr>
@@ -193,6 +181,15 @@ else
                 var ds = contextMenuDataset;
                 <div class="ctx-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault="true"></div>
                 <div class="ctx-menu" style="left:@(contextMenuX)px; top:@(contextMenuY)px;">
+                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = TogglePin(ds); }">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsPinned(ds.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+                        @(IsPinned(ds.Id) ? "Unpin" : "Pin to top")
+                    </button>
+                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = ToggleDefault(ds); }">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsDefaultDataset(ds.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                        @(IsDefaultDataset(ds.Id) ? "Clear default" : "Set as default")
+                    </button>
+                    <div class="ctx-sep"></div>
                     <button class="ctx-item" @onclick="() => { CloseContextMenu(); OpenDataset(ds); }">
                         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
                         Open dataset
@@ -686,6 +683,15 @@ else
         contextMenuDataset = dataset;
         contextMenuX = e.ClientX;
         contextMenuY = e.ClientY;
+    }
+
+    // Opened from the row's 3-dot button (far right of the row). Anchor the ~200px-wide menu to the
+    // button's left so it opens inward and stays on screen, rather than at the click point.
+    private void OpenActionsMenu(MouseEventArgs e, Dataset dataset)
+    {
+        contextMenuDataset = dataset;
+        contextMenuX = Math.Max(8, e.ClientX - 200);
+        contextMenuY = e.ClientY + 12;
     }
 
     private void CloseContextMenu() => contextMenuDataset = null;

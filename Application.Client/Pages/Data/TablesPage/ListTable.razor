@@ -206,38 +206,8 @@ else
                                         <button class="btn-icon" title="@(IsTablePinned(tableName) ? "Unpin" : "Pin to top")" @onclick="() => ToggleTablePin(tableName)" style="@(IsTablePinned(tableName) ? "color:#4f46e5" : "color:#71717a")">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsTablePinned(tableName) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
                                         </button>
-                                        <button class="btn-icon btn-icon-open" title="View / edit table data" @onclick="() => ViewTable(tableName)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
-                                        </button>
-                                        <button class="btn-icon" title="Query this table" @onclick="() => QueryTable(tableName)" style="color:#71717a">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
-                                        </button>
-                                        <button class="btn-icon" title="API docs" @onclick="() => OpenApiDocs(tableName)" style="color:#71717a">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-                                        </button>
-                                        <button class="btn-icon" title="Document this table's columns" @onclick="() => DocumentTable(tableName)" style="color:#0891b2">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
-                                        </button>
-                                        <button class="btn-icon" title="Download CSV" @onclick="() => DownloadTable(tableName)" style="color:#71717a">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                                        </button>
-                                        @if (canEdit)
-                                        {
-                                        <button class="btn-icon btn-icon-share" title="Share this table" @onclick="() => OpenShareTable(tableName)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
-                                        </button>
-                                        }
-                                        @if (canEdit)
-                                        {
-                                        <button class="btn-icon" title="Connect this table to a dashboard" @onclick="() => OpenConnect(tableName)" style="color:#7c3aed">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                                        </button>
-                                        }
-                                        <button class="btn-icon btn-icon-edit" title="Edit table structure" @onclick="() => EditTable(tableName)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                                        </button>
-                                        <button class="btn-icon btn-icon-delete" title="Delete table" @onclick="() => DeleteTable(tableName)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                                        <button class="btn-icon" title="More actions" @onclick="e => OpenActionsMenu(e, tableName)">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
                                         </button>
                                     </div>
                                 </td>
@@ -252,6 +222,11 @@ else
                 var t = contextMenuTable;
                 <div class="ctx-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault="true"></div>
                 <div class="ctx-menu" style="left:@(contextMenuX)px; top:@(contextMenuY)px;">
+                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = ToggleTablePin(t); }">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsTablePinned(t) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+                        @(IsTablePinned(t) ? "Unpin" : "Pin to top")
+                    </button>
+                    <div class="ctx-sep"></div>
                     <button class="ctx-item" @onclick="() => { CloseContextMenu(); ViewTable(t); }">
                         <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
                         View / edit table data
@@ -1363,6 +1338,15 @@ else
         contextMenuTable = tableName;
         contextMenuX = e.ClientX;
         contextMenuY = e.ClientY;
+    }
+
+    // Opened from the row's 3-dot button (far right of the row). Anchor the ~200px-wide menu to the
+    // button's left so it opens inward and stays on screen, rather than at the click point.
+    private void OpenActionsMenu(MouseEventArgs e, string tableName)
+    {
+        contextMenuTable = tableName;
+        contextMenuX = Math.Max(8, e.ClientX - 200);
+        contextMenuY = e.ClientY + 12;
     }
 
     private void CloseContextMenu() => contextMenuTable = null;
