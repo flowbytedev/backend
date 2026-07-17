@@ -41,9 +41,24 @@ else
 
                 <div class="ds-field">
                     <label class="ds-label" for="ds-name">Dataset Name <span style="color:#ef4444">*</span></label>
-                    <InputText id="ds-name" class="ds-input" @bind-Value="datasetModel.Name" placeholder="e.g., Sales Analytics 2024" />
+                    <input id="ds-name" class="ds-input" @bind="datasetModel.Name" @bind:event="oninput" @bind:after="OnNameInput" placeholder="e.g., Sales Analytics 2024" />
                     <ValidationMessage For="@(() => datasetModel.Name)" class="ds-error" />
-                    <span class="ds-hint">Use a descriptive name that identifies the dataset's purpose</span>
+                    @if (nameChecking)
+                    {
+                        <span class="ds-hint">Checking availability…</span>
+                    }
+                    else if (nameError != null)
+                    {
+                        <span class="ds-error">@nameError</span>
+                    }
+                    else if (nameAvailable)
+                    {
+                        <span class="ds-hint" style="color:#16a34a">✓ This name is available</span>
+                    }
+                    else
+                    {
+                        <span class="ds-hint">Use a descriptive name that identifies the dataset's purpose. Must be unique within your company.</span>
+                    }
                 </div>
 
                 <div class="ds-field">
@@ -97,7 +112,7 @@ else
                 }
 
                 <div class="ds-form-actions">
-                    <button type="submit" class="btn btn-default" disabled="@isSubmitting">
+                    <button type="submit" class="btn btn-default" disabled="@(isSubmitting || nameChecking || nameError != null)">
                         @if (isSubmitting)
                         {
                             <span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px;margin-right:2px"></span>
@@ -148,6 +163,37 @@ else
     private string selectedSourceEntityId = string.Empty;
     private List<DatabaseEntityOptionDto> sourceDatabases = new();
 
+    // Live dataset-name uniqueness check (names are unique per company).
+    private bool nameChecking;
+    private bool nameAvailable;
+    private string? nameError;
+    private System.Threading.CancellationTokenSource? nameCts;
+
+    private async Task OnNameInput()
+    {
+        nameError = null;
+        nameAvailable = false;
+        nameCts?.Cancel();
+        var name = datasetModel.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name)) { nameChecking = false; return; }
+
+        var cts = nameCts = new System.Threading.CancellationTokenSource();
+        nameChecking = true;
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(350, cts.Token); // debounce keystrokes
+            var available = await _httpClient.GetFromJsonAsync<bool>(
+                $"api/datasets/name-available?name={Uri.EscapeDataString(name)}", cts.Token);
+            if (cts.Token.IsCancellationRequested) return;
+            nameAvailable = available;
+            nameError = available ? null : "A dataset with this name already exists in this company.";
+        }
+        catch (OperationCanceledException) { }
+        catch { /* ignore check failures — the server still enforces uniqueness on submit */ }
+        finally { if (!cts.IsCancellationRequested) { nameChecking = false; StateHasChanged(); } }
+    }
+
     [SupplyParameterFromQuery]
     public string? c { get; set; }
 
@@ -195,6 +241,11 @@ else
 
     private async Task HandleValidSubmit()
     {
+        if (nameError != null)
+        {
+            _toastService.ShowWarning(nameError);
+            return;
+        }
         if (isExternal && string.IsNullOrWhiteSpace(selectedSourceEntityId))
         {
             _toastService.ShowWarning("Select a source database for the external dataset.");

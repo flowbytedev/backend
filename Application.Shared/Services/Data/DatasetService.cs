@@ -79,8 +79,22 @@ public class DatasetService : IDatasetService
             .ToListAsync();
     }
 
+    public async Task<bool> IsNameAvailableAsync(string companyId, string name, string? excludeId = null)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        var trimmed = name.Trim().ToLower();
+        return !await _context.Dataset.AsNoTracking().AnyAsync(d =>
+            d.CompanyId == companyId &&
+            (excludeId == null || d.Id != excludeId) &&
+            d.Name != null && d.Name.ToLower() == trimmed);
+    }
+
     public async Task<Dataset?> CreateDatasetAsync(Dataset dataset, string userId)
     {
+        // Dataset names are unique per company (case-insensitive).
+        if (!await IsNameAvailableAsync(dataset.CompanyId, dataset.Name ?? string.Empty))
+            throw new InvalidOperationException($"A dataset named '{dataset.Name?.Trim()}' already exists in this company.");
+
         dataset.Id = Guid.NewGuid().ToString(); // DuckDB won't auto-gen string Id
         dataset.CreatedBy = userId;
         dataset.CreatedAt = DateTime.UtcNow;
@@ -131,6 +145,10 @@ public class DatasetService : IDatasetService
 
         if (!hasAccess)
             return null;
+
+        // Dataset names are unique per company (case-insensitive) — exclude this dataset from the check.
+        if (!await IsNameAvailableAsync(dataset.CompanyId, dataset.Name ?? string.Empty, id))
+            throw new InvalidOperationException($"A dataset named '{dataset.Name?.Trim()}' already exists in this company.");
 
         // Capture the current stored path first — if the user changes it we move the DuckDB file so the
         // dataset's data follows the new location instead of being orphaned.

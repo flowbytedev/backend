@@ -53,8 +53,16 @@ else
                 </div>
                 <div class="ds-field" style="margin-bottom:0">
                     <label class="ds-label">Table Name</label>
-                    <InputText class="ds-input" @bind-Value="tableModel.TableName" placeholder="e.g., customers" />
+                    <input class="ds-input" @bind="tableModel.TableName" @bind:event="oninput" @bind:after="OnTableNameInput" placeholder="e.g., customers" />
                     <ValidationMessage For="@(() => tableModel.TableName)" class="ds-error" />
+                    @if (tableChecking)
+                    {
+                        <span class="ds-hint">Checking availability…</span>
+                    }
+                    else if (tableNameTaken)
+                    {
+                        <span class="ds-error">A table with this name already exists in this dataset.</span>
+                    }
                 </div>
             </div>
 
@@ -120,7 +128,7 @@ else
             <!-- Actions -->
             <div class="ds-form-actions" style="justify-content:flex-end">
                 <button type="button" class="btn btn-outline" @onclick="GoBack" disabled="@isSubmitting">Cancel</button>
-                <button type="submit" class="btn btn-default" disabled="@(!tableModel.Columns.Any() || isSubmitting)">
+                <button type="submit" class="btn btn-default" disabled="@(!tableModel.Columns.Any() || isSubmitting || tableChecking || tableNameTaken)">
                     @if (isSubmitting)
                     {
                         <span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px"></span>
@@ -178,6 +186,16 @@ else
         canEdit = authState.User.HasCompanyRole(companyId, "EDIT_DATA");
         if (!canEdit) return;
 
+        // Ensure the tenant + user headers are set for this page's own requests (name check, dataset load).
+        _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+        _httpClient.DefaultRequestHeaders.Add("X-Company-Id", companyId);
+        var uid = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrEmpty(uid))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("UserId");
+            _httpClient.DefaultRequestHeaders.Add("UserId", uid);
+        }
+
         Dataset = await _httpClient.GetFromJsonAsync<Dataset>($"api/datasets/{datasetId}");
 
         if (Action == "edit")
@@ -188,6 +206,35 @@ else
 
         if (Action != "edit")
             AddColumn();
+    }
+
+    // Live table-name uniqueness check (table names are unique within the dataset). Skipped in edit mode,
+    // where the table's own name is expected to already exist.
+    private bool tableChecking;
+    private bool tableNameTaken;
+    private System.Threading.CancellationTokenSource? tableCts;
+
+    private async Task OnTableNameInput()
+    {
+        tableNameTaken = false;
+        tableCts?.Cancel();
+        if (Action == "edit") { tableChecking = false; return; }
+
+        var name = tableModel.TableName?.Trim();
+        if (string.IsNullOrWhiteSpace(name) || string.IsNullOrEmpty(datasetId)) { tableChecking = false; return; }
+
+        var cts = tableCts = new System.Threading.CancellationTokenSource();
+        tableChecking = true;
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(350, cts.Token); // debounce keystrokes
+            tableNameTaken = await _httpClient.GetFromJsonAsync<bool>(
+                $"api/datasets/{datasetId}/tables/{Uri.EscapeDataString(name)}/exists", cts.Token);
+        }
+        catch (OperationCanceledException) { }
+        catch { /* ignore check failures — the server still enforces uniqueness on create */ }
+        finally { if (!cts.IsCancellationRequested) { tableChecking = false; StateHasChanged(); } }
     }
 
     private void AddColumn() { tableModel.Columns.Add(new Column()); StateHasChanged(); }
@@ -208,6 +255,8 @@ else
 
         var duplicates = tableModel.Columns.GroupBy(col => col.Name.ToLower()).Where(g => g.Count() > 1).Select(g => g.Key);
         if (duplicates.Any()) { _toastService.ShowWarning($"Duplicate column names: {string.Join(", ", duplicates)}"); return; }
+
+        if (Action != "edit" && tableNameTaken) { _toastService.ShowWarning("A table with this name already exists in this dataset."); return; }
 
         try
         {

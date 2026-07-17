@@ -21,6 +21,13 @@ public interface IDatasetService
     Task<Dataset?> UpdateDatasetAsync(string id, Dataset dataset, string userId);
     Task<bool> DeleteDatasetAsync(string id, string userId);
 
+    /// <summary>
+    /// True when <paramref name="name"/> is not already used by another dataset in the company (names must
+    /// be unique per company, case-insensitive). Pass <paramref name="excludeId"/> when editing so the
+    /// dataset's own current name doesn't count as a clash. An empty name is treated as unavailable.
+    /// </summary>
+    Task<bool> IsNameAvailableAsync(string companyId, string name, string? excludeId = null);
+
     // New methods for chat functionality
     Task<List<Dataset>> GetDatasetsByIdsAsync(List<string> datasetIds, string companyId, string userId);
     Task<List<Dataset>> SearchDatasetsAsync(string query, string companyId, string userId);

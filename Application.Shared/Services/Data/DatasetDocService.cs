@@ -42,6 +42,13 @@ public interface IDatasetDocService
     /// (case-insensitive). Lets callers enrich a schema they already have without re-reading columns.
     /// </summary>
     Task<Dictionary<string, ColumnDocDto>> GetSavedColumnDocsAsync(string companyId, string datasetId, string tableName, bool snapshotMode, CancellationToken ct = default);
+
+    /// <summary>
+    /// Names of the dataset's tables that already have at least one saved column doc in the given layer
+    /// (<paramref name="snapshotMode"/> true = DuckDB snapshot; false = live source). Lets table lists
+    /// badge which tables are documented without loading each table's docs.
+    /// </summary>
+    Task<List<string>> GetDocumentedTablesAsync(string companyId, string datasetId, bool snapshotMode, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -112,6 +119,13 @@ public class DatasetDocService : IDatasetDocService
             },
             StringComparer.OrdinalIgnoreCase);
     }
+
+    public async Task<List<string>> GetDocumentedTablesAsync(string companyId, string datasetId, bool snapshotMode, CancellationToken ct = default)
+        => await _db.DatasetColumnDoc.AsNoTracking()
+            .Where(d => d.CompanyId == companyId && d.DatasetId == datasetId && d.IsSnapshot == snapshotMode)
+            .Select(d => d.TableName)
+            .Distinct()
+            .ToListAsync(ct);
 
     public async Task<TableDocDto> SaveColumnDocsAsync(string companyId, string datasetId, string tableName, bool snapshotMode, string? userId, List<SaveColumnDocRequest> edits, CancellationToken ct = default)
     {

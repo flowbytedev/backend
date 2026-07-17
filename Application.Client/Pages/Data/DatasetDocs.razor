@@ -51,6 +51,7 @@ else
         <DatasetTablePicker CompanyId="@(companyId ?? string.Empty)"
                             UserId="@userId"
                             TableLabel="Table"
+                            ShowDocsBadge="true"
                             @bind-DatasetId="selectedDatasetId"
                             @bind-DatasetId:after="OnDatasetPicked"
                             @bind-TableName="selectedTable"
@@ -126,6 +127,10 @@ else
     [SupplyParameterFromQuery(Name = "t")]
     public string? t { get; set; }
 
+    // Optional deep-link mode: "false" opens on the live Source layer (external datasets), else Snapshot.
+    [SupplyParameterFromQuery(Name = "snapshot")]
+    public bool? snapshot { get; set; }
+
     private string? companyId;
     private string? userId;
     private bool isLoading = true;
@@ -170,11 +175,12 @@ else
         isLoading = false;
 
         // Deep link from the Tables page: preselect the dataset + table (the picker loads its own lists) and
-        // load docs right away. Deep links reference DuckDB snapshot tables.
+        // load docs right away. The Tables page passes ?snapshot=false when the table was chosen from an
+        // external dataset's live Source view, so the picker opens on Source and selects that table.
         if (!string.IsNullOrEmpty(d))
         {
             selectedDatasetId = d;
-            snapshotMode = true;
+            snapshotMode = snapshot ?? true;
             if (!string.IsNullOrEmpty(t))
             {
                 selectedTable = t;

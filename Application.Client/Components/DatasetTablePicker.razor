@@ -126,6 +126,12 @@
                             <span class="dtp-trigger-title dtp-mono">@st.Name</span>
                             <span class="dtp-trigger-sub">@TableDetail(st)</span>
                         }
+                        else if (!string.IsNullOrEmpty(TableName))
+                        {
+                            @* An externally-set table (e.g. a deep link) that isn't in the loaded list yet —
+                               still show it as selected rather than falling back to the placeholder. *@
+                            <span class="dtp-trigger-title dtp-mono">@TableName</span>
+                        }
                         else
                         {
                             <span class="dtp-trigger-placeholder">@TablePlaceholder</span>
@@ -168,6 +174,10 @@
                                                 @if (opt.Live)
                                                 {
                                                     <span class="dtp-tag dtp-tag-live">live source</span>
+                                                }
+                                                @if (opt.Documented)
+                                                {
+                                                    <span class="dtp-tag dtp-tag-docs" title="This table already has column documentation">docs</span>
                                                 }
                                                 @if (opt.Stats is { } ts)
                                                 {
@@ -226,6 +236,10 @@
     /// datasets — it never requests the admin-gated <c>source-tables</c> endpoint.</summary>
     [Parameter] public bool CanViewSource { get; set; } = true;
 
+    /// <summary>When true, the table list badges tables that already have column docs (for the current
+    /// snapshot/source layer). Opt-in so hosts that don't care skip the extra fetch.</summary>
+    [Parameter] public bool ShowDocsBadge { get; set; }
+
     /// <summary>Optional preloaded datasets. When supplied the component uses them instead of fetching
     /// (and skips the stats call + the UserId requirement) — pass this when the parent already has the list.</summary>
     [Parameter] public List<Dataset>? Datasets { get; set; }
@@ -248,13 +262,14 @@
     private bool _loadingTables;
     private bool _datasetsLoaded;
     private string? _tablesLoadedFor;
+    private bool _tablesLoadedSnapshot = true;
     private List<Dataset>? _providedRef;
 
     private ElementReference _searchRef;
     private bool _pendingFocus;
 
     private DatasetOption? SelectedDatasetOption => _datasets.FirstOrDefault(d => d.Dataset.Id == DatasetId);
-    private TableOption? SelectedTableOption => _tables.FirstOrDefault(t => t.Name == TableName);
+    private TableOption? SelectedTableOption => _tables.FirstOrDefault(t => string.Equals(t.Name, TableName, StringComparison.OrdinalIgnoreCase));
     private bool IsExternal => SelectedDatasetOption?.Dataset.SourceType == DatasetSourceType.External;
 
     private List<DatasetOption> FilteredDatasets =>
@@ -288,8 +303,10 @@
             await LoadDatasetsAsync();
         }
 
-        // React to a dataset set from the outside (e.g. a deep link) that we haven't loaded tables for yet.
-        if (ShowTable && !string.IsNullOrWhiteSpace(CompanyId) && DatasetId != _tablesLoadedFor)
+        // React to a dataset OR mode set from the outside (e.g. a deep link) that we haven't loaded the
+        // matching table list for yet — the layer (snapshot vs live source) determines which tables apply.
+        if (ShowTable && !string.IsNullOrWhiteSpace(CompanyId)
+            && (DatasetId != _tablesLoadedFor || SnapshotMode != _tablesLoadedSnapshot))
             await LoadTablesAsync();
     }
 
@@ -348,6 +365,7 @@
     private async Task LoadTablesAsync()
     {
         _tablesLoadedFor = DatasetId;
+        _tablesLoadedSnapshot = SnapshotMode;
         _tables = new();
         // When the host manages its own table list (ShowTable=false) we still own the dataset/mode, but
         // there's nothing to fetch here.
@@ -375,10 +393,21 @@
                                 .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
             }
 
+            // Which tables already have docs, for the layer we're showing (source layer when live, else
+            // snapshot). Opt-in via ShowDocsBadge so non-docs hosts skip the extra request.
+            HashSet<string>? documented = null;
+            if (ShowDocsBadge)
+            {
+                var docs = await SafeGetAsync<List<string>>(
+                    $"api/datasets/{DatasetId}/documented-tables?snapshot={(live ? "false" : "true")}");
+                documented = docs?.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+
             _tables = names.Select(n => new TableOption(
                 n,
                 stats != null && stats.TryGetValue(n, out var ts) ? ts : null,
-                live)).ToList();
+                live,
+                documented != null && documented.Contains(n))).ToList();
         }
         catch
         {
@@ -548,7 +577,7 @@
     }
 
     private record DatasetOption(Dataset Dataset, DatasetStats? Stats);
-    private record TableOption(string Name, TableStats? Stats, bool Live);
+    private record TableOption(string Name, TableStats? Stats, bool Live, bool Documented = false);
 }
 
 <style>
@@ -622,6 +651,7 @@
     .dtp-tag-local { color: #075985; background: #e0f2fe; }
     .dtp-tag-ext { color: #9a3412; background: #ffedd5; }
     .dtp-tag-live { color: #166534; background: #dcfce7; }
+    .dtp-tag-docs { color: #0369a1; background: #e0f2fe; }
     .dtp-stat { font-size: 0.6875rem; color: #71717a; font-variant-numeric: tabular-nums; }
     .dtp-stat-dim { color: #a1a1aa; }
 
@@ -656,6 +686,7 @@
     [data-theme="dark"] .dtp-tag-local { color: #bae6fd; background: rgba(14,165,233,0.18); }
     [data-theme="dark"] .dtp-tag-ext { color: #fed7aa; background: rgba(234,88,12,0.20); }
     [data-theme="dark"] .dtp-tag-live { color: #bbf7d0; background: rgba(22,163,74,0.22); }
+    [data-theme="dark"] .dtp-tag-docs { color: #bae6fd; background: rgba(14,165,233,0.20); }
     [data-theme="dark"] .dtp-seg { border-color: #2b303b; }
     [data-theme="dark"] .dtp-seg-btn { background: #181a20; color: #9aa1ac; }
     [data-theme="dark"] .dtp-seg-btn + .dtp-seg-btn { border-left-color: #2b303b; }

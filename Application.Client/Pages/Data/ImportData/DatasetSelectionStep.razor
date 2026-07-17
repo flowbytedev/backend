@@ -27,9 +27,9 @@
 
         <div style="display:flex;gap:0.75rem;align-items:flex-end">
             <div class="ds-field" style="flex:1;margin-bottom:0">
-                <input class="ds-input" type="text" placeholder="New dataset name" @bind="newDatasetName" @bind:event="oninput" />
+                <input class="ds-input" type="text" placeholder="New dataset name" @bind="newDatasetName" @bind:event="oninput" @bind:after="OnNewNameInput" />
             </div>
-            <button class="btn btn-outline" @onclick="CreateNewDataset" disabled="@(string.IsNullOrWhiteSpace(newDatasetName) || isCreatingDataset)">
+            <button class="btn btn-outline" @onclick="CreateNewDataset" disabled="@(string.IsNullOrWhiteSpace(newDatasetName) || isCreatingDataset || nameChecking || nameTaken)">
                 @if (isCreatingDataset)
                 {
                     <span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px"></span>
@@ -42,6 +42,14 @@
                 }
             </button>
         </div>
+        @if (nameChecking)
+        {
+            <span class="ds-hint">Checking availability…</span>
+        }
+        else if (nameTaken)
+        {
+            <span class="ds-error">A dataset with this name already exists in this company.</span>
+        }
     }
     else
     {
@@ -50,11 +58,19 @@
             <p style="font-size:0.9375rem;font-weight:600;color:#18181b;margin:0">No Datasets Found</p>
             <p style="font-size:0.875rem;color:#71717a;margin:0">Create your first dataset to get started</p>
             <div style="display:flex;gap:0.75rem;align-items:center;width:100%;max-width:360px">
-                <input class="ds-input" type="text" style="flex:1" placeholder="Dataset name" @bind="newDatasetName" @bind:event="oninput" />
-                <button class="btn btn-default" @onclick="CreateNewDataset" disabled="@(string.IsNullOrWhiteSpace(newDatasetName) || isCreatingDataset)">
+                <input class="ds-input" type="text" style="flex:1" placeholder="Dataset name" @bind="newDatasetName" @bind:event="oninput" @bind:after="OnNewNameInput" />
+                <button class="btn btn-default" @onclick="CreateNewDataset" disabled="@(string.IsNullOrWhiteSpace(newDatasetName) || isCreatingDataset || nameChecking || nameTaken)">
                     @if (isCreatingDataset) { <span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px"></span> } else { <span>Create</span> }
                 </button>
             </div>
+            @if (nameChecking)
+            {
+                <span class="ds-hint">Checking availability…</span>
+            }
+            else if (nameTaken)
+            {
+                <span class="ds-error">A dataset with this name already exists in this company.</span>
+            }
         </div>
     }
 
@@ -89,7 +105,43 @@
     private string selectedDatasetId = string.Empty;
     private string newDatasetName = string.Empty;
 
+    // Live dataset-name uniqueness check (names are unique per company).
+    private bool nameChecking;
+    private bool nameTaken;
+    private System.Threading.CancellationTokenSource? nameCts;
+
     protected override async Task OnInitializedAsync() => await LoadDatasets();
+
+    private async Task OnNewNameInput()
+    {
+        nameTaken = false;
+        nameCts?.Cancel();
+        var name = newDatasetName?.Trim();
+        if (string.IsNullOrWhiteSpace(name)) { nameChecking = false; return; }
+
+        var cts = nameCts = new System.Threading.CancellationTokenSource();
+        nameChecking = true;
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(350, cts.Token); // debounce keystrokes
+            EnsureCompanyHeader();
+            var available = await _httpClient.GetFromJsonAsync<bool>(
+                $"api/datasets/name-available?name={Uri.EscapeDataString(name)}", cts.Token);
+            if (cts.Token.IsCancellationRequested) return;
+            nameTaken = !available;
+        }
+        catch (OperationCanceledException) { }
+        catch { /* ignore check failures — the server still enforces uniqueness on create */ }
+        finally { if (!cts.IsCancellationRequested) { nameChecking = false; StateHasChanged(); } }
+    }
+
+    private void EnsureCompanyHeader()
+    {
+        if (string.IsNullOrEmpty(CompanyId)) return;
+        _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+        _httpClient.DefaultRequestHeaders.Add("X-Company-Id", CompanyId);
+    }
 
     private async Task LoadDatasets()
     {
@@ -113,7 +165,7 @@
 
     private async Task CreateNewDataset()
     {
-        if (string.IsNullOrWhiteSpace(newDatasetName)) return;
+        if (string.IsNullOrWhiteSpace(newDatasetName) || nameTaken || nameChecking) return;
         try
         {
             isCreatingDataset = true;

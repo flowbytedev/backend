@@ -31,6 +31,7 @@ public class DatasetsController : ControllerBase
     private readonly IDatasetSharingService _sharingService;
     private readonly IDatasetTableMoveService _tableMoveService;
     private readonly Application.Shared.Services.Data.IUserDatasetPreferenceService _preferences;
+    private readonly IDatasetDocService _docService;
 
     public DatasetsController(
         IDatasetService datasetService,
@@ -41,7 +42,8 @@ public class DatasetsController : ControllerBase
         Application.Shared.Services.Org.IUserService userService,
         IDatasetSharingService sharingService,
         IDatasetTableMoveService tableMoveService,
-        Application.Shared.Services.Data.IUserDatasetPreferenceService preferences)
+        Application.Shared.Services.Data.IUserDatasetPreferenceService preferences,
+        IDatasetDocService docService)
     {
         _datasetService = datasetService;
         _duckdbService = duckdbService;
@@ -52,6 +54,7 @@ public class DatasetsController : ControllerBase
         _sharingService = sharingService;
         _tableMoveService = tableMoveService;
         _preferences = preferences;
+        _docService = docService;
     }
 
     // GET: api/Datasets/{companyId}
@@ -70,6 +73,21 @@ public class DatasetsController : ControllerBase
 
         var datasets = await _datasetService.GetDatasetsByCompanyAsync(companyId, userId);
         return Ok(datasets);
+    }
+
+    // GET: api/datasets/name-available?name=...&excludeId=... — is a dataset name free within the company?
+    // Used by the create/edit/import forms for live "name already taken" feedback. Names are unique per
+    // company (case-insensitive); pass excludeId when editing so the dataset's own name doesn't clash.
+    [HttpGet("name-available")]
+    public async Task<ActionResult<bool>> IsDatasetNameAvailable([FromQuery] string name, [FromQuery] string? excludeId = null)
+    {
+        var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
+        if (string.IsNullOrWhiteSpace(companyId))
+            return BadRequest("Company ID is required");
+        if (!User.HasCompanyRole(companyId, "EDIT_DATA"))
+            return Forbid();
+
+        return Ok(await _datasetService.IsNameAvailableAsync(companyId, name ?? string.Empty, excludeId));
     }
 
     // ---- Per-user pins + default dataset ----------------------------------------------------------
@@ -177,6 +195,11 @@ public class DatasetsController : ControllerBase
 
             return CreatedAtAction(nameof(GetDataset), new { id = created.Id }, created);
         }
+        catch (InvalidOperationException ex)
+        {
+            // Business-rule violation (e.g. duplicate name) → 409 so the UI can show it as a clean conflict.
+            return Conflict(ex.Message);
+        }
         catch (Exception ex)
         {
             return BadRequest($"Error creating dataset: {ex.Message}");
@@ -205,6 +228,11 @@ public class DatasetsController : ControllerBase
                 return NotFound();
 
             return Ok(updated);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Business-rule violation (e.g. duplicate name) → 409 so the UI can show it as a clean conflict.
+            return Conflict(ex.Message);
         }
         catch (Exception ex)
         {
@@ -262,11 +290,37 @@ public class DatasetsController : ControllerBase
         if (!await DatasetExists(table.DatasetId, userId))
             return NotFound($"Dataset with ID '{table.DatasetId}' not found.");
 
+        // Table names must be unique within the dataset (case-insensitive). The message intentionally
+        // contains "already exists" — the import wizard keys off that phrase to treat it as a re-import
+        // into the existing table (append/replace/upsert) rather than a hard failure.
+        var existingTables = await _duckdbService.GetTablesAsync(table.DatasetId) ?? Enumerable.Empty<string>();
+        if (existingTables.Any(t => string.Equals(t, table.TableName, StringComparison.OrdinalIgnoreCase)))
+            return Conflict($"A table named '{table.TableName}' already exists in this dataset.");
 
         await _duckdbService.CreateTableAsync(table);
 
 
         return CreatedAtAction(nameof(GetTable), new { datasetId = table.DatasetId, tableName = table.TableName }, table);
+    }
+
+    // GET: api/datasets/{datasetId}/tables/{tableName}/exists — is this table name already used in the
+    // dataset (case-insensitive)? Used by the Create Table form for live "name already taken" feedback.
+    [HttpGet("{datasetId}/tables/{tableName}/exists")]
+    public async Task<ActionResult<bool>> TableExists(string datasetId, string tableName)
+    {
+        var userId = Request.Headers["UserId"].ToString();
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest("User ID is required in headers");
+
+        var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
+        if (!User.HasCompanyRole(companyId, "EDIT_DATA"))
+            return Forbid();
+
+        if (!await DatasetExists(datasetId, userId))
+            return NotFound($"Dataset with ID '{datasetId}' not found.");
+
+        var tables = await _duckdbService.GetTablesAsync(datasetId) ?? Enumerable.Empty<string>();
+        return Ok(tables.Any(t => string.Equals(t, tableName, StringComparison.OrdinalIgnoreCase)));
     }
 
     // POST: api/Datasets/infer-schema
@@ -588,6 +642,30 @@ public class DatasetsController : ControllerBase
             names = names.Where(n => allowed.Contains(n));
 
         return Ok(names.ToList());
+    }
+
+    // GET: api/datasets/{datasetId}/documented-tables?snapshot=true — names of tables that already have
+    // saved column docs for the given layer (snapshot = DuckDB, false = live source), so table lists can
+    // badge which tables are documented. snapshot is ignored (treated as true) for Local datasets.
+    [HttpGet("{datasetId}/documented-tables")]
+    public async Task<ActionResult<IEnumerable<string>>> GetDocumentedTables(string datasetId, [FromQuery] bool snapshot = true)
+    {
+        var userId = Request.Headers["UserId"].ToString();
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest("User ID is required in headers");
+
+        var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
+        if (!User.HasCompanyRole(companyId, "VIEW_DATA", "QUERY", "DATA_ADMIN"))
+            return Forbid();
+
+        var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);
+        if (dataset == null)
+            return NotFound($"Dataset with ID '{datasetId}' not found.");
+
+        // Local datasets only ever have snapshot docs; only External datasets can be documented live.
+        var snapshotMode = dataset.SourceType == Application.Shared.Enums.DatasetSourceType.External ? snapshot : true;
+        var names = await _docService.GetDocumentedTablesAsync(companyId, datasetId, snapshotMode, HttpContext.RequestAborted);
+        return Ok(names);
     }
 
     // GET: api/Datasets/{datasetId}/tables

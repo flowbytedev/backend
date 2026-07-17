@@ -133,6 +133,10 @@ else
                                         {
                                             <svg title="Pinned" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#4f46e5;flex-shrink:0"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
                                         }
+                                        @if (IsDocumented(tableName))
+                                        {
+                                            <span title="This table has column documentation" style="font-size:0.625rem;font-weight:700;letter-spacing:0.03em;padding:0.05rem 0.4rem;border-radius:9999px;background:#e0f2fe;color:#0369a1;text-transform:uppercase;flex-shrink:0">Docs</span>
+                                        }
                                     </div>
                                 </td>
                                 @{ var ts = TableStatFor(tableName); }
@@ -1028,6 +1032,10 @@ else
     private TableStats? TableStatFor(string name) =>
         tableStats.TryGetValue(name, out var v) ? v : null;
 
+    // Tables that already have column docs for the current view (snapshot vs live source) — badged "DOCS".
+    private HashSet<string> documentedTables = new(StringComparer.OrdinalIgnoreCase);
+    private bool IsDocumented(string name) => documentedTables.Contains(name);
+
     private static string FormatBytes(long bytes)
     {
         if (bytes <= 0) return "0 B";
@@ -1220,6 +1228,7 @@ else
                 await LoadTablePins();
                 ApplyFilterAndSort();
                 await LoadTableStats();
+                await LoadDocumentedTables();
             }
             else if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
@@ -1263,6 +1272,22 @@ else
             }
         }
         catch { /* stats are supplementary — the table list still renders without them */ }
+    }
+
+    // Names of tables that already have column docs for the current view (source layer when viewing an
+    // external dataset's live source, otherwise the DuckDB snapshot) — used to badge them "DOCS".
+    private async Task LoadDocumentedTables()
+    {
+        try
+        {
+            await SetUserHeaderAsync();
+            var snap = (isExternal && !snapshotMode) ? "false" : "true";
+            var names = await _httpClient.GetFromJsonAsync<List<string>>(
+                $"api/Datasets/{datasetId}/documented-tables?snapshot={snap}");
+            documentedTables = names?.ToHashSet(StringComparer.OrdinalIgnoreCase) ?? new(StringComparer.OrdinalIgnoreCase);
+            StateHasChanged();
+        }
+        catch { /* doc badges are supplementary — the table list still renders without them */ }
     }
 
     private void HandleSearch()
@@ -1355,7 +1380,10 @@ else
     private void ViewTable(string tableName) => _navigationManager.NavigateTo($"/data/view?c={companyId}&DatasetId={datasetId}&TableName={tableName}");
     private void QueryTable(string tableName) => _navigationManager.NavigateTo($"/data/query?c={companyId}&DatasetId={datasetId}&TableName={tableName}");
     private void EditTable(string tableName) => _navigationManager.NavigateTo($"/data/tables/edit?c={companyId}&d={datasetId}&t={tableName}");
-    private void DocumentTable(string tableName) => _navigationManager.NavigateTo($"/data/docs?c={companyId}&d={datasetId}&t={Uri.EscapeDataString(tableName)}");
+    // Carry the current view mode so the docs page opens on the matching layer: Source (snapshot=false)
+    // when viewing an external dataset's live source, otherwise the snapshot. The table is auto-selected.
+    private void DocumentTable(string tableName) => _navigationManager.NavigateTo(
+        $"/data/docs?c={companyId}&d={datasetId}&t={Uri.EscapeDataString(tableName)}&snapshot={((isExternal && !snapshotMode) ? "false" : "true")}");
     private void GoBack() => _navigationManager.NavigateTo($"/data/datasets?c={companyId}");
 
     private async Task DownloadTable(string tableName)
