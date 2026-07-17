@@ -42,6 +42,7 @@
                                     DatasetPlaceholder="Dataset…"
                                     DatasetId="@(_datasetId ?? string.Empty)"
                                     DatasetIdChanged="OnDatasetPicked"
+                                    CanViewSource="@CanViewSource"
                                     @bind-SnapshotMode="_snapshotMode"
                                     @bind-SnapshotMode:after="LoadTablesAsync" />
             }
@@ -462,6 +463,9 @@
     [Parameter] public NotebookCellDto Cell { get; set; } = new();
     [Parameter] public string NotebookId { get; set; } = string.Empty;
     [Parameter] public string? CompanyId { get; set; }
+    /// <summary>Whether the user may query an External dataset's live source (data admins only). When false
+    /// the picker hides the Source/Snapshot toggle and the cell stays on the Snapshot layer.</summary>
+    [Parameter] public bool CanViewSource { get; set; } = true;
     [Parameter] public List<Dataset> Datasets { get; set; } = new();
     [Parameter] public List<NotebookCellDto> AvailableReferences { get; set; } = new();
     [Parameter] public bool ShowDragHandle { get; set; }
@@ -538,7 +542,9 @@
         _sql = Cell.Sql ?? string.Empty;
         _markdown = Cell.Markdown ?? string.Empty;
         _referencedCellIds = new List<string>(Cell.ReferencedCellIds);
-        _snapshotMode = Cell.SnapshotMode;
+        // A cell saved in live-source mode by a data admin must fall back to the snapshot layer for a user
+        // without source access — they can't read the admin-gated source-tables endpoint.
+        _snapshotMode = Cell.SnapshotMode || (!CanViewSource && IsExternalDataset);
         _runError = Cell.LastRunError;
 
         if (!string.IsNullOrWhiteSpace(_datasetId)) await LoadTablesAsync();
@@ -572,7 +578,7 @@
         // In Source mode (the default for an External dataset), the user is querying the live database
         // itself, so autocomplete/discovery should reflect its real (schema-qualified) tables — not the
         // dataset's local DuckDB snapshot, which the RunCellAsync path only ever writes to, not from.
-        var isLiveSource = IsExternalDataset && !_snapshotMode;
+        var isLiveSource = IsExternalDataset && !_snapshotMode && CanViewSource;
         var endpoint = isLiveSource
             ? $"api/datasets/{_datasetId}/source-tables"
             : $"api/datasets/{_datasetId}/tables";

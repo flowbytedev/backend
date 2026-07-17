@@ -74,7 +74,7 @@ else
                 <svg class="ds-search-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
                 <input class="ds-search" type="search" placeholder="Search tables..." @bind="searchTerm" @bind:event="oninput" @bind:after="HandleSearch" />
             </div>
-            @if (isExternal)
+            @if (isExternal && canViewSource)
             {
                 <div style="display:flex;align-items:center;gap:0.4rem;margin-left:auto" title="View the external source's live tables, or the saved local snapshots">
                     <span style="font-size:0.75rem;color:#71717a">View</span>
@@ -1108,6 +1108,9 @@ else
     private bool isExternal;
     private bool snapshotMode = true;
     private bool modeInitialized;
+    // Viewing an external dataset's live source tables is limited to data admins ({companyId}_DATA_ADMIN)
+    // and company admins; everyone else only ever sees the local DuckDB snapshot.
+    private bool canViewSource;
 
     protected override async Task OnInitializedAsync()
     {
@@ -1130,6 +1133,7 @@ else
         var user = authState.User;
         canView = user.HasCompanyRole(companyId, "VIEW_DATA");
         canEdit = user.HasCompanyRole(companyId, "EDIT_DATA");
+        canViewSource = user.HasCompanyRole(companyId, "DATA_ADMIN");
         if (!canView) { isLoading = false; return; }
         await CheckDatabaseAsync();
         await LoadTables();
@@ -1225,8 +1229,9 @@ else
                 var dataset = await datasetResponse.Content.ReadFromJsonAsync<Dataset>();
                 datasetName = dataset?.Name;
                 isExternal = dataset?.SourceType == DatasetSourceType.External;
-                // Default external datasets to the live Source view; local datasets stay on Snapshot.
-                if (!modeInitialized) { snapshotMode = !isExternal; modeInitialized = true; }
+                // Default external datasets to the live Source view for data admins; local datasets — and
+                // users without source access — stay on the Snapshot (DuckDB) view.
+                if (!modeInitialized) { snapshotMode = !isExternal || !canViewSource; modeInitialized = true; }
             }
 
             // Source mode lists the external database's live tables; snapshot mode lists the DuckDB tables.

@@ -563,7 +563,10 @@ public class DatasetsController : ControllerBase
             return BadRequest("User ID is required in headers");
 
         var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA", "QUERY", "DATA_ADMIN"))
+        // Viewing an external database's live source tables is restricted to data administrators
+        // ({companyId}_DATA_ADMIN) and company admins ({companyId}_ADMIN, implicitly allowed by
+        // HasCompanyRole). Other data roles (VIEW_DATA/QUERY) only ever see the local DuckDB snapshot.
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN"))
             return Forbid();
 
         var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);

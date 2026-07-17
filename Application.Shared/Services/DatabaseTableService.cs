@@ -1156,7 +1156,14 @@ public class DatabaseTableService : IDatabaseTableService
 
     private async Task<List<(string Schema, string Name)>> QueryClickHouseTablesAsync(DatabaseConnection c, CancellationToken ct)
     {
-        const string query = "SELECT database, name FROM system.tables WHERE database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema') FORMAT JSONEachRow";
+        // Scope to the configured database when one is set, so a dataset backed by (say) `sales_dataset`
+        // lists only that database's tables. ClickHouse's HTTP endpoint has no per-connection default
+        // catalog — unlike SQL Server/Postgres (which connect to a specific catalog) or MySQL (which we
+        // filter by table_schema) — so without this filter system.tables returns every non-system database.
+        var whereClause = string.IsNullOrWhiteSpace(c.DatabaseName)
+            ? "database NOT IN ('system', 'INFORMATION_SCHEMA', 'information_schema')"
+            : $"database = '{EscapeLiteral(c.DatabaseName)}'";
+        var query = $"SELECT database, name FROM system.tables WHERE {whereClause} FORMAT JSONEachRow";
         var body = await QueryClickHouseAsync(c, query, ct);
 
         var tables = new List<(string, string)>();

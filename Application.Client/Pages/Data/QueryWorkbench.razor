@@ -38,7 +38,7 @@ else
                                 DatasetPlaceholder="Select dataset…"
                                 @bind-DatasetId="selectedDatasetId"
                                 @bind-DatasetId:after="OnDatasetSelected" />
-            @if (IsExternal)
+            @if (IsExternal && canViewSource)
             {
                 <div class="qw-modes" title="Query the live source database or its saved local snapshots">
                     <button class="qw-tab @(sourceMode == "source" ? "qw-tab-active" : "")" @onclick='() => ChangeMode("source")'>Source</button>
@@ -284,6 +284,9 @@ else
 
     private string? companyId;
     private bool canView;
+    // Querying the live external source (vs. its local snapshots) is limited to data admins
+    // ({companyId}_DATA_ADMIN) and company admins; other QUERY users only see the snapshots.
+    private bool canViewSource;
     private bool canEdit;
     private bool isLoading = true;
     private bool isRunning;
@@ -334,6 +337,7 @@ else
         var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
         canView = authState.User.HasCompanyRole(companyId, "QUERY");
         canEdit = authState.User.HasCompanyRole(companyId, "QUERY");
+        canViewSource = authState.User.HasCompanyRole(companyId, "DATA_ADMIN");
         if (!canView) { isLoading = false; return; }
 
         SetHeaders(authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value);
@@ -377,7 +381,9 @@ else
         tables.Clear();
         savedQueries.Clear();
         result = null;
-        sourceMode = "source"; // external datasets default to the live source
+        // Data admins default an external dataset to the live source; other users can only reach the
+        // snapshots, so default them there (the Source/Snapshots toggle is hidden for them).
+        sourceMode = canViewSource ? "source" : "snapshots";
         if (string.IsNullOrEmpty(selectedDatasetId)) return;
 
         await LoadTables();

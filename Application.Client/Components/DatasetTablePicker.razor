@@ -97,8 +97,8 @@
         </div>
     </div>
 
-    <!-- Source/Snapshot mode (external datasets only) -->
-    @if (ShowModeToggle && SelectedDatasetOption?.Dataset.SourceType == DatasetSourceType.External)
+    <!-- Source/Snapshot mode (external datasets only; source view is admin-gated via CanViewSource) -->
+    @if (ShowModeToggle && CanViewSource && SelectedDatasetOption?.Dataset.SourceType == DatasetSourceType.External)
     {
         <div class="dtp-field dtp-field-mode">
             <span class="dtp-label">Reading</span>
@@ -220,6 +220,11 @@
     /// host may manage its own table list yet still want the picker to own the mode). Only ever visible for
     /// External datasets.</summary>
     [Parameter] public bool ShowModeToggle { get; set; } = true;
+
+    /// <summary>Whether the user may view an External dataset's live source tables (data admins only). When
+    /// false the Source/Snapshot toggle is hidden and the picker stays on the Snapshot layer for External
+    /// datasets — it never requests the admin-gated <c>source-tables</c> endpoint.</summary>
+    [Parameter] public bool CanViewSource { get; set; } = true;
 
     /// <summary>Optional preloaded datasets. When supplied the component uses them instead of fetching
     /// (and skips the stats call + the UserId requirement) — pass this when the parent already has the list.</summary>
@@ -353,7 +358,8 @@
         try
         {
             // Live source-tables for an external dataset in source mode; otherwise the DuckDB tables.
-            var live = IsExternal && !SnapshotMode;
+            // Guard on CanViewSource so a non-admin never hits the admin-gated source-tables endpoint.
+            var live = IsExternal && !SnapshotMode && CanViewSource;
             var namesUrl = live
                 ? $"api/datasets/{DatasetId}/source-tables"
                 : $"api/datasets/{DatasetId}/tables";
@@ -408,8 +414,9 @@
             await TableNameChanged.InvokeAsync(TableName);
         }
 
-        // External datasets default to reading the live source; Local only have a DuckDB layer.
-        var snapshot = !IsExternal;
+        // External datasets default to reading the live source (admins only); Local only have a DuckDB
+        // layer. A user without source access stays on the Snapshot layer for External datasets too.
+        var snapshot = !IsExternal || !CanViewSource;
         if (snapshot != SnapshotMode)
         {
             SnapshotMode = snapshot;

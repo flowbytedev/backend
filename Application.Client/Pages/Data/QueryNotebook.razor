@@ -275,6 +275,7 @@ else
                          @ondrop="() => OnDrop(index)"
                          @ondrop:preventDefault="true">
                         <NotebookCellCard Cell="cell" NotebookId="@currentNotebook.Id" CompanyId="@companyId" Datasets="datasets"
+                                          CanViewSource="canViewSource"
                                           AvailableReferences="PriorSqlCells(index)"
                                           ShowDragHandle="true"
                                           ExternalResult="@ResultFor(cell.Id)"
@@ -446,6 +447,9 @@ else
     private bool isLoading = true;
     private bool canView;
     private bool canEdit;
+    // Querying an external dataset's live source is limited to data admins ({companyId}_DATA_ADMIN) and
+    // company admins; other QUERY users only work against the snapshots.
+    private bool canViewSource;
 
     private List<Dataset> datasets = new();
     private List<QueryNotebookDto> notebooks = new();
@@ -481,6 +485,7 @@ else
         var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
         canView = authState.User.HasCompanyRole(companyId, "QUERY");
         canEdit = authState.User.HasCompanyRole(companyId, "QUERY");
+        canViewSource = authState.User.HasCompanyRole(companyId, "DATA_ADMIN");
         if (!canView) { isLoading = false; return; }
 
         _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
