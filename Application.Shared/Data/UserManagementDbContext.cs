@@ -86,10 +86,13 @@ namespace Application.Shared.Data
                 {
                     // get the attributes of the property
                     // Console.WriteLine(property);
-                    var attributes = property.PropertyInfo.GetCustomAttributesData();
+                    // Null-conditional: shadow properties have no PropertyInfo, and an unguarded
+                    // dereference here takes down the whole model build. chat, relay and identity
+                    // all guard it; this one did not.
+                    var attributes = property.PropertyInfo?.GetCustomAttributesData();
 
                     // check if the column does not have Column attribute
-                    if (!attributes.Any(a => a.AttributeType.Name == "ColumnAttribute"))
+                    if (attributes == null || !attributes.Any(a => a.AttributeType.Name == "ColumnAttribute"))
                     {
                         property.SetColumnName(ToSnakeCase(property.Name));
                     }
@@ -108,6 +111,12 @@ namespace Application.Shared.Data
         public DbSet<CompanyDomain> CompanyDomain { get; set; }
 
         public DbSet<ApplicationUser> ApplicationUser { get; set; }
+
+        // Cross-app access registry. Owned and written by the identity app; read-only here.
+        // Both entities declare every FK explicitly -- the snake_case loop below dereferences
+        // property.PropertyInfo without a null check, so a shadow property would break the model.
+        public DbSet<AppRegistryApplication> AppRegistryApplication { get; set; }
+        public DbSet<AppRegistryUserAccess> AppRegistryUserAccess { get; set; }
 
 
 

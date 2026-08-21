@@ -1,8 +1,145 @@
-﻿@page "/Account/AccessDenied"
+@page "/Account/AccessDenied"
+@layout BareLayout
+@inject IApplicationAccessService AccessService
+@inject IConfiguration Configuration
 
-<PageTitle>Access denied</PageTitle>
+@*  Styles are inline rather than in app.css because this one page has to look right in three
+    apps whose stylesheets share no class vocabulary. Every value falls back to a literal, so it
+    renders correctly whether or not the host defines the token. *@
+<style>
+    .fb-denied {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 60vh;
+        padding: 40px 20px;
+    }
 
-<header>
-    <h1 class="text-danger">Access denied</h1>
-    <p class="text-danger">You do not have access to this resource.</p>
-</header>
+    .fb-denied-card {
+        width: 100%;
+        max-width: 460px;
+        padding: 32px;
+        text-align: center;
+        background: var(--surface, var(--container-bg, #fff));
+        border: 1px solid var(--border, var(--border-color, #e4e7ec));
+        border-radius: 16px;
+        box-shadow: 0 12px 32px -4px rgba(16, 24, 40, 0.14);
+    }
+
+    .fb-denied-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 52px;
+        height: 52px;
+        margin-bottom: 18px;
+        border-radius: 50%;
+        color: #DC2626;
+        background: rgba(220, 38, 38, 0.09);
+    }
+
+    .fb-denied-title {
+        margin: 0 0 10px;
+        font-size: 20px;
+        font-weight: 700;
+        color: var(--text-primary, var(--text-color, #101828));
+    }
+
+    .fb-denied-text {
+        margin: 0 0 24px;
+        font-size: 14px;
+        line-height: 1.6;
+        color: var(--text-secondary, var(--text-muted-color, #667085));
+    }
+
+    .fb-denied-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        flex-wrap: wrap;
+    }
+
+    .fb-denied-btn {
+        display: inline-flex;
+        align-items: center;
+        padding: 9px 18px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none !important;
+        cursor: pointer;
+    }
+
+    .fb-denied-btn-primary {
+        background: var(--accent, var(--accent-color, #2563EB));
+        color: #fff;
+    }
+
+    .fb-denied-btn-secondary {
+        background: transparent;
+        border-color: var(--border, var(--border-color, #e4e7ec));
+        color: var(--text-primary, var(--text-color, #101828));
+    }
+</style>
+
+<PageTitle>Access denied — @appName</PageTitle>
+
+<div class="fb-denied">
+    <div class="fb-denied-card">
+        <div class="fb-denied-icon">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" /><line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+            </svg>
+        </div>
+
+        @if (Reason == "newuser")
+        {
+            <h1 class="fb-denied-title">Almost there</h1>
+            <p class="fb-denied-text">
+                Your account has been created, but an administrator still needs to grant you
+                access to <strong>@appName</strong> before you can sign in.
+            </p>
+        }
+        else if (Reason == "noapp")
+        {
+            <h1 class="fb-denied-title">No access to @appName</h1>
+            <p class="fb-denied-text">
+                You signed in successfully, but your account has not been granted access to
+                <strong>@appName</strong>, so you have been signed out again.
+                Ask an administrator to grant you access, then try again.
+            </p>
+        }
+        else
+        {
+            @* The pre-existing route-level and module-level denials also land here; don't
+               mislabel those as an application-access problem. *@
+            <h1 class="fb-denied-title">Access denied</h1>
+            <p class="fb-denied-text">You do not have permission to access this resource.</p>
+        }
+
+        <div class="fb-denied-actions">
+            @if (!string.IsNullOrEmpty(identityUrl))
+            {
+                <a class="fb-denied-btn fb-denied-btn-primary" href="@identityUrl">Request access</a>
+            }
+            <a class="fb-denied-btn fb-denied-btn-secondary" href="Account/Login">Sign in again</a>
+        </div>
+    </div>
+</div>
+
+@code {
+    [SupplyParameterFromQuery]
+    private string? Reason { get; set; }
+
+    private string appName = "this application";
+    private string identityUrl = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Read the display name from dbo.application so this page and the launcher always agree.
+        appName = await AccessService.GetApplicationNameAsync();
+
+        identityUrl = (Configuration["UserManagement:ApplicationUrl"] ?? "").TrimEnd('/');
+    }
+}

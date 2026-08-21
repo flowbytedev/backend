@@ -1,0 +1,177 @@
+@* Microsoft-365-style app launcher. WASM island mounted in the (statically rendered) header,
+   so it declares its own render mode -- same approach as the other header components.
+   NOTE: class names are namespaced (fb-launcher-*) to avoid colliding with Bootstrap's
+   .dropdown-menu, which is loaded globally. *@
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@inject HttpClient Http
+
+<AuthorizeView>
+    <Authorized>
+<div class="fb-launcher" @onkeydown="OnKeyDown">
+    <button type="button"
+            class="fb-launcher-btn @(_open ? "is-open" : "")"
+            title="Apps"
+            aria-label="Apps"
+            aria-haspopup="true"
+            aria-expanded="@(_open ? "true" : "false")"
+            @onclick="Toggle">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="5" cy="5" r="2" /><circle cx="12" cy="5" r="2" /><circle cx="19" cy="5" r="2" />
+            <circle cx="5" cy="12" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="19" cy="12" r="2" />
+            <circle cx="5" cy="19" r="2" /><circle cx="12" cy="19" r="2" /><circle cx="19" cy="19" r="2" />
+        </svg>
+    </button>
+
+    @if (_open)
+    {
+        <button class="fb-launcher-backdrop" @onclick="Close" tabindex="-1" aria-hidden="true"></button>
+
+        <div class="fb-launcher-panel" role="menu">
+            <div class="fb-launcher-head">Your apps</div>
+
+            @if (_loading)
+            {
+                <div class="fb-launcher-grid">
+                    @for (var i = 0; i < 4; i++)
+                    {
+                        <div class="fb-launcher-tile is-skeleton" aria-hidden="true">
+                            <span class="fb-launcher-icon"></span>
+                            <span class="fb-launcher-text">
+                                <span class="fb-launcher-name"></span>
+                                <span class="fb-launcher-desc"></span>
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+            else if (_apps.Count == 0)
+            {
+                <div class="fb-launcher-empty">
+                    No apps assigned yet.<br />
+                    Contact your administrator to request access.
+                </div>
+            }
+            else
+            {
+                <div class="fb-launcher-grid">
+                    @foreach (var app in _apps)
+                    {
+                        var isCurrent = !string.IsNullOrEmpty(CurrentAppId)
+                                        && string.Equals(app.Id, CurrentAppId, StringComparison.OrdinalIgnoreCase);
+                        var hasUrl = !string.IsNullOrWhiteSpace(app.Url);
+
+                        @if (isCurrent)
+                        {
+                            <div class="fb-launcher-tile is-current" role="menuitem" aria-current="true" title="@app.Name (you are here)">
+                                @Tile(app)
+                                <span class="fb-launcher-here">Here</span>
+                            </div>
+                        }
+                        else if (!hasUrl)
+                        {
+                            @* No URL configured in dbo.application. Show it, but never as a link:
+                               an anchor with an empty href navigates to the current page. *@
+                            <div class="fb-launcher-tile is-unavailable" role="menuitem" aria-disabled="true"
+                                 title="@app.Name has no address configured yet">
+                                @Tile(app)
+                                <span class="fb-launcher-here">Not set up</span>
+                            </div>
+                        }
+                        else
+                        {
+                            <a class="fb-launcher-tile" role="menuitem" href="@app.Url" title="@app.Name">
+                                @Tile(app)
+                            </a>
+                        }
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    /// <summary>
+    /// This app's own id, so its own tile can be marked rather than linked.
+    /// Passed down from the layout, which can read configuration server-side.
+    /// </summary>
+    [Parameter] public string? CurrentAppId { get; set; }
+
+    private bool _open;
+    private bool _loading = true;
+    private bool _loaded;
+    private List<AppTile> _apps = new();
+
+    private RenderFragment Tile(AppTile app) =>
+        @<text>
+            <span class="fb-launcher-icon" style="@IconStyle(app)">
+                @if (!string.IsNullOrWhiteSpace(app.Icon))
+                {
+                    <i class="@app.Icon" aria-hidden="true"></i>
+                }
+                else
+                {
+                    <span class="fb-launcher-monogram">@Monogram(app.Name)</span>
+                }
+            </span>
+            <span class="fb-launcher-text">
+                <span class="fb-launcher-name">@app.Name</span>
+                @if (!string.IsNullOrWhiteSpace(app.Description))
+                {
+                    <span class="fb-launcher-desc">@app.Description</span>
+                }
+            </span>
+        </text>;
+
+    private async Task Toggle()
+    {
+        _open = !_open;
+
+        // Fetch once, on first open, so the header costs nothing on pages nobody opens it from.
+        if (_open && !_loaded)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private void Close() => _open = false;
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape")
+        {
+            _open = false;
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            var response = await Http.GetFromJsonAsync<Response<List<AppTile>>>("api/applauncher/apps");
+            _apps = response?.Items ?? new List<AppTile>();
+        }
+        catch
+        {
+            // A launcher that cannot reach the API should stay quiet rather than throw a toast
+            // over whatever the user was actually doing. It retries on the next open.
+            _apps = new List<AppTile>();
+            _loading = false;
+            return;
+        }
+
+        _loaded = true;
+        _loading = false;
+    }
+
+    private static string IconStyle(AppTile app) =>
+        string.IsNullOrWhiteSpace(app.Color)
+            ? ""
+            : $"color: {app.Color}; background: color-mix(in srgb, {app.Color} 12%, transparent);";
+
+    private static string Monogram(string? name) =>
+        string.IsNullOrWhiteSpace(name) ? "?" : name.Trim()[..1].ToUpperInvariant();
+}

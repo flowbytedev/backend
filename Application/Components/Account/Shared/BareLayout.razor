@@ -1,0 +1,34 @@
+@inherits LayoutComponentBase
+@inject NavigationManager NavigationManager
+
+@*  AccountLayout without the @layout MainLayout wrapper.
+
+    The app shell renders the nav bar, the company/workspace switcher and several
+    InteractiveWebAssembly islands that immediately call authenticated APIs. On the access-denied
+    page the user has just been signed out, so all of that would 401 behind a page whose whole
+    point is to explain calmly that they have no access. This layout gives those pages the same
+    HttpContext handling with none of the chrome. *@
+
+@if (HttpContext is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    @Body
+}
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (HttpContext is null)
+        {
+            // Rendering interactively means there is no HttpContext. Identity pages need one to
+            // set cookies, so bounce back to a server-rendered request.
+            NavigationManager.Refresh(forceReload: true);
+        }
+    }
+}

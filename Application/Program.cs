@@ -221,6 +221,7 @@ builder.Services.AddScoped<ClientAuthenticationDetail>();
 
 builder.Services.AddScoped<ICompanyService, CompanyService>();
 builder.Services.AddScoped<IUserService, UserService>();
+builder.Services.AddScoped<IApplicationAccessService, ApplicationAccessService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.IDatasetService, DatasetService>();
 builder.Services.AddScoped<IDuckdbService, DuckdbService>();
 builder.Services.AddScoped<ICommentService, CommentService>();
@@ -553,6 +554,12 @@ app.UseStaticFiles();
 app.UseAntiforgery();
 
 app.UseCors("AllowAll");
+
+// Refuse anyone who does not hold access to this application in the shared identity database.
+// Placed here so static files and CORS preflight are already handled, and before endpoint
+// execution. See Middleware/ApplicationAccessMiddleware.cs for why this is not an auth policy.
+app.UseMiddleware<Application.Middleware.ApplicationAccessMiddleware>();
+
 
 app.MapHub<NotificationHub<DataJob>>("/notification/datajob");
 app.MapHub<SalesDataHub>("/realtime/salesdata");

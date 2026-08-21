@@ -992,3 +992,221 @@ code {
 [data-theme="dark"] .border-gray-300 { border-color: #2b303b !important; }
 [data-theme="dark"] .divide-gray-100 > :not([hidden]) ~ :not([hidden]),
 [data-theme="dark"] .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2b303b !important; }
+/* ═══════════════════════════════════════════════════════════════════
+   APP LAUNCHER (waffle)
+   Shared across identity / chat / backend / relay. Only the token
+   mapping in `.fb-launcher` differs per app -- everything below it is
+   identical, so it can be diffed across repos. Class names are
+   namespaced fb-launcher-* to stay clear of Bootstrap's .dropdown-menu.
+═══════════════════════════════════════════════════════════════════ */
+
+.fb-launcher {
+  --fbl-surface:    var(--container-bg);
+  --fbl-border:     var(--border-color);
+  --fbl-text:       var(--text-color);
+  /* backend has no muted-text token; this matches the .al-* header greys. */
+  --fbl-muted:      #6b7280;
+  --fbl-hover:      var(--hover-bg);
+  /* Brand indigo, same as .al-brand-icon. */
+  --fbl-accent:     #6366f1;
+  --fbl-radius:     12px;
+  --fbl-shadow:     0 12px 32px -4px rgba(0, 0, 0, 0.18);
+
+  position: relative;
+  display: inline-flex;
+}
+
+
+.fb-launcher-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md, 8px);
+  background: transparent;
+  color: var(--fbl-muted);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.fb-launcher-btn:hover,
+.fb-launcher-btn.is-open {
+  background: var(--fbl-hover);
+  border-color: var(--fbl-border);
+  color: var(--fbl-text);
+}
+
+.fb-launcher-btn:focus-visible {
+  outline: 2px solid var(--fbl-accent);
+  outline-offset: 2px;
+}
+
+.fb-launcher-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+
+.fb-launcher-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 50;
+  width: 380px;
+  max-width: calc(100vw - 24px);
+  padding: 10px;
+  background: var(--fbl-surface);
+  border: 1px solid var(--fbl-border);
+  border-radius: var(--fbl-radius);
+  box-shadow: var(--fbl-shadow);
+}
+
+.fb-launcher-head {
+  padding: 2px 6px 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fbl-muted);
+}
+
+.fb-launcher-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.fb-launcher-tile {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px;
+  border-radius: var(--radius-md, 8px);
+  text-decoration: none !important;
+  color: var(--fbl-text);
+  transition: background 120ms ease;
+}
+
+a.fb-launcher-tile:hover {
+  background: var(--fbl-hover);
+}
+
+a.fb-launcher-tile:focus-visible {
+  outline: 2px solid var(--fbl-accent);
+  outline-offset: -2px;
+}
+
+.fb-launcher-tile.is-current {
+  background: var(--fbl-hover);
+  cursor: default;
+}
+
+.fb-launcher-tile.is-unavailable {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.fb-launcher-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-md, 8px);
+  /* Fallback tint for browsers without color-mix(); the inline style overrides both. */
+  background: var(--fbl-hover);
+  color: var(--fbl-accent);
+  font-size: 15px;
+}
+
+.fb-launcher-monogram {
+  font-family: var(--font-display, sans-serif);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.fb-launcher-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.fb-launcher-name {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--fbl-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-launcher-desc {
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--fbl-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fb-launcher-here {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  font-family: var(--font-mono, monospace);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--fbl-muted);
+}
+
+.fb-launcher-empty {
+  padding: 18px 10px 20px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--fbl-muted);
+}
+
+/* Skeleton */
+.fb-launcher-tile.is-skeleton .fb-launcher-icon,
+.fb-launcher-tile.is-skeleton .fb-launcher-name,
+.fb-launcher-tile.is-skeleton .fb-launcher-desc {
+  background: var(--fbl-hover);
+  border-radius: 4px;
+  animation: fb-launcher-pulse 1.4s ease-in-out infinite;
+}
+
+.fb-launcher-tile.is-skeleton .fb-launcher-icon { border-radius: var(--radius-md, 8px); }
+.fb-launcher-tile.is-skeleton .fb-launcher-name { width: 74px; height: 10px; }
+.fb-launcher-tile.is-skeleton .fb-launcher-desc { width: 52px; height: 8px; margin-top: 4px; }
+
+@keyframes fb-launcher-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fb-launcher-tile.is-skeleton .fb-launcher-icon,
+  .fb-launcher-tile.is-skeleton .fb-launcher-name,
+  .fb-launcher-tile.is-skeleton .fb-launcher-desc { animation: none; }
+}
+
+@media (max-width: 560px) {
+  .fb-launcher-panel { width: 300px; padding: 8px; }
+  .fb-launcher-grid  { grid-template-columns: minmax(0, 1fr); }
+}
+

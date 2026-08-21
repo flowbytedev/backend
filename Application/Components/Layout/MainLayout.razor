@@ -1,4 +1,4 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 @using System.Security.Claims
 @using Application.Shared.Services.Org
 @using Microsoft.AspNetCore.WebUtilities
@@ -10,6 +10,7 @@
 
 <div class="al-root">
     <header class="al-header">
+        <AppLauncher CurrentAppId="@_configuration["ApplicationId"]" />
         <div class="al-brand">
             <div class="al-brand-icon">D</div>
             <span class="al-brand-name">DATA APP</span>

@@ -1,9 +1,10 @@
-﻿@page "/Account/ExternalLogin"
+@page "/Account/ExternalLogin"
 
 @using System.ComponentModel.DataAnnotations
 @using System.Security.Claims
 @using System.Text
 @using System.Text.Encodings.Web
+@using Microsoft.AspNetCore.Authentication
 @using Microsoft.AspNetCore.Identity
 @using Microsoft.AspNetCore.WebUtilities
 @using Application.Shared.Models.User;
@@ -16,6 +17,7 @@
 @inject NavigationManager NavigationManager
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<ExternalLogin> Logger
+@inject IApplicationAccessService AccessService
 @inject ICompanyService _companyService
 
 <PageTitle>Register</PageTitle>
@@ -105,6 +107,30 @@
 
     private async Task OnLoginCallbackAsync()
     {
+        // Refuse before signing anything in. externalLoginInfo.ProviderKey is the Entra object
+        // id (OnTokenValidated rewrites NameIdentifier to `oid` on the external principal), while
+        // application_user_access is keyed by application_user.id -- user_login is the only bridge
+        // between the two, so resolve the local account rather than comparing the claim directly.
+        var localUser = await UserManager.FindByLoginAsync(
+            externalLoginInfo.LoginProvider, externalLoginInfo.ProviderKey);
+
+        if (localUser is not null && !await AccessService.HasAccessAsync(localUser.Id))
+        {
+            Logger.LogWarning(
+                "Login refused for {UserId}: no live access to {ApplicationId}.",
+                localUser.Id, AccessService.ApplicationId);
+
+            // Nothing is signed in yet, but the OIDC handler just wrote the external cookie --
+            // drop it so a retry starts clean. Sign out BEFORE redirecting: RedirectTo throws to
+            // unwind, so anything after it never runs.
+            // Targeted scheme names rather than SignInManager.SignOutAsync(), which also signs out
+            // Identity.TwoFactorUserId -- a scheme these apps never register.
+            await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
+            await HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
+
+            RedirectManager.RedirectTo("Account/AccessDenied", new() { ["reason"] = "noapp" });
+        }
+
         // Sign in the user with this external login provider if the user already has a login.
         var result = await SignInManager.ExternalLoginSignInAsync(
             externalLoginInfo.LoginProvider,
@@ -175,6 +201,15 @@
                 if (UserManager.Options.SignIn.RequireConfirmedAccount)
                 {
                     RedirectManager.RedirectTo("Account/RegisterConfirmation", new() { ["email"] = Input.Email });
+                }
+
+                if (!await AccessService.HasAccessAsync(user.Id))
+                {
+                    Logger.LogInformation(
+                        "New user {UserId} registered but has no access to {ApplicationId}; not signing in.",
+                        user.Id, AccessService.ApplicationId);
+                    await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
+                    RedirectManager.RedirectTo("Account/AccessDenied", new() { ["reason"] = "newuser" });
                 }
 
                 await SignInManager.SignInAsync(user, isPersistent: false, externalLoginInfo.LoginProvider);
