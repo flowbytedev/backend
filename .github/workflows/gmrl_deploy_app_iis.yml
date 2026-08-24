@@ -1,0 +1,48 @@
+name: Deploy APP to IIS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ dev, main ]
+    # Only trigger the workflow if changes occur in the 'Application.Api' folder (including all subfolders and files)
+    paths:
+      - 'Application/**'
+      - 'Application.Client/**'
+      - 'Application.Shared/**'
+
+jobs:
+  build:
+    runs-on: spinsrv3
+
+    steps:
+    - uses: actions/checkout@v2
+    
+
+    - name: Build with dotnet
+      shell: cmd
+      run: dotnet build Application/Application.csproj --configuration Release
+
+
+  # dependecy on the build job
+  deploy:
+    runs-on: spinsrv3
+
+    # Dynamically pick environment: if branch is 'dev', use 'test'; else use 'prod'
+    environment: ${{ github.ref_name == 'dev' && 'test' || 'prod' }}
+    
+    needs: build
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Publish with dotnet
+      shell: cmd
+      run: dotnet publish Application/Application.csproj --configuration Release --output .\backend #./publish
+
+    - name: Deploy to IIS
+      shell: cmd
+      run: |
+        iisreset /stop
+        xcopy /s /y  .\backend\* ${{ secrets.APP_IIS_PATH }}\
+        iisreset /start
+      
