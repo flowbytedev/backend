@@ -225,143 +225,144 @@ else
     @if (_editApi is not null)
     {
         <div class="sc">
-            <div class="fb-modal-backdrop" @onclick="() => _editApi = null"></div>
-            <div class="fb-modal" role="dialog" aria-modal="true">
-                <div class="fb-modal-head">
-                    <h2 class="fb-modal-title">@(_editApiIsNew ? "New API credential" : $"Edit {_editApiOriginalName}")</h2>
-                </div>
-                <div class="fb-modal-body">
-                    <div class="field">
-                        <label class="field-label">Name</label>
-                        <input class="input" @bind="_editApi.Name" @bind:event="oninput" placeholder="erp-api" />
-                        <div class="field-help">How pipeline steps refer to this. Changing it breaks steps that use the old name.</div>
+            <div class="fb-modal-backdrop" @onclick="() => _editApi = null">
+                <div class="fb-modal" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+                    <div class="fb-modal-head">
+                        <h2 class="fb-modal-title">@(_editApiIsNew ? "New API credential" : $"Edit {_editApiOriginalName}")</h2>
                     </div>
-
-                    <div class="field">
-                        <label class="field-label">Description</label>
-                        <input class="input" @bind="_editApi.Description" @bind:event="oninput" />
-                    </div>
-
-                    <div class="field">
-                        <label class="field-label">Base URL</label>
-                        <input class="input" @bind="_editApi.BaseUrl" @bind:event="oninput"
-                               placeholder="https://erp.internal/api/v2/" />
-                        <div class="field-help">
-                            Optional, but recommended: steps then use relative paths, and this credential
-                            cannot be pointed at any other host.
-                        </div>
-                    </div>
-
-                    <div class="field">
-                        <label class="field-label">Authentication</label>
-                        <select class="select" @bind="_editApi.AuthType">
-                            <option value="@ApiAuthTypes.None">None</option>
-                            <option value="@ApiAuthTypes.Bearer">Bearer token</option>
-                            <option value="@ApiAuthTypes.Basic">Basic (username + password)</option>
-                            <option value="@ApiAuthTypes.Header">Secret in a header</option>
-                            <option value="@ApiAuthTypes.QueryParam">Secret in a query parameter</option>
-                        </select>
-                    </div>
-
-                    @if (_editApi.AuthType == ApiAuthTypes.Basic)
-                    {
+                    <div class="fb-modal-body">
                         <div class="field">
-                            <label class="field-label">Username</label>
-                            <input class="input" @bind="_editApi.Username" @bind:event="oninput" />
+                            <label class="field-label">Name</label>
+                            <input class="input" @bind="_editApi.Name" @bind:event="oninput" placeholder="erp-api" />
+                            <div class="field-help">How pipeline steps refer to this. Changing it breaks steps that use the old name.</div>
                         </div>
-                    }
 
-                    @if (_editApi.AuthType == ApiAuthTypes.Header)
-                    {
                         <div class="field">
-                            <label class="field-label">Header name</label>
-                            <input class="input" @bind="_editApi.HeaderName" @bind:event="oninput"
-                                   placeholder="X-Api-Key" />
+                            <label class="field-label">Description</label>
+                            <input class="input" @bind="_editApi.Description" @bind:event="oninput" />
                         </div>
-                    }
 
-                    @if (_editApi.AuthType == ApiAuthTypes.QueryParam)
-                    {
                         <div class="field">
-                            <label class="field-label">Query parameter name</label>
-                            <input class="input" @bind="_editApi.QueryParamName" @bind:event="oninput"
-                                   placeholder="api_key" />
+                            <label class="field-label">Base URL</label>
+                            <input class="input" @bind="_editApi.BaseUrl" @bind:event="oninput"
+                                   placeholder="https://erp.internal/api/v2/" />
                             <div class="field-help">
-                                Weaker than a header — query strings are recorded in proxy and server logs.
-                                Use it only when the API offers nothing else.
+                                Optional, but recommended: steps then use relative paths, and this credential
+                                cannot be pointed at any other host.
                             </div>
                         </div>
-                    }
 
-                    @if (_editApi.AuthType != ApiAuthTypes.None)
-                    {
                         <div class="field">
-                            <label class="field-label">
-                                @(_editApi.AuthType == ApiAuthTypes.Basic ? "Password" : "Secret")
+                            <label class="field-label">Authentication</label>
+                            <select class="select" @bind="_editApi.AuthType">
+                                <option value="@ApiAuthTypes.None">None</option>
+                                <option value="@ApiAuthTypes.Bearer">Bearer token</option>
+                                <option value="@ApiAuthTypes.Basic">Basic (username + password)</option>
+                                <option value="@ApiAuthTypes.Header">Secret in a header</option>
+                                <option value="@ApiAuthTypes.QueryParam">Secret in a query parameter</option>
+                            </select>
+                        </div>
+
+                        @if (_editApi.AuthType == ApiAuthTypes.Basic)
+                        {
+                            <div class="field">
+                                <label class="field-label">Username</label>
+                                <input class="input" @bind="_editApi.Username" @bind:event="oninput" />
+                            </div>
+                        }
+
+                        @if (_editApi.AuthType == ApiAuthTypes.Header)
+                        {
+                            <div class="field">
+                                <label class="field-label">Header name</label>
+                                <input class="input" @bind="_editApi.HeaderName" @bind:event="oninput"
+                                       placeholder="X-Api-Key" />
+                            </div>
+                        }
+
+                        @if (_editApi.AuthType == ApiAuthTypes.QueryParam)
+                        {
+                            <div class="field">
+                                <label class="field-label">Query parameter name</label>
+                                <input class="input" @bind="_editApi.QueryParamName" @bind:event="oninput"
+                                       placeholder="api_key" />
+                                <div class="field-help">
+                                    Weaker than a header — query strings are recorded in proxy and server logs.
+                                    Use it only when the API offers nothing else.
+                                </div>
+                            </div>
+                        }
+
+                        @if (_editApi.AuthType != ApiAuthTypes.None)
+                        {
+                            <div class="field">
+                                <label class="field-label">
+                                    @(_editApi.AuthType == ApiAuthTypes.Basic ? "Password" : "Secret")
+                                </label>
+                                <input class="input" type="password" autocomplete="new-password"
+                                       @bind="_secret" @bind:event="oninput" />
+                                <div class="field-help">
+                                    @if (_editApiIsNew)
+                                    {
+                                        <span>Stored encrypted. It is never shown again after saving.</span>
+                                    }
+                                    else if (_editApi.HasSecret)
+                                    {
+                                        <span>A secret is stored. Leave this empty to keep it.</span>
+                                    }
+                                    else
+                                    {
+                                        <span>No secret is stored yet.</span>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        <div class="field">
+                            <label class="field-label">Extra headers</label>
+                            <textarea class="textarea" rows="3" @bind="_editApi.ExtraHeadersJson" @bind:event="oninput"
+                                      placeholder='{"Accept": "application/json"}'></textarea>
+                            <div class="field-help">A JSON object, sent on every request. Not for secrets.</div>
+                        </div>
+
+                        <div class="field">
+                            <label class="field-label">Timeout (seconds)</label>
+                            <input class="input" type="number" min="1" max="3600"
+                                   value="@(_editApi.TimeoutSeconds?.ToString() ?? string.Empty)"
+                                   @oninput="e => _editApi.TimeoutSeconds = int.TryParse(e.Value?.ToString(), out var t) ? t : null" />
+                            <div class="field-help">Empty uses the server default.</div>
+                        </div>
+
+                        <div class="field field-check">
+                            <label>
+                                <input type="checkbox" @bind="_editApi.AllowWrite" />
+                                May send data
                             </label>
-                            <input class="input" type="password" autocomplete="new-password"
-                                   @bind="_secret" @bind:event="oninput" />
                             <div class="field-help">
-                                @if (_editApiIsNew)
-                                {
-                                    <span>Stored encrypted. It is never shown again after saving.</span>
-                                }
-                                else if (_editApi.HasSecret)
-                                {
-                                    <span>A secret is stored. Leave this empty to keep it.</span>
-                                }
-                                else
-                                {
-                                    <span>No secret is stored yet.</span>
-                                }
+                                Required for a "Send to API" step. Leave off for a credential that only reads —
+                                a destination using it is refused outright, not downgraded.
                             </div>
                         </div>
-                    }
 
-                    <div class="field">
-                        <label class="field-label">Extra headers</label>
-                        <textarea class="textarea" rows="3" @bind="_editApi.ExtraHeadersJson" @bind:event="oninput"
-                                  placeholder='{"Accept": "application/json"}'></textarea>
-                        <div class="field-help">A JSON object, sent on every request. Not for secrets.</div>
-                    </div>
-
-                    <div class="field">
-                        <label class="field-label">Timeout (seconds)</label>
-                        <input class="input" type="number" min="1" max="3600"
-                               value="@(_editApi.TimeoutSeconds?.ToString() ?? string.Empty)"
-                               @oninput="e => _editApi.TimeoutSeconds = int.TryParse(e.Value?.ToString(), out var t) ? t : null" />
-                        <div class="field-help">Empty uses the server default.</div>
-                    </div>
-
-                    <div class="field field-check">
-                        <label>
-                            <input type="checkbox" @bind="_editApi.AllowWrite" />
-                            May send data
-                        </label>
-                        <div class="field-help">
-                            Required for a "Send to API" step. Leave off for a credential that only reads —
-                            a destination using it is refused outright, not downgraded.
+                        <div class="field field-check">
+                            <label>
+                                <input type="checkbox" @bind="_editApi.IsEnabled" />
+                                Enabled
+                            </label>
+                            <div class="field-help">Turning this off stops every step that uses it, without deleting anything.</div>
                         </div>
-                    </div>
 
-                    <div class="field field-check">
-                        <label>
-                            <input type="checkbox" @bind="_editApi.IsEnabled" />
-                            Enabled
-                        </label>
-                        <div class="field-help">Turning this off stops every step that uses it, without deleting anything.</div>
+                        @if (_error is not null)
+                        {
+                            <div class="form-error">@_error</div>
+                        }
                     </div>
-
-                    @if (_error is not null)
-                    {
-                        <div class="form-error">@_error</div>
-                    }
-                </div>
-                <div class="fb-modal-foot">
-                    <button class="btn btn-ghost" @onclick="() => _editApi = null">Cancel</button>
-                    <button class="btn btn-primary" disabled="@_saving" @onclick="SaveApi">
-                        @(_saving ? "Saving…" : "Save")
-                    </button>
+                    <div class="fb-modal-foot">
+                        <button class="btn btn-ghost" @onclick="() => _editApi = null">Cancel</button>
+                        <button class="btn btn-primary" disabled="@_saving" @onclick="SaveApi">
+                            @(_saving ? "Saving…" : "Save")
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -371,49 +372,50 @@ else
     @if (_editWrite is not null)
     {
         <div class="sc">
-            <div class="fb-modal-backdrop" @onclick="() => _editWrite = null"></div>
-            <div class="fb-modal" role="dialog" aria-modal="true">
-                <div class="fb-modal-head">
-                    <h2 class="fb-modal-title">Write access to @_editWrite.EntityName</h2>
-                </div>
-                <div class="fb-modal-body">
-                    <div class="field">
-                        <label class="field-label">Login</label>
-                        <input class="input" @bind="_editWrite.Username" @bind:event="oninput" />
+            <div class="fb-modal-backdrop" @onclick="() => _editWrite = null">
+                <div class="fb-modal" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+                    <div class="fb-modal-head">
+                        <h2 class="fb-modal-title">Write access to @_editWrite.EntityName</h2>
                     </div>
-
-                    <div class="field">
-                        <label class="field-label">Password</label>
-                        <input class="input" type="password" autocomplete="new-password"
-                               @bind="_secret" @bind:event="oninput" />
-                        <div class="field-help">
-                            @(_editWrite.HasSecret
-                                ? "A password is stored. Leave this empty to keep it."
-                                : "Stored encrypted; never shown again.")
+                    <div class="fb-modal-body">
+                        <div class="field">
+                            <label class="field-label">Login</label>
+                            <input class="input" @bind="_editWrite.Username" @bind:event="oninput" />
                         </div>
-                    </div>
 
-                    <div class="field field-check">
-                        <label>
-                            <input type="checkbox" @bind="_editWrite.AllowCreateTable" />
-                            May create tables
-                        </label>
-                        <div class="field-help">
-                            Lets a pipeline issue CREATE TABLE inside that database. Off unless you need
-                            "create the table if it does not exist" to work.
+                        <div class="field">
+                            <label class="field-label">Password</label>
+                            <input class="input" type="password" autocomplete="new-password"
+                                   @bind="_secret" @bind:event="oninput" />
+                            <div class="field-help">
+                                @(_editWrite.HasSecret
+                                    ? "A password is stored. Leave this empty to keep it."
+                                    : "Stored encrypted; never shown again.")
+                            </div>
                         </div>
-                    </div>
 
-                    @if (_error is not null)
-                    {
-                        <div class="form-error">@_error</div>
-                    }
-                </div>
-                <div class="fb-modal-foot">
-                    <button class="btn btn-ghost" @onclick="() => _editWrite = null">Cancel</button>
-                    <button class="btn btn-primary" disabled="@_saving" @onclick="SaveWrite">
-                        @(_saving ? "Saving…" : "Save")
-                    </button>
+                        <div class="field field-check">
+                            <label>
+                                <input type="checkbox" @bind="_editWrite.AllowCreateTable" />
+                                May create tables
+                            </label>
+                            <div class="field-help">
+                                Lets a pipeline issue CREATE TABLE inside that database. Off unless you need
+                                "create the table if it does not exist" to work.
+                            </div>
+                        </div>
+
+                        @if (_error is not null)
+                        {
+                            <div class="form-error">@_error</div>
+                        }
+                    </div>
+                    <div class="fb-modal-foot">
+                        <button class="btn btn-ghost" @onclick="() => _editWrite = null">Cancel</button>
+                        <button class="btn btn-primary" disabled="@_saving" @onclick="SaveWrite">
+                            @(_saving ? "Saving…" : "Save")
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

@@ -32,4 +32,10 @@
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.11.3" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The pipeline test harness asserts generated destination DDL, which runs against customer
+         databases and cannot be exercised any other way without one. -->
+    <InternalsVisibleTo Include="pltest" />
+  </ItemGroup>
+
 </Project>

@@ -377,6 +377,33 @@ public class ExternalTableWriter(
     // ---------------------------------------------------------------- ClickHouse
 
     /// <summary>
+    /// Which ClickHouse database this write targets.
+    /// <para>
+    /// It comes from the entity's own connection, NOT from the FlowByte dataset's display name — those are
+    /// different things and only coincidentally similar. Getting this wrong is silent: ClickHouse simply
+    /// resolves an unqualified name against the session default, so rows land in <c>default</c> and the run
+    /// reports success against a table nobody was looking at.
+    /// </para>
+    /// <para>
+    /// Precedence: an explicit schema on the step wins, then the connection's database, then ClickHouse's
+    /// own fallback.
+    /// </para>
+    /// </summary>
+    internal static string ClickHouseDatabase(DatabaseConnection target, ExternalWriteRequest request) =>
+        !string.IsNullOrWhiteSpace(request.Schema) ? request.Schema!
+        : !string.IsNullOrWhiteSpace(target.DatabaseName) ? target.DatabaseName!
+        : "default";
+
+    /// <summary>
+    /// The fully-qualified target. Qualified explicitly rather than relying on the connection's default
+    /// database, so the statement says where it is going and cannot be redirected by session state.
+    /// </summary>
+    internal static string ClickHouseTable(DatabaseConnection target, ExternalWriteRequest request) =>
+        SqlTypeMapper.Quote(DataSourceType.ClickHouse, ClickHouseDatabase(target, request))
+        + "." + SqlTypeMapper.Quote(DataSourceType.ClickHouse, request.Table);
+
+
+    /// <summary>
     /// ClickHouse has no ADO path from a stored connection (the connection factory declines it), so this
     /// posts <c>INSERT ... FORMAT CSVWithNames</c> over HTTP — the same mechanism
     /// <c>DatabaseAdminService</c> already uses for write-capable ClickHouse calls. Rows are sent in
@@ -386,8 +413,58 @@ public class ExternalTableWriter(
         DatabaseConnection target, ExternalWriteRequest request, CancellationToken ct)
     {
         var result = new ImportResult();
-        var table = SqlTypeMapper.QualifiedTable(DataSourceType.ClickHouse, request.Schema, request.Table);
 
+        // QualifiedTable deliberately drops the schema for ClickHouse (its "schema" slot IS the database),
+        // so the database has to be applied here instead — otherwise every write lands in `default`.
+        var table = ClickHouseTable(target, request);
+
+        request.Progress?.WriteLine(
+            $"      target {table} on {target.Host}");
+
+        // Columns first, from a short read. The ADO path does the same, and this side needs them for the
+        // same reason: the DDL has to be built before anything is sent.
+        var columns = await store.ReadRelationAsync(
+            request.SourceDatasetId, request.SourceRelation,
+            (_, cols, _) => Task.FromResult(cols), ct);
+
+        if (columns.Count == 0)
+        {
+            result.Error = "The incoming data has no columns.";
+            result.ErrorType = PipelineErrorType.Invalid;
+            return result;
+        }
+
+        if (request.CreateIfMissing)
+        {
+            var ddl = BuildCreateTable(DataSourceType.ClickHouse, table, columns);
+
+            if (ddl is null)
+            {
+                result.Error =
+                    "Could not work out a ClickHouse column type for every column, so the table was not " +
+                    "created. Create it manually and run again.";
+                result.ErrorType = PipelineErrorType.NotWritable;
+                return result;
+            }
+
+            // The DDL is already CREATE TABLE IF NOT EXISTS, so this is idempotent and needs no prior
+            // existence check — which is just as well, since ClickHouse has no ADO path to ask over.
+            request.Progress?.WriteLine($"      ensuring {table} exists");
+            await PostClickHouseAsync(target, ddl, ct);
+        }
+        else if (!await ClickHouseTableExistsAsync(target, request, ct))
+        {
+            // Without this the INSERT below fails with ClickHouse's raw UNKNOWN_TABLE, which says nothing
+            // about the setting that would have fixed it.
+            result.Error =
+                $"The destination table {table} does not exist. Create it, or turn on \"create the table " +
+                "if it does not exist\" on the destination step.";
+            result.ErrorType = PipelineErrorType.NotWritable;
+            return result;
+        }
+
+        // After the create, not before: a Replace into a table that did not exist yet would otherwise
+        // truncate nothing and then fail.
         if (request.Mode == ImportMode.Replace)
         {
             request.Progress?.WriteLine($"      truncating {table}");
@@ -438,6 +515,35 @@ public class ExternalTableWriter(
     }
 
     /// <summary>
+    /// Whether a table exists, asked of ClickHouse's own catalogue over HTTP.
+    /// <para>
+    /// Only needed when the step is NOT set to create the table: the create path uses
+    /// <c>CREATE TABLE IF NOT EXISTS</c> and does not care. A failure to answer is treated as "exists", so
+    /// a catalogue quirk cannot block a load that would otherwise have worked — the INSERT will report the
+    /// real problem either way.
+    /// </para>
+    /// </summary>
+    private async Task<bool> ClickHouseTableExistsAsync(
+        DatabaseConnection target, ExternalWriteRequest request, CancellationToken ct)
+    {
+        var database = ClickHouseDatabase(target, request);
+
+        var sql =
+            "SELECT count() FROM system.tables WHERE database = " +
+            $"'{database.Replace("'", "\\'")}' AND name = '{request.Table.Replace("'", "\\'")}'";
+
+        try
+        {
+            var body = await PostClickHouseAsync(target, sql, ct);
+            return !long.TryParse(body?.Trim(), out var count) || count > 0;
+        }
+        catch (Exception)
+        {
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Posts a statement to ClickHouse over HTTP.
     /// <para>
     /// A deliberate near-duplicate of the private helper in <c>DatabaseAdminService</c>, for one reason: that
@@ -446,7 +552,7 @@ public class ExternalTableWriter(
     /// <c>?readonly=1</c>, since this writes.
     /// </para>
     /// </summary>
-    private async Task PostClickHouseAsync(DatabaseConnection c, string sql, CancellationToken ct)
+    private async Task<string?> PostClickHouseAsync(DatabaseConnection c, string sql, CancellationToken ct)
     {
         var protocol = c.UseSsl ? "https" : "http";
         var port = c.Port > 0 ? c.Port : 8123;
@@ -454,7 +560,13 @@ public class ExternalTableWriter(
         var client = httpClientFactory.CreateClient();
         client.Timeout = Timeout.InfiniteTimeSpan;
 
-        var request = new HttpRequestMessage(HttpMethod.Post, $"{protocol}://{c.Host}:{port}/");
+        // The database goes on the query string. Without it ClickHouse uses the session default — which is
+        // how a write configured for one database silently populates `default` instead.
+        var database = string.IsNullOrWhiteSpace(c.DatabaseName)
+            ? string.Empty
+            : "?database=" + Uri.EscapeDataString(c.DatabaseName!);
+
+        var request = new HttpRequestMessage(HttpMethod.Post, $"{protocol}://{c.Host}:{port}/{database}");
 
         if (!string.IsNullOrEmpty(c.Username))
         {
@@ -473,6 +585,10 @@ public class ExternalTableWriter(
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException(
                 $"ClickHouse rejected the write ({(int)response.StatusCode}): {body}");
+
+        // Returned so a SELECT can be read back — the existence check needs an answer, not just a
+        // non-failure.
+        return body;
     }
 
     // -------------------------------------------------------------------- helpers
@@ -510,25 +626,36 @@ public class ExternalTableWriter(
         return Convert.ToInt64(count ?? 0) > 0;
     }
 
-    private static string? BuildCreateTable(
+    /// <summary>
+    /// Internal rather than private so the destination DDL can be asserted without a live database.
+    /// This runs against a customer's database and had no coverage at all until it failed in use.
+    /// </summary>
+    internal static string? BuildCreateTable(
         DataSourceType engine, string qualified, List<PipelineColumn> columns)
     {
+        // ClickHouse expresses nullability in the TYPE (Nullable(Int32)), so it takes no NULL suffix.
+        // Built per column rather than stripped from the finished string afterwards: a Replace(" NULL")
+        // over the whole body would also cut those characters out of a quoted column name that happened
+        // to contain them.
+        var clickHouse = engine == DataSourceType.ClickHouse;
         var parts = new List<string>();
 
         foreach (var column in columns)
         {
             var type = SqlTypeMapper.For(engine, column.Type);
             if (type is null) return null;         // no safe mapping: refuse rather than guess
-            parts.Add($"{SqlTypeMapper.Quote(engine, column.Name)} {type} NULL");
+
+            var name = SqlTypeMapper.Quote(engine, column.Name);
+            parts.Add(clickHouse ? $"{name} {type}" : $"{name} {type} NULL");
         }
 
         var body = string.Join(", ", parts);
 
-        // ClickHouse needs an engine and an ordering key; MergeTree with no ORDER BY is the neutral choice
-        // for a load target, and the columns are already Nullable.
-        return engine == DataSourceType.ClickHouse
-            ? $"CREATE TABLE IF NOT EXISTS {qualified} ({body.Replace(" NULL", string.Empty)}) " +
-              "ENGINE = MergeTree ORDER BY tuple()"
+        // ClickHouse needs an engine and an ordering key; MergeTree with no sorting key is the neutral
+        // choice for a load target. IF NOT EXISTS makes the create idempotent, which is what lets the
+        // ClickHouse write path skip an existence check entirely.
+        return clickHouse
+            ? $"CREATE TABLE IF NOT EXISTS {qualified} ({body}) ENGINE = MergeTree ORDER BY tuple()"
             : $"CREATE TABLE {qualified} ({body})";
     }
 

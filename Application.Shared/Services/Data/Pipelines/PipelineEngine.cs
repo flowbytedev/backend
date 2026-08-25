@@ -521,7 +521,14 @@ public class PipelineEngine(
         var keys = StringList(config, "keys");
         var createIfMissing = Bool(config, "createIfMissing");
 
-        ctx.Log.WriteLine($"      writing into {dataset.Name}.{table} ({mode.ToString().ToLowerInvariant()})");
+        // Named as "dataset.table" only for a LOCAL dataset, where the dataset IS the database. For an
+        // external one the dataset name is a FlowByte label and the real database comes from the entity's
+        // connection — writing "Sales Dataset.item" would name a database that does not exist. The writer
+        // logs the true target once it has resolved the connection.
+        ctx.Log.WriteLine(dataset.SourceType == DatasetSourceType.External
+            ? $"      writing to external dataset '{dataset.Name}' -> {table} "
+              + $"({mode.ToString().ToLowerInvariant()})"
+            : $"      writing into {dataset.Name}.{table} ({mode.ToString().ToLowerInvariant()})");
 
         ImportResult written;
 
