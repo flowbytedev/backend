@@ -1,0 +1,363 @@
+@*
+    One step on the canvas. An HTML div rather than SVG <text>, so labels get real ellipsis, :hover,
+    :focus-visible and every CSS token — SVG has no text-overflow, and sizing a box to its label would need a
+    JS measurement round trip per node plus a second layout pass.
+
+    ShouldRender is overridden so editing or selecting one step re-renders one step, not all sixty.
+*@
+@using Application.Client.Pipelines
+@using Application.Shared.Models.Data.Pipelines
+@using Application.Shared.Services.Data.Pipelines
+
+<div class="pl-node @_modifier @_stateCss @(Selected ? "is-selected" : "") @(Dimmed ? "is-dim" : "") @(Matched ? "is-match" : "") @(Box.Pinned ? "is-pinned" : "")"
+     id="@($"plnode-{Box.Id}")"
+     style="left:@Px(Box.X);top:@Px(Box.Y);width:@Px(Box.Width);height:@Px(Box.Height);"
+     role="group"
+     tabindex="-1"
+     aria-label="@AriaLabel()"
+     @onclick="OnClickHandler"
+     @onclick:stopPropagation="true"
+     @ondblclick="OnDoubleClickHandler"
+     @ondblclick:stopPropagation="true">
+
+    @* Input ports, spread down the left edge. A join has two, and they must be distinguishable. *@
+    @for (var i = 0; i < _inPorts.Count; i++)
+    {
+        var index = i;
+        var port = _inPorts[index];
+        var anchor = PipelineLayout.InPortAnchor(Box, index, _inPorts.Count);
+
+        @* data-* attributes let pipeline-graph.js identify a port mid-drag without calling into .NET. *@
+        <span class="pl-port pl-port--in @(IsConnected(port) ? "is-connected" : "")"
+              style="top:@Px(anchor.Y - Box.Y - 5);"
+              title="@PortTitle(port, false)"
+              data-node="@Box.Id" data-port="@port" data-dir="in"
+              @onclick="() => OnPortClick.InvokeAsync((Box.Id, port, false))"
+              @onclick:stopPropagation="true"></span>
+
+        @if (_inPorts.Count > 1)
+        {
+            <span class="pl-port-label pl-port-label--in" style="top:@Px(anchor.Y - Box.Y - 7);">@port</span>
+        }
+    }
+
+    @* Output ports, spread down the right edge. *@
+    @for (var i = 0; i < _outPorts.Count; i++)
+    {
+        var index = i;
+        var port = _outPorts[index];
+        var anchor = PipelineLayout.OutPortAnchor(Box, index, _outPorts.Count);
+
+        <span class="pl-port pl-port--out"
+              style="top:@Px(anchor.Y - Box.Y - 5);"
+              title="@PortTitle(port, true)"
+              data-node="@Box.Id" data-port="@port" data-dir="out"
+              @onclick="() => OnPortClick.InvokeAsync((Box.Id, port, true))"
+              @onclick:stopPropagation="true"></span>
+
+        @if (_outPorts.Count > 1)
+        {
+            <span class="pl-port-label pl-port-label--out" style="top:@Px(anchor.Y - Box.Y - 7);">@port</span>
+        }
+    }
+
+    <div class="pl-node-head">
+        <svg class="pl-node-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            @NodeIcons.Path(_spec?.Icon)
+        </svg>
+        <span class="pl-node-title">@Title</span>
+        @if (Box.Pinned)
+        {
+            <span class="pl-node-pin" title="Moved by hand. Re-layout puts it back.">📌</span>
+        }
+    </div>
+
+    <div class="pl-node-sub">@Subtitle()</div>
+
+    @if (RunState is not null)
+    {
+        <div class="pl-node-meta">
+            @if (RunState.Status == PipelineStepStatus.Running)
+            {
+                <span class="pl-spin" aria-hidden="true"></span>
+            }
+            else
+            {
+                <span>@_stateGlyph</span>
+            }
+            @if (RunState.DurationMs > 0)
+            {
+                <span>@NodeIcons.Duration(RunState.DurationMs)</span>
+            }
+            @if (RunState.RowsOut is > 0)
+            {
+                <span>@NodeIcons.Rows(RunState.RowsOut.Value)</span>
+            }
+        </div>
+    }
+
+    @if (SelfLoops)
+    {
+        <div class="pl-node-badges"><span class="badge badge-neutral">↻ loops</span></div>
+    }
+
+    @* Append-a-step affordance. Hidden below the zoom threshold by CSS. *@
+    @if (!ReadOnly && _outPorts.Count == 1)
+    {
+        <button class="pl-node-insert"
+                style="right:-30px;top:@Px(Box.Height / 2 - 9);"
+                title="Add a step after this one"
+                @onclick="() => OnAppend.InvokeAsync(Box.Id)"
+                @onclick:stopPropagation="true">+</button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public NodeBox Box { get; set; } = default!;
+    [Parameter, EditorRequired] public PipelineNodeDef Node { get; set; } = default!;
+
+    /// <summary>Per-step run state, or null in the editor.</summary>
+    [Parameter] public NodeRunState? RunState { get; set; }
+
+    [Parameter] public bool Selected { get; set; }
+    [Parameter] public bool Dimmed { get; set; }
+    [Parameter] public bool Matched { get; set; }
+
+    /// <summary>Input ports that already have an edge, so a connected port reads differently.</summary>
+    [Parameter] public IReadOnlyCollection<string>? ConnectedInPorts { get; set; }
+
+    [Parameter] public bool SelfLoops { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+
+    /// <summary>Bumped by the parent whenever this step's definition changes, to drive ShouldRender.</summary>
+    [Parameter] public int Revision { get; set; }
+
+    [Parameter] public EventCallback<(string NodeId, bool Additive)> OnSelect { get; set; }
+    [Parameter] public EventCallback<string> OnOpen { get; set; }
+    [Parameter] public EventCallback<string> OnAppend { get; set; }
+    [Parameter] public EventCallback<(string NodeId, string Port, bool IsOutput)> OnPortClick { get; set; }
+
+    private PipelineNodeSpec? _spec;
+    private List<string> _inPorts = new();
+    private List<string> _outPorts = new();
+    private string _modifier = string.Empty;
+    private string _stateCss = string.Empty;
+    private string _stateGlyph = string.Empty;
+
+    // Cheap stamp: re-render only when something this step actually displays has changed.
+    private string _stamp = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        _spec = PipelineNodeCatalog.Get(Node.Type);
+        _inPorts = PipelineNodeCatalog.InPortsFor(Node).ToList();
+        _outPorts = PipelineNodeCatalog.OutPortsFor(Node).ToList();
+        _modifier = NodeIcons.ModifierFor(_spec?.Category);
+        (_stateCss, _stateGlyph) = NodeIcons.StateOf(RunState?.Status);
+    }
+
+    protected override bool ShouldRender()
+    {
+        var next = string.Join('|',
+            Revision, Box.X, Box.Y, Box.Width, Box.Height, Box.Pinned,
+            Selected, Dimmed, Matched, SelfLoops, ReadOnly,
+            ConnectedInPorts is null ? "" : string.Join(',', ConnectedInPorts),
+            RunState?.Status, RunState?.DurationMs, RunState?.RowsOut);
+
+        if (next == _stamp) return false;
+        _stamp = next;
+        return true;
+    }
+
+    private bool IsConnected(string port) => ConnectedInPorts?.Contains(port) == true;
+
+    private string Title => string.IsNullOrWhiteSpace(Node.Label) ? (_spec?.Label ?? Node.Id) : Node.Label!;
+
+    /// <summary>
+    /// The single most identifying config value — what this step actually reads or writes. Falling back to
+    /// the type label would be safe but useless: a canvas of six steps all captioned "Map columns" tells the
+    /// reader nothing.
+    /// </summary>
+    private string Subtitle()
+    {
+        var config = Node.Config;
+        if (config is null) return _spec?.Label ?? Node.Type;
+
+        string? Value(string key) => config[key]?.ToString();
+
+        switch (Node.Type)
+        {
+            case PipelineNodeTypes.SourceDataset:
+            {
+                var table = Value("table");
+                var dataset = Value("dataset");
+                if (!string.IsNullOrWhiteSpace(table)) return $"{dataset}.{table}".TrimStart('.');
+                break;
+            }
+
+            case PipelineNodeTypes.SourceDatabase:
+            {
+                var mode = Value("mode");
+                if (mode == "query") return Value("connection") is { Length: > 0 } c ? $"{c} · query" : "query";
+                var table = Value("table");
+                if (!string.IsNullOrWhiteSpace(table)) return table!;
+                break;
+            }
+
+            case PipelineNodeTypes.TransformRank:
+            case PipelineNodeTypes.TransformSurrogateKey:
+                return Value("column") is { Length: > 0 } rankCol ? rankCol : _spec?.Label ?? Node.Type;
+
+            case PipelineNodeTypes.TransformFill:
+                return Value("direction") == "up" ? "fill upwards" : "fill downwards";
+
+            case PipelineNodeTypes.TransformSplit:
+                return Value("column") is { Length: > 0 } splitCol
+                    ? $"{splitCol} \u2192 {(Value("mode") == "rows" ? "rows" : "columns")}"
+                    : _spec?.Label ?? Node.Type;
+
+            case PipelineNodeTypes.TransformPivot:
+                return Value("on") is { Length: > 0 } pivotOn ? $"{pivotOn} \u2192 columns" : "pivot";
+
+            case PipelineNodeTypes.TransformUnpivot:
+                return "columns \u2192 rows";
+
+            case PipelineNodeTypes.TransformFlatten:
+            case PipelineNodeTypes.TransformParse:
+                return Value("column") is { Length: > 0 } jsonCol ? jsonCol : _spec?.Label ?? Node.Type;
+
+            case PipelineNodeTypes.SourceApi:
+            {
+                // The path is the useful half; the credential name is visible in the inspector anyway.
+                var url = Value("url");
+                var page = Value("pagination");
+                var paged = !string.IsNullOrWhiteSpace(page) && page != PipelineApiPagination.None;
+
+                if (!string.IsNullOrWhiteSpace(url))
+                {
+                    var shown = url!.Split('?')[0].TrimEnd('/');
+                    var tail = shown.Split('/').LastOrDefault();
+                    if (!string.IsNullOrWhiteSpace(tail))
+                        return paged ? $"{tail} · paged" : tail!;
+                }
+
+                return paged ? $"{page} paged" : "API";
+            }
+
+            case PipelineNodeTypes.DestinationApi:
+            {
+                var url = Value("url");
+                var shape = Value("shape") == PipelineApiWriteShapes.Row ? "per row" : "batched";
+
+                if (!string.IsNullOrWhiteSpace(url))
+                {
+                    var tail = url!.Split('?')[0].TrimEnd('/').Split('/').LastOrDefault();
+                    if (!string.IsNullOrWhiteSpace(tail)) return $"{tail} · {shape}";
+                }
+
+                return shape;
+            }
+
+            case PipelineNodeTypes.SourceFile:
+            {
+                // Just the file name: a full UNC path would be truncated to uselessness in a 200px box.
+                var path = Value("path") ?? Value("blobPath");
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    var name = path!.Split('/', '\\').LastOrDefault();
+                    if (!string.IsNullOrWhiteSpace(name)) return name!;
+                }
+                return Value("location") switch
+                {
+                    PipelineFileLocations.Upload => "uploaded at run time",
+                    PipelineFileLocations.Blob => "blob storage",
+                    _ => _spec?.Label ?? Node.Type
+                };
+            }
+
+            case PipelineNodeTypes.TransformMap:
+            {
+                var count = (config["columns"] as System.Text.Json.Nodes.JsonObject)?.Count ?? 0;
+                return count == 1 ? "1 column" : $"{count} columns";
+            }
+
+            case PipelineNodeTypes.TransformFilter:
+                if (Value("where") is { Length: > 0 } where) return where;
+                break;
+
+            case PipelineNodeTypes.TransformJoin:
+                return $"{Value("kind") ?? "left"} join";
+
+            case PipelineNodeTypes.TransformAggregate:
+            {
+                var groups = (config["groupBy"] as System.Text.Json.Nodes.JsonArray)?.Count ?? 0;
+                var metrics = (config["metrics"] as System.Text.Json.Nodes.JsonArray)?.Count ?? 0;
+                return $"{groups} by, {metrics} summar{(metrics == 1 ? "y" : "ies")}";
+            }
+
+            case PipelineNodeTypes.TransformDedupe:
+            {
+                var keys = (config["keys"] as System.Text.Json.Nodes.JsonArray)?.Count ?? 0;
+                return keys == 1 ? "1 key" : $"{keys} keys";
+            }
+
+            case PipelineNodeTypes.DestinationDataset:
+            {
+                var table = Value("table");
+                var mode = Value("mode") ?? PipelineWriteModes.Append;
+                if (!string.IsNullOrWhiteSpace(table)) return $"{table} · {mode}";
+                break;
+            }
+        }
+
+        return _spec?.Label ?? Node.Type;
+    }
+
+    /// <summary>
+    /// Composed so a screen reader hears what the step is, and how it ran. The canvas is otherwise entirely
+    /// opaque, and for a screen-reader user this text IS the run view.
+    /// </summary>
+    private string AriaLabel()
+    {
+        var parts = new List<string> { $"{_spec?.Label ?? Node.Type} step, {Title}" };
+
+        var sub = Subtitle();
+        if (sub != (_spec?.Label ?? Node.Type)) parts.Add(sub);
+
+        if (RunState is not null)
+        {
+            parts.Add(RunState.Status switch
+            {
+                PipelineStepStatus.Success => $"succeeded in {NodeIcons.Duration(RunState.DurationMs)}",
+                PipelineStepStatus.Failed => $"failed: {RunState.Error}",
+                PipelineStepStatus.Running => "running",
+                PipelineStepStatus.Skipped => "skipped",
+                _ => RunState.Status
+            });
+
+            if (RunState.RowsOut is > 0) parts.Add(NodeIcons.Rows(RunState.RowsOut.Value));
+        }
+
+        return string.Join(". ", parts);
+    }
+
+    private string PortTitle(string port, bool isOutput)
+    {
+        if (isOutput) return _outPorts.Count > 1
+            ? $"Output '{port}' — drag to another step's input"
+            : "Output — drag to another step's input";
+
+        return _inPorts.Count > 1
+            ? $"Input '{port}' — drag another step's output here"
+            : "Input — drag another step's output here";
+    }
+
+    private async Task OnClickHandler(MouseEventArgs e) =>
+        await OnSelect.InvokeAsync((Box.Id, e.ShiftKey || e.CtrlKey || e.MetaKey));
+
+    private async Task OnDoubleClickHandler() => await OnOpen.InvokeAsync(Box.Id);
+
+    private static string Px(double value) =>
+        value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "px";
+}

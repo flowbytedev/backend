@@ -1,0 +1,618 @@
+@page "/data/pipelines/{Id}/runs"
+@page "/data/pipelines/{Id}/runs/{RunId}"
+@using System.Net.Http.Json
+@using Application.Client.Pipelines
+@using Application.Shared.Authorization
+@using Application.Shared.Models.Data.Pipelines
+@using Application.Shared.Services.Data.Pipelines
+@inject HttpClient _httpClient
+@inject IToastService _toastService
+@inject NavigationManager _navigationManager
+@inject AuthenticationStateProvider _authenticationStateProvider
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize(Policy = PolicyNames.DataAdminAccess)]
+@implements IDisposable
+
+<PageTitle>@(_run is null ? "Pipeline runs" : $"Run · {_run.PipelineName}")</PageTitle>
+
+@if (!_canView && !_loading)
+{
+    <div class="sc"><div class="page-wrap"><div class="empty">
+        <div class="empty-title">Access denied</div>
+    </div></div></div>
+}
+else if (RunId is null)
+{
+    @* ---------------- history list ---------------- *@
+    <div class="sc">
+        <div class="page-wrap">
+            <div class="page-header">
+                <h1 class="page-title">Run history</h1>
+                <p class="page-subtitle">
+                    <a href="@($"data/pipelines/{Id}?c={_companyId}")">Back to the pipeline</a>
+                </p>
+            </div>
+
+            <div class="action-bar">
+                <label class="switch-row">
+                    <span class="switch @(_live ? "is-on" : "")" @onclick="ToggleLive"></span>
+                    <span class="switch-label">Live</span>
+                </label>
+                <span class="action-bar-spacer"></span>
+                <button class="btn btn-secondary btn-sm" @onclick="LoadRunsAsync">Refresh</button>
+            </div>
+
+            @if (_loading)
+            {
+                <div class="card"><div class="card-body">
+                    <div class="skeleton" style="height:18px;"></div>
+                </div></div>
+            }
+            else if (_runs.Count == 0)
+            {
+                <div class="card"><div class="empty">
+                    <div class="empty-title">No runs yet</div>
+                    <div class="empty-text">Run the pipeline and its history will appear here.</div>
+                </div></div>
+            }
+            else
+            {
+                <div class="card">
+                    <div class="table-wrap">
+                        <table class="table table-clickable">
+                            <thead>
+                                <tr>
+                                    <th>Started</th>
+                                    <th>Status</th>
+                                    <th>Trigger</th>
+                                    <th>Steps</th>
+                                    <th>Read</th>
+                                    <th>Written</th>
+                                    <th>Took</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var run in _runs)
+                                {
+                                    var item = run;
+                                    <tr @key="item.Id" @onclick="() => OpenRun(item.Id)">
+                                        <td>@item.StartedAt.ToLocalTime().ToString("dd MMM HH:mm:ss")</td>
+                                        <td>
+                                            <span class="badge @RunBadge(item.Status)">@item.Status</span>
+                                            @if (item.Error is { Length: > 0 })
+                                            {
+                                                <div style="font-size:11px;color:var(--danger);max-width:320px;">
+                                                    @item.Error
+                                                </div>
+                                            }
+                                        </td>
+                                        <td>@item.TriggerType</td>
+                                        <td style="font-family:var(--font-mono);font-size:12px;">
+                                            @item.StepsCompleted/@item.StepsTotal
+                                            @if (item.StepsFailed > 0)
+                                            {
+                                                <span style="color:var(--danger);"> ·@item.StepsFailed failed</span>
+                                            }
+                                        </td>
+                                        <td style="font-family:var(--font-mono);font-size:12px;">@item.RowsRead.ToString("N0")</td>
+                                        <td style="font-family:var(--font-mono);font-size:12px;">@item.RowsWritten.ToString("N0")</td>
+                                        <td style="font-family:var(--font-mono);font-size:12px;">@NodeIcons.Duration(item.DurationMs)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+else if (_run is not null)
+{
+    @* ---------------- one run: the SAME canvas, read-only, plus a waterfall ---------------- *@
+    <div class="pl-shell sc">
+        <div class="pl-topbar">
+            <div class="pl-crumbs">
+                <a href="@($"data/pipelines?c={_companyId}")">Pipelines</a>
+                <span class="pl-crumb-sep">/</span>
+                <a href="@($"data/pipelines/{Id}/runs?c={_companyId}")">Runs</a>
+                <span class="pl-crumb-sep">/</span>
+                <span class="pl-crumb-current">@_run.StartedAt.ToLocalTime().ToString("dd MMM HH:mm:ss")</span>
+            </div>
+
+            <span class="badge @RunBadge(_run.Status)">@_run.Status</span>
+            @if (_polling)
+            {
+                <span class="pl-spin" aria-hidden="true"></span>
+            }
+
+            <span class="pl-topbar-spacer"></span>
+
+            <span class="chip">@_run.RowsRead.ToString("N0") read</span>
+            <span class="chip">@_run.RowsWritten.ToString("N0") written</span>
+            <span class="chip">@NodeIcons.Duration(_run.DurationMs)</span>
+
+            @if (!PipelineRunStatus.IsTerminal(_run.Status))
+            {
+                <button class="btn btn-danger btn-sm" @onclick="CancelAsync">Cancel</button>
+            }
+            <a class="btn btn-ghost btn-sm" href="@($"data/pipelines/{Id}?c={_companyId}")">Open pipeline</a>
+        </div>
+
+        <div class="pl-body no-palette">
+            <div></div>
+            <div></div>
+
+            @* Read-only, with run state. Never a forked renderer: the graph you see here is the graph you
+               drew, coloured by what happened. *@
+            <PipelineCanvas Layout="_layout"
+                            Graph="_graph"
+                            RunState="_runState"
+                            ReadOnly="true"
+                            Selected="_selected"
+                            OnSelectNode="SelectStep"
+                            OnOpenNode="id => SelectStep((id, false))" />
+
+            <div class="pl-resizer"></div>
+
+            <div class="pl-panel pl-panel--right">
+                <div class="pl-panel-head">
+                    <span class="pl-panel-title">@(_step is null ? "Steps" : _step.NodeLabel ?? _step.NodeId)</span>
+                </div>
+
+                <div class="pl-panel-body">
+                    @if (_step is null)
+                    {
+                        <div class="pl-inspector-empty">Pick a step to see what it produced.</div>
+
+                        @if (_run.Error is { Length: > 0 })
+                        {
+                            <div class="field">
+                                <label class="field-label">Failure</label>
+                                <div class="field-error">@_run.Error</div>
+                                @if (_run.ErrorType is { Length: > 0 })
+                                {
+                                    <div class="field-help">@_run.ErrorType</div>
+                                }
+                            </div>
+                        }
+
+                        @if (_run.Log is { Length: > 0 })
+                        {
+                            <details class="pl-group" open>
+                                <summary>Log</summary>
+                                <div class="pl-group-body">
+                                    <pre class="code" style="max-height:320px;">@_run.Log</pre>
+                                </div>
+                            </details>
+                        }
+                    }
+                    else
+                    {
+                        <div class="field">
+                            <label class="field-label">Result</label>
+                            <div class="chips">
+                                <span class="badge @StepBadge(_step.Status)">@_step.Status</span>
+                                <span class="chip">@NodeIcons.Duration(_step.DurationMs)</span>
+                                @if (_step.RowsOut is { } rows)
+                                {
+                                    <span class="chip">@NodeIcons.Rows(rows)</span>
+                                }
+                            </div>
+                        </div>
+
+                        @if (_step.Error is { Length: > 0 })
+                        {
+                            <div class="field">
+                                <label class="field-label">Error</label>
+                                <div class="field-error">@_step.Error</div>
+                            </div>
+                        }
+
+                        @if (_step.Columns is { Count: > 0 })
+                        {
+                            <div class="field">
+                                <label class="field-label">Columns (@_step.Columns.Count)</label>
+                                <div class="pl-cols">
+                                    @foreach (var column in _step.Columns)
+                                    {
+                                        <span class="pl-col-chip sc-tip" data-tip="@column.Type">@column.Name</span>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        @if (_step.SqlText is { Length: > 0 })
+                        {
+                            <details class="pl-group" open>
+                                <summary>Generated SQL</summary>
+                                <div class="pl-group-body">
+                                    @* The single most useful thing in the whole run view when the numbers
+                                       look wrong: every transform is SQL underneath. *@
+                                    <pre class="code" style="max-height:220px;">@_step.SqlText</pre>
+                                </div>
+                            </details>
+                        }
+
+                        @if (_step.Preview is { Count: > 0 })
+                        {
+                            <details class="pl-group" open>
+                                <summary>First @_step.Preview.Count rows</summary>
+                                <div class="pl-group-body" style="overflow:auto;">
+                                    <table class="pl-preview-table">
+                                        <thead>
+                                            <tr>
+                                                @foreach (var column in PreviewColumns())
+                                                {
+                                                    <th>@column</th>
+                                                }
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var row in _step.Preview)
+                                            {
+                                                <tr>
+                                                    @foreach (var column in PreviewColumns())
+                                                    {
+                                                        var value = row.GetValueOrDefault(column);
+                                                        <td>
+                                                            @if (value is null)
+                                                            {
+                                                                <span class="pl-preview-null">null</span>
+                                                            }
+                                                            else
+                                                            {
+                                                                @value.ToString()
+                                                            }
+                                                        </td>
+                                                    }
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </details>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+
+        @* ---------- waterfall: div bars positioned by offset, so a concurrent wave visibly overlaps ------- *@
+        @if (_steps.Count > 0)
+        {
+            <div class="pl-testpanel">
+                <div class="pl-testpanel-head">
+                    <strong style="font-size:13px;">Steps</strong>
+                    <span class="chip">@_steps.Count</span>
+                    <span class="pl-topbar-spacer"></span>
+                    <span style="font-size:11.5px;color:var(--text-muted);">
+                        total @NodeIcons.Duration(_totalMs)
+                    </span>
+                </div>
+                <div class="pl-testpanel-body">
+                    <div class="pl-fall">
+                        @foreach (var step in _steps)
+                        {
+                            var item = step;
+                            var geometry = BarGeometry(item);
+                            <button class="pl-fall-row" @key="item.Id" @onclick="() => SelectStep((item.NodeId, false))">
+                                <span class="pl-fall-name">@(item.NodeLabel ?? item.NodeId)</span>
+                                <span class="pl-fall-track">
+                                    <span class="pl-fall-bar @BarClass(item.Status)"
+                                          style="left:@geometry.Left%;width:@geometry.Width%;"></span>
+                                </span>
+                                <span class="pl-fall-meta">
+                                    @NodeIcons.Duration(item.DurationMs)
+                                    @if (item.RowsOut is { } rows)
+                                    {
+                                        <text> · @rows.ToString("N0")</text>
+                                    }
+                                </span>
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [Parameter] public string? RunId { get; set; }
+    [SupplyParameterFromQuery(Name = "c")] public string? c { get; set; }
+
+    private string _companyId = string.Empty;
+    private bool _canView;
+    private bool _loading = true;
+    private bool _live;
+    private bool _polling;
+
+    private List<PipelineRunDto> _runs = new();
+    private PipelineRunDto? _run;
+    private List<PipelineRunStepDto> _steps = new();
+    private PipelineRunStepDto? _step;
+
+    private PipelineGraph _graph = new();
+    private GraphLayout _layout = GraphLayout.Empty;
+    private Dictionary<string, NodeRunState> _runState = new();
+    private readonly HashSet<string> _selected = new(StringComparer.Ordinal);
+
+    private int _totalMs = 1;
+    private CancellationTokenSource? _poll;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companyId = c ?? string.Empty;
+
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        _canView = authState.User.HasCompanyRole(_companyId, "DATA_ADMIN");
+        if (!_canView) { _loading = false; return; }
+
+        _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+        _httpClient.DefaultRequestHeaders.Add("X-Company-Id", _companyId);
+
+        var userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrEmpty(userId))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("UserId");
+            _httpClient.DefaultRequestHeaders.Add("UserId", userId);
+        }
+    }
+
+    // Navigating between the list and a run reuses this component, so OnInitializedAsync does not re-run.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_canView) return;
+
+        StopPolling();
+
+        if (RunId is null) await LoadRunsAsync();
+        else await LoadRunAsync();
+    }
+
+    private async Task LoadRunsAsync()
+    {
+        _loading = true;
+        try
+        {
+            _runs = await _httpClient
+                .GetFromJsonAsync<List<PipelineRunDto>>($"api/pipelines/{Id}/runs?take=50") ?? new();
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not load runs: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+        }
+
+        if (_live) StartPolling();
+    }
+
+    private async Task LoadRunAsync()
+    {
+        _loading = true;
+        _step = null;
+        _selected.Clear();
+
+        try
+        {
+            _run = await _httpClient.GetFromJsonAsync<PipelineRunDto>($"api/pipelines/runs/{RunId}");
+            if (_run is null) return;
+
+            // The graph that ACTUALLY ran, snapshotted on the run — so editing the pipeline afterwards
+            // cannot change what this run appears to have done.
+            var pipeline = await _httpClient.GetFromJsonAsync<PipelineDetailDto>($"api/pipelines/{Id}");
+            _graph = PipelineGraph.TryParse(pipeline?.GraphJson) ?? new();
+
+            _steps = await _httpClient
+                .GetFromJsonAsync<List<PipelineRunStepDto>>($"api/pipelines/runs/{RunId}/steps") ?? new();
+
+            _runState = NodeRunState.FromSteps(_steps);
+
+            // Pins are ignored in the run view: it is always auto-laid-out, so the shape is canonical.
+            _graph.Layout = null;
+            _layout = PipelineLayout.Compute(_graph, null, 1);
+
+            _totalMs = Math.Max(1, _steps.Sum(s => s.DurationMs));
+
+            if (!PipelineRunStatus.IsTerminal(_run.Status)) StartPolling();
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not load the run: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SelectStep((string NodeId, bool Additive) e)
+    {
+        _selected.Clear();
+        _selected.Add(e.NodeId);
+
+        try
+        {
+            // The preview and column JSON are fetched only when a step is opened — the step list omits them
+            // so a 40-step run does not ship 40 result previews to draw one chart.
+            _step = await _httpClient
+                .GetFromJsonAsync<PipelineRunStepDto>($"api/pipelines/runs/{RunId}/steps/{e.NodeId}");
+        }
+        catch
+        {
+            _step = _steps.FirstOrDefault(s => s.NodeId == e.NodeId);
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        try
+        {
+            var response = await _httpClient.PostAsync($"api/pipelines/runs/{RunId}/cancel", null);
+            if (response.IsSuccessStatusCode)
+                _toastService.ShowInfo("Cancelling — the run stops after the step in progress.");
+            else
+                _toastService.ShowError(await response.Content.ReadAsStringAsync());
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not cancel: {ex.Message}");
+        }
+    }
+
+    private void ToggleLive()
+    {
+        _live = !_live;
+        if (_live) StartPolling(); else StopPolling();
+    }
+
+    /// <summary>
+    /// A cancellable loop, never a Timer: a Timer in WASM keeps firing after the component is gone. Backs
+    /// off when nothing changes and stops outright once the run is terminal.
+    /// </summary>
+    private void StartPolling()
+    {
+        StopPolling();
+        _poll = new CancellationTokenSource();
+        var token = _poll.Token;
+
+        _ = Task.Run(async () =>
+        {
+            var interval = 1500;
+            var quiet = 0;
+            var lastRev = -1;
+            var cursor = 0;
+
+            while (!token.IsCancellationRequested)
+            {
+                try
+                {
+                    await Task.Delay(interval, token);
+                    if (token.IsCancellationRequested) return;
+
+                    _polling = true;
+
+                    if (RunId is null)
+                    {
+                        await LoadRunsAsync();
+                        await InvokeAsync(StateHasChanged);
+                        continue;
+                    }
+
+                    var status = await _httpClient.GetFromJsonAsync<PipelineRunStatusDto>(
+                        $"api/pipelines/runs/{RunId}/status?since={cursor}", token);
+
+                    if (status is null) continue;
+
+                    // rev only grows, so an out-of-order response can simply be discarded.
+                    if (status.Rev < lastRev) continue;
+
+                    var changed = status.Rev != lastRev;
+                    lastRev = status.Rev;
+
+                    if (status.Steps.Count > 0)
+                    {
+                        NodeRunState.Merge(_runState, status.Steps);
+                        cursor = status.Cursor;
+                        changed = true;
+                    }
+
+                    if (_run is not null)
+                    {
+                        _run.Status = status.Status;
+                        _run.StepsCompleted = status.StepsCompleted;
+                        _run.StepsFailed = status.StepsFailed;
+                        _run.StepsSkipped = status.StepsSkipped;
+                        _run.RowsRead = status.RowsRead;
+                        _run.RowsWritten = status.RowsWritten;
+                        _run.DurationMs = status.DurationMs;
+                        _run.Error = status.Error;
+                    }
+
+                    if (changed)
+                    {
+                        quiet = 0;
+                        interval = 1500;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    else if (++quiet >= 10)
+                    {
+                        interval = Math.Min(10_000, (int)(interval * 1.5));
+                    }
+
+                    if (PipelineRunStatus.IsTerminal(status.Status))
+                    {
+                        // Reload once at the end to pick up the log and the final step rows.
+                        await LoadRunAsync();
+                        await InvokeAsync(StateHasChanged);
+                        return;
+                    }
+                }
+                catch (OperationCanceledException) { return; }
+                catch { /* a transient failure must not kill the loop */ }
+                finally { _polling = false; }
+            }
+        }, token);
+    }
+
+    private void StopPolling()
+    {
+        _poll?.Cancel();
+        _poll?.Dispose();
+        _poll = null;
+        _polling = false;
+    }
+
+    private void OpenRun(string runId) =>
+        _navigationManager.NavigateTo($"data/pipelines/{Id}/runs/{runId}?c={_companyId}");
+
+    private List<string> PreviewColumns() =>
+        _step?.Columns is { Count: > 0 }
+            ? _step.Columns.Select(c => c.Name).ToList()
+            : _step?.Preview?.FirstOrDefault()?.Keys.ToList() ?? new();
+
+    /// <summary>
+    /// Bar position as a percentage of the run's total. Cumulative rather than wall-clock because step rows
+    /// carry a duration, not an offset — good enough to show which step dominated, which is the question.
+    /// </summary>
+    private (double Left, double Width) BarGeometry(PipelineRunStepDto step)
+    {
+        var before = _steps.Where(s => s.StepIndex < step.StepIndex).Sum(s => s.DurationMs);
+        var left = 100.0 * before / _totalMs;
+        var width = Math.Max(0.6, 100.0 * step.DurationMs / _totalMs);
+        return (Math.Round(Math.Min(left, 99.4), 2), Math.Round(Math.Min(width, 100 - left), 2));
+    }
+
+    private static string BarClass(string status) => status switch
+    {
+        PipelineStepStatus.Success => "is-ok",
+        PipelineStepStatus.Failed => "is-failed",
+        PipelineStepStatus.Skipped => "is-skipped",
+        _ => string.Empty
+    };
+
+    private static string RunBadge(string? status) => status switch
+    {
+        PipelineRunStatus.Success => "badge-success",
+        PipelineRunStatus.Failed => "badge-danger",
+        PipelineRunStatus.Running => "badge-accent",
+        PipelineRunStatus.Canceled => "badge-warning",
+        _ => "badge-neutral"
+    };
+
+    private static string StepBadge(string? status) => status switch
+    {
+        PipelineStepStatus.Success => "badge-success",
+        PipelineStepStatus.Failed => "badge-danger",
+        PipelineStepStatus.Running => "badge-accent",
+        PipelineStepStatus.Skipped => "badge-neutral",
+        _ => "badge-neutral"
+    };
+
+    public void Dispose() => StopPolling();
+}

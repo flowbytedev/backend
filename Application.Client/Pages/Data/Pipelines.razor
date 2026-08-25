@@ -1,0 +1,370 @@
+@page "/data/pipelines"
+@using System.Net.Http.Json
+@using Application.Shared.Authorization
+@using Application.Shared.Models.Data.Pipelines
+@inject HttpClient _httpClient
+@inject IToastService _toastService
+@inject NavigationManager _navigationManager
+@inject AuthenticationStateProvider _authenticationStateProvider
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize(Policy = PolicyNames.DataAdminAccess)]
+
+<PageTitle>Data Pipelines</PageTitle>
+
+@if (!_canView && !_loading)
+{
+    <div class="sc">
+        <div class="page-wrap">
+            <div class="empty">
+                <div class="empty-title">Access denied</div>
+                <div class="empty-text">You don't have permission to manage data pipelines.</div>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="sc">
+        <div class="page-wrap">
+            <div class="page-header">
+                <h1 class="page-title">Data Pipelines</h1>
+                <p class="page-subtitle">
+                    Read from a file, a database or another dataset; reshape the columns; load the result into
+                    a dataset. Run it by hand, on a schedule, or over the API.
+                </p>
+            </div>
+
+            <div class="action-bar">
+                <input class="input" style="max-width:280px;" placeholder="Filter pipelines…"
+                       value="@_filter" @oninput="e => _filter = e.Value?.ToString() ?? string.Empty" />
+                <span class="action-bar-spacer"></span>
+                <button class="btn btn-primary" @onclick="StartCreate">New pipeline</button>
+            </div>
+
+            @if (_loading)
+            {
+                <div class="card"><div class="card-body">
+                    <div class="skeleton" style="height:18px;margin-bottom:8px;"></div>
+                    <div class="skeleton" style="height:18px;width:70%;"></div>
+                </div></div>
+            }
+            else if (Filtered.Count == 0)
+            {
+                <div class="card"><div class="empty">
+                    <div class="empty-title">@(_all.Count == 0 ? "No pipelines yet" : "Nothing matches")</div>
+                    <div class="empty-text">
+                        @if (_all.Count == 0)
+                        {
+                            @("Create one to move data from a source into a dataset.")
+                        }
+                        else
+                        {
+                            @($"No pipeline matches “{_filter}”.")
+                        }
+                    </div>
+                </div></div>
+            }
+            else
+            {
+                <div class="card">
+                    <div class="table-wrap">
+                        <table class="table table-clickable">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Steps</th>
+                                    <th>Schedule</th>
+                                    <th>Last run</th>
+                                    <th>Rows</th>
+                                    <th class="table-actions"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var pipeline in Filtered)
+                                {
+                                    var item = pipeline;
+                                    <tr @key="item.Id" @onclick="() => Open(item.Id)">
+                                        <td>
+                                            <div style="font-weight:600;">@item.Name</div>
+                                            @if (!string.IsNullOrWhiteSpace(item.Description))
+                                            {
+                                                <div style="font-size:11.5px;color:var(--text-muted);">
+                                                    @item.Description
+                                                </div>
+                                            }
+                                            @if (!item.Valid)
+                                            {
+                                                <span class="badge badge-danger" style="margin-top:3px;">
+                                                    @item.ErrorCount problem@(item.ErrorCount == 1 ? "" : "s")
+                                                </span>
+                                            }
+                                        </td>
+                                        <td>@item.NodeCount</td>
+                                        <td>
+                                            <span class="badge @ScheduleBadge(item.ScheduleState)">
+                                                @item.ScheduleState
+                                            </span>
+                                            @if (!string.IsNullOrWhiteSpace(item.CronExpression))
+                                            {
+                                                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+                                                    @item.CronExpression
+                                                </div>
+                                            }
+                                            @if (item.NextRunAt is { } next)
+                                            {
+                                                <div style="font-size:11px;color:var(--text-muted);">
+                                                    next @next.ToLocalTime().ToString("dd MMM HH:mm")
+                                                </div>
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (item.LastRunAt is { } when)
+                                            {
+                                                <span class="badge @RunBadge(item.LastRunStatus)">
+                                                    @item.LastRunStatus
+                                                </span>
+                                                <div style="font-size:11px;color:var(--text-muted);">
+                                                    @when.ToLocalTime().ToString("dd MMM HH:mm")
+                                                </div>
+                                            }
+                                            else
+                                            {
+                                                <span style="color:var(--text-muted);">never</span>
+                                            }
+                                        </td>
+                                        <td style="font-family:var(--font-mono);font-size:12px;">
+                                            @(item.LastRunRows?.ToString("N0") ?? "—")
+                                        </td>
+                                        <td class="table-actions" @onclick:stopPropagation="true">
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => OpenRuns(item.Id)">
+                                                History
+                                            </button>
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => Duplicate(item.Id)">
+                                                Duplicate
+                                            </button>
+                                            <button class="btn btn-ghost btn-sm" style="color:var(--danger);"
+                                                    @onclick="() => AskDelete(item)">
+                                                Delete
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+    @if (_creating)
+    {
+        <div class="fb-modal-backdrop" @onclick="() => _creating = false">
+            <div class="fb-modal" @onclick:stopPropagation="true">
+                <div class="fb-modal-head"><span class="fb-modal-title">New pipeline</span></div>
+                <div class="fb-modal-body sc">
+                    <div class="field">
+                        <label class="field-label">Name</label>
+                        <input class="input" @bind="_newName" @bind:event="oninput"
+                               placeholder="Nightly sales load" />
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Description</label>
+                        <textarea class="textarea" @bind="_newDescription"
+                                  placeholder="What this pipeline is for."></textarea>
+                    </div>
+                </div>
+                <div class="fb-modal-foot">
+                    <button class="btn btn-secondary" @onclick="() => _creating = false">Cancel</button>
+                    <button class="btn btn-primary" disabled="@(string.IsNullOrWhiteSpace(_newName) || _saving)"
+                            @onclick="Create">
+                        @(_saving ? "Creating…" : "Create")
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (_deleting is not null)
+    {
+        <div class="fb-modal-backdrop" @onclick="() => _deleting = null">
+            <div class="fb-modal" style="max-width:440px;" @onclick:stopPropagation="true">
+                <div class="fb-modal-head"><span class="fb-modal-title">Delete pipeline</span></div>
+                <div class="fb-modal-body sc">
+                    <p>Delete <strong>@_deleting.Name</strong>?</p>
+                    <p style="color:var(--text-muted);font-size:12.5px;">
+                        Its run history is kept — those runs are the record of what happened to your data.
+                    </p>
+                </div>
+                <div class="fb-modal-foot">
+                    <button class="btn btn-secondary" @onclick="() => _deleting = null">Cancel</button>
+                    <button class="btn btn-danger" @onclick="Delete">Delete</button>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "c")] public string? c { get; set; }
+
+    private string _companyId = string.Empty;
+    private bool _canView;
+    private bool _loading = true;
+    private bool _creating;
+    private bool _saving;
+    private string _filter = string.Empty;
+    private string _newName = string.Empty;
+    private string? _newDescription;
+    private PipelineDto? _deleting;
+
+    private List<PipelineDto> _all = new();
+
+    private List<PipelineDto> Filtered => string.IsNullOrWhiteSpace(_filter)
+        ? _all
+        : _all.Where(p =>
+            p.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+            || (p.Description ?? string.Empty).Contains(_filter, StringComparison.OrdinalIgnoreCase))
+          .ToList();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companyId = c ?? string.Empty;
+
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        _canView = authState.User.HasCompanyRole(_companyId, "DATA_ADMIN");
+        if (!_canView) { _loading = false; return; }
+
+        _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+        _httpClient.DefaultRequestHeaders.Add("X-Company-Id", _companyId);
+
+        var userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrEmpty(userId))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("UserId");
+            _httpClient.DefaultRequestHeaders.Add("UserId", userId);
+        }
+
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+        try
+        {
+            _all = await _httpClient.GetFromJsonAsync<List<PipelineDto>>("api/pipelines") ?? new();
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not load pipelines: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void StartCreate()
+    {
+        _newName = string.Empty;
+        _newDescription = null;
+        _creating = true;
+    }
+
+    private async Task Create()
+    {
+        _saving = true;
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync("api/pipelines", new PipelineSaveRequest
+            {
+                Name = _newName.Trim(),
+                Description = _newDescription,
+                IsEnabled = true
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _toastService.ShowError(await response.Content.ReadAsStringAsync());
+                return;
+            }
+
+            var created = await response.Content.ReadFromJsonAsync<PipelineDetailDto>();
+            _creating = false;
+            if (created is not null) Open(created.Id);
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not create the pipeline: {ex.Message}");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task Duplicate(string id)
+    {
+        try
+        {
+            var response = await _httpClient.PostAsync($"api/pipelines/{id}/duplicate", null);
+            if (response.IsSuccessStatusCode)
+            {
+                _toastService.ShowSuccess("Duplicated. The copy has no schedule.");
+                await Load();
+            }
+            else
+            {
+                _toastService.ShowError(await response.Content.ReadAsStringAsync());
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not duplicate: {ex.Message}");
+        }
+    }
+
+    private void AskDelete(PipelineDto pipeline) => _deleting = pipeline;
+
+    private async Task Delete()
+    {
+        if (_deleting is null) return;
+        var id = _deleting.Id;
+        _deleting = null;
+
+        try
+        {
+            var response = await _httpClient.DeleteAsync($"api/pipelines/{id}");
+            if (response.IsSuccessStatusCode) await Load();
+            else _toastService.ShowError(await response.Content.ReadAsStringAsync());
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not delete: {ex.Message}");
+        }
+    }
+
+    private void Open(string id) =>
+        _navigationManager.NavigateTo($"data/pipelines/{id}?c={_companyId}");
+
+    private void OpenRuns(string id) =>
+        _navigationManager.NavigateTo($"data/pipelines/{id}/runs?c={_companyId}");
+
+    private static string ScheduleBadge(string? state) => state switch
+    {
+        "Active" => "badge-success",
+        "Error" => "badge-danger",
+        "Paused" => "badge-warning",
+        _ => "badge-neutral"
+    };
+
+    private static string RunBadge(string? status) => status switch
+    {
+        PipelineRunStatus.Success => "badge-success",
+        PipelineRunStatus.Failed => "badge-danger",
+        PipelineRunStatus.Running => "badge-accent",
+        PipelineRunStatus.Canceled => "badge-warning",
+        _ => "badge-neutral"
+    };
+}

@@ -1,0 +1,442 @@
+/* =====================================================================================================
+   shadcn design system — ported from the sibling relay app.
+
+   WHY THIS IS A SEPARATE FILE AND HOW IT IS SCOPED
+   -----------------------------------------------------------------------------------------------------
+   The app is moving to this design one page at a time, so this file must be able to sit alongside the
+   existing look without disturbing it. Two decisions make that work:
+
+   1. THE TOKENS ARE GLOBAL, because they cannot collide. The existing app.css names its variables
+      --bg-color / --container-bg / --text-color / --border-color; relay names its --bg / --surface /
+      --text-primary / --border. The only overlap in the whole set is --header-bg, which app.css owns for
+      the real page header, so it is deliberately NOT redefined here. Both files already theme off
+      <html data-theme>, so the dark block below needs no new plumbing.
+
+   2. THE COMPONENT RECIPES ARE SCOPED to a `.sc` ancestor, and they use relay's own class names inside
+      that scope. Relay styles .btn, .card, .badge and .table directly, but so do Bootstrap (live from CDN
+      here) and this app's own pages — adopting those names globally would restyle every existing screen,
+      which is the opposite of migrating gradually. Wrapping a migrated page in `<div class="sc">` gives it
+      relay's markup verbatim while everything outside is untouched.
+
+      Specificity works out: `.sc .btn` (0,2,0) beats both Bootstrap's `.btn` and app.css's `.btn` (0,1,0).
+
+      ONE EXCEPTION, and it is the thing to watch when migrating a page: an !important declaration in
+      app.css beats the scope regardless of specificity. app.css escalates the .btn family that way, so the
+      button rules below counter it property-for-property (see the note there). If a migrated page looks
+      subtly wrong, check whether app.css marks that property !important before adjusting anything here.
+
+   TO MIGRATE A PAGE: wrap its root element in class="sc" and use relay's class names. To finish the
+   migration one day, delete the `.sc ` prefixes here and the old rules from app.css.
+   ===================================================================================================== */
+
+
+/* =====================================================================================================
+   1. TOKENS — global. Light.
+   ===================================================================================================== */
+:root {
+    --accent: #18181b;
+    --accent-hover: #27272a;
+    --accent-active: #09090b;
+    --accent-subtle: #f4f4f5;
+    --accent-border: #d4d4d8;
+
+    --success: #16a34a;
+    --success-subtle: #f0fdf4;
+    --success-border: #bbf7d0;
+    --warning: #ca8a04;
+    --warning-subtle: #fefce8;
+    --warning-border: #fde68a;
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+    --danger-subtle: #fef2f2;
+    --danger-border: #fecaca;
+
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --surface-subtle: #f4f4f5;
+    --surface-muted: #f8fafc;
+    --border: #e4e4e7;
+    --border-strong: #d4d4d8;
+    --ring: rgba(24, 24, 27, 0.16);
+
+    --text-primary: #09090b;
+    --text-secondary: #52525b;
+    --text-muted: #71717a;
+    --text-on-accent: #fafafa;
+
+    /* Matches .al-header / .al-footer in app.css. The pipeline shell sizes itself from these, so if the
+       real chrome ever changes height these two numbers are the single place to correct it. */
+    --header-height: 52px;
+    --footer-height: 36px;
+
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 8px;
+    --radius-xl: 10px;
+
+    --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 8px 24px rgba(15, 23, 42, 0.08);
+    --shadow-lg: 0 24px 64px rgba(15, 23, 42, 0.18);
+
+    --font-display: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-body: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+
+    /* Canvas-only tokens. Kept with the palette rather than in the canvas section so a theme change is
+       one place to look. */
+    --pl-grid: #e4e4e7;
+    --pl-edge: #a1a1aa;
+}
+
+/* =====================================================================================================
+   2. TOKENS — dark (GitHub-flavoured, flat surfaces). Same data-theme attribute app.css already uses.
+   ===================================================================================================== */
+:root[data-theme="dark"] {
+    --accent: #2f81f7;
+    --accent-hover: #4a9bff;
+    --accent-active: #1f6feb;
+    --accent-subtle: rgba(56, 139, 253, 0.15);
+    --accent-border: #1f6feb;
+
+    --success: #3fb950;
+    --success-subtle: #0f2417;
+    --success-border: #238636;
+    --warning: #d29922;
+    --warning-subtle: #272013;
+    --warning-border: #9e6a03;
+    --danger: #f85149;
+    --danger-hover: #ff6a63;
+    --danger-subtle: #25100f;
+    --danger-border: #da3633;
+
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface-subtle: #21262d;
+    --surface-muted: #1c2128;
+    --border: #30363d;
+    --border-strong: #444c56;
+    --ring: rgba(47, 129, 247, 0.40);
+
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #6e7681;
+    --text-on-accent: #ffffff;
+
+    --shadow-xs: 0 1px 0 rgba(1, 4, 9, 0.20);
+    --shadow-sm: 0 1px 3px rgba(1, 4, 9, 0.40);
+    --shadow-md: 0 8px 24px rgba(1, 4, 9, 0.50);
+    --shadow-lg: 0 16px 48px rgba(1, 4, 9, 0.60);
+
+    --pl-grid: #21262d;
+    --pl-edge: #484f58;
+}
+
+
+/* =====================================================================================================
+   3. PRIMITIVES — scoped to `.sc`.
+   ===================================================================================================== */
+.sc {
+    font-family: var(--font-body);
+    color: var(--text-primary);
+    letter-spacing: 0;
+}
+
+.sc *, .sc *::before, .sc *::after { box-sizing: border-box; }
+
+.sc a { color: var(--accent); text-underline-offset: 4px; }
+
+/* ---- page furniture ---- */
+.sc .page-wrap { max-width: 1280px; padding: 32px; margin: 0 auto; }
+.sc .page-header { display: flex; flex-direction: column; gap: 6px; margin-bottom: 22px; }
+.sc .page-title { font-family: var(--font-display); font-size: 26px; font-weight: 650; line-height: 1.15; }
+.sc .page-subtitle { max-width: 720px; color: var(--text-muted); font-size: 13.5px; }
+
+.sc .action-bar {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    min-height: 54px; margin-bottom: 16px; padding: 10px;
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    background: var(--surface); box-shadow: var(--shadow-xs);
+}
+.sc .action-bar-spacer { flex: 1 1 auto; }
+
+/* ---- button ----
+   NOTE ON !important, which is otherwise avoided in this file.
+
+   app.css declares `.btn { padding / font-size / font-weight / border-radius / border … !important }` and
+   `.btn-ghost { background / color / border-color !important }`. An !important declaration beats
+   specificity outright, so `.sc .btn` loses to it no matter how the selector is written — verified in the
+   browser: the scoped font-size was silently ignored and buttons rendered at app.css's 0.875rem.
+
+   So each property below is marked !important ONLY where app.css already marks the same property that way.
+   This is matching an existing escalation, not a preference: when those app.css rules are eventually
+   deleted as pages migrate, these can lose their !important in the same change. Properties app.css does
+   not escalate (height, colour on the non-ghost variants) are left plain. */
+.sc .btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 13px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    font-family: var(--font-body);
+    letter-spacing: 0;
+    border: 1px solid transparent !important;
+    border-radius: var(--radius-md) !important;
+    text-decoration: none !important;
+    cursor: pointer;
+    box-shadow: none;
+    white-space: nowrap;
+    transition: background .12s ease, border-color .12s ease, color .12s ease;
+}
+.sc .btn:disabled { opacity: .5; cursor: not-allowed; }
+.sc .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* border-color is !important because app.css escalates the `border` SHORTHAND on .btn, which would
+   otherwise reset this variant's border back to transparent. */
+.sc .btn-primary {
+    background: var(--accent); color: var(--text-on-accent); border-color: var(--accent) !important;
+}
+.sc .btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+.sc .btn-secondary {
+    background: var(--surface); color: var(--text-primary); border-color: var(--border) !important;
+}
+.sc .btn-secondary:hover:not(:disabled) { background: var(--surface-subtle); }
+
+/* app.css escalates all three of these on .btn-ghost, including a hardcoded #18181b colour that would
+   otherwise survive into dark mode. */
+.sc .btn-ghost {
+    background: none !important;
+    color: var(--text-secondary) !important;
+    border-color: transparent !important;
+}
+.sc .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-subtle) !important;
+    color: var(--text-primary) !important;
+}
+
+.sc .btn-danger {
+    background: var(--danger); color: #fff; border-color: var(--danger) !important;
+}
+.sc .btn-danger:hover:not(:disabled) { background: var(--danger-hover); border-color: var(--danger-hover); }
+
+.sc .btn-sm { height: 30px; padding: 0 9px !important; font-size: 12.5px !important; }
+.sc .btn-icon { width: 32px; height: 32px; padding: 0 !important; }
+
+/* ---- form controls ---- */
+.sc .field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
+.sc .field-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.sc .field-help { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+.sc .field-error { font-size: 11px; color: var(--danger); }
+
+.sc .input, .sc .select, .sc .textarea {
+    width: 100%; font-family: var(--font-body); font-size: 13px; color: var(--text-primary);
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 0 10px; height: 34px; outline: none;
+    transition: border-color .12s ease, box-shadow .12s ease;
+}
+.sc .textarea { height: auto; min-height: 76px; padding: 8px 10px; line-height: 1.5; resize: vertical; }
+.sc .select { padding-right: 28px; cursor: pointer; }
+
+.sc .input:focus, .sc .select:focus, .sc .textarea:focus {
+    border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring);
+}
+.sc .input:disabled, .sc .select:disabled, .sc .textarea:disabled {
+    background: var(--surface-subtle); color: var(--text-muted); cursor: not-allowed;
+}
+.sc .input::placeholder, .sc .textarea::placeholder { color: var(--text-muted); }
+.sc .input-mono, .sc .textarea-mono { font-family: var(--font-mono); font-size: 12.5px; }
+
+/* ---- switch ---- */
+.sc .switch-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; cursor: pointer; user-select: none; }
+.sc .switch {
+    position: relative; flex: 0 0 auto; width: 34px; height: 20px; border-radius: 999px;
+    background: var(--border-strong); transition: background .15s ease;
+}
+.sc .switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    border-radius: 50%; background: #fff; transition: transform .15s ease;
+}
+.sc .switch.is-on { background: var(--accent); }
+.sc .switch.is-on::after { transform: translateX(14px); }
+.sc .switch-label { font-size: 13px; color: var(--text-primary); }
+
+/* ---- badge: one recipe, colour supplied by --bh ---- */
+.sc .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 600; line-height: 1.6;
+    padding: 1px 8px; border-radius: 999px;
+    color: var(--bh, var(--text-muted));
+    background: color-mix(in srgb, var(--bh, var(--text-muted)) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--bh, var(--text-muted)) 28%, transparent);
+}
+.sc .badge-neutral { --bh: var(--text-muted); }
+.sc .badge-accent { --bh: var(--accent); }
+.sc .badge-success { --bh: var(--success); }
+.sc .badge-warning { --bh: var(--warning); }
+.sc .badge-danger { --bh: var(--danger); }
+
+/* ---- card ---- */
+.sc .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); box-shadow: var(--shadow-xs);
+}
+.sc .card-head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+}
+.sc .card-title { font-size: 14px; font-weight: 600; }
+.sc .card-body { padding: 14px; }
+
+/* ---- table ---- */
+.sc .table-wrap { overflow-x: auto; border-radius: var(--radius-lg); }
+.sc .table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.sc .table th {
+    text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--text-muted); padding: 8px 12px; border-bottom: 1px solid var(--border);
+    background: var(--surface-subtle); white-space: nowrap;
+}
+.sc .table td { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--text-primary); }
+.sc .table tbody tr:hover td { background: var(--surface-subtle); }
+.sc .table tbody tr:last-child td { border-bottom: 0; }
+.sc .table-actions { width: 1%; white-space: nowrap; text-align: right; }
+.sc .table-clickable tbody tr { cursor: pointer; }
+
+/* ---- pager ---- */
+.sc .pager { display: flex; align-items: center; gap: 6px; padding: 10px 12px; font-size: 12.5px;
+    color: var(--text-muted); }
+.sc .pager-spacer { flex: 1 1 auto; }
+
+/* ---- empty state ---- */
+.sc .empty {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 44px 20px; text-align: center; color: var(--text-muted);
+}
+.sc .empty-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.sc .empty-text { font-size: 12.5px; max-width: 420px; }
+
+/* ---- modal. fb-modal-* namespacing, because Bootstrap owns .modal* ---- */
+.sc-modal-backdrop, .fb-modal-backdrop {
+    position: fixed; inset: 0; z-index: 1050;
+    background: rgba(9, 9, 11, 0.45); backdrop-filter: blur(2px);
+    display: grid; place-items: center; padding: 20px;
+}
+.fb-modal {
+    width: 100%; max-width: 560px; max-height: 86vh; display: flex; flex-direction: column;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-xl); box-shadow: var(--shadow-lg);
+}
+.fb-modal-head { display: flex; align-items: center; gap: 8px; padding: 14px 16px;
+    border-bottom: 1px solid var(--border); }
+.fb-modal-title { font-size: 15px; font-weight: 600; flex: 1 1 auto; }
+.fb-modal-body { padding: 16px; overflow: auto; }
+.fb-modal-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+    padding: 12px 16px; border-top: 1px solid var(--border); }
+.fb-modal-wide { max-width: 880px; }
+
+/* ---- dropdown menu. fb- namespaced for the same reason. ---- */
+.fb-dropdown { position: relative; display: inline-flex; }
+.fb-dropdown-menu {
+    position: absolute; top: calc(100% + 4px); right: 0; z-index: 40; min-width: 180px; padding: 4px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-md);
+}
+.fb-dropdown-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px;
+    border: 0; background: none; border-radius: var(--radius-sm);
+    font-size: 12.5px; color: var(--text-primary); text-align: left; cursor: pointer;
+}
+.fb-dropdown-item:hover { background: var(--surface-subtle); }
+.fb-dropdown-item.is-danger { color: var(--danger); }
+.fb-dropdown-sep { height: 1px; margin: 4px 0; background: var(--border); }
+
+/* ---- tooltip. NOT .tooltip: Bootstrap sets opacity:0 on that and the tooltip would never appear. ---- */
+.sc-tip { position: relative; }
+.sc-tip::after {
+    content: attr(data-tip); position: absolute; bottom: calc(100% + 6px); left: 50%;
+    transform: translateX(-50%); z-index: 60;
+    padding: 3px 7px; border-radius: var(--radius-sm); white-space: nowrap;
+    font-size: 11px; font-weight: 500; font-family: var(--font-body);
+    color: var(--text-on-accent); background: var(--accent);
+    opacity: 0; pointer-events: none; transition: opacity .12s ease;
+}
+.sc-tip:hover::after, .sc-tip:focus-visible::after { opacity: 1; }
+
+/* ---- metric chips ---- */
+.sc .chips { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sc .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+    background: var(--surface-subtle); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 1px 6px;
+}
+
+/* ---- json / code block ---- */
+.sc .code {
+    font-family: var(--font-mono); font-size: 12px; line-height: 1.55;
+    background: var(--surface-subtle); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 10px 12px; overflow: auto;
+    white-space: pre; color: var(--text-primary); margin: 0;
+}
+
+/* ---- skeleton ---- */
+.sc .skeleton {
+    background: linear-gradient(90deg, var(--surface-subtle) 25%, var(--border) 37%, var(--surface-subtle) 63%);
+    background-size: 400% 100%; border-radius: var(--radius-sm);
+    animation: sc-shimmer 1.4s ease infinite;
+}
+@keyframes sc-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+
+/* ---- spinner ---- */
+.sc .spin, .pl-spin {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid var(--accent-border); border-top-color: var(--accent);
+    animation: sc-rotate .7s linear infinite;
+}
+@keyframes sc-rotate { to { transform: rotate(360deg); } }
+
+/* ---- tabs. New with the Connections page; there was no tab component before. ---- */
+.sc .tabs {
+    display: flex; align-items: center; gap: 2px; margin-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+}
+.sc .tab {
+    appearance: none; background: transparent; border: 0; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 12px; font: inherit; font-size: 13px; font-weight: 500;
+    color: var(--text-muted); border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+}
+.sc .tab:hover { color: var(--text-primary); }
+.sc .tab.is-active { color: var(--text-primary); border-bottom-color: var(--text-primary); }
+.sc .tab-count {
+    font-size: 11px; font-weight: 600; line-height: 1;
+    padding: 3px 6px; border-radius: 999px;
+    background: var(--surface-subtle); color: var(--text-muted);
+}
+.sc .tab.is-active .tab-count { background: var(--text-primary); color: var(--surface); }
+
+/* ---- table cell helpers ---- */
+.sc .cell-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.sc .cell-mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+}
+
+/* ---- a checkbox row inside a .field, where the label sits beside the control ---- */
+.sc .field-check > label {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 13px; font-weight: 500; color: var(--text-primary); cursor: pointer;
+}
+
+/* ---- inline form error. Not .alert-*: Bootstrap owns those and marks several properties
+        !important, which would win over this scope regardless of specificity. ---- */
+.sc .form-error {
+    margin-top: 12px; padding: 9px 11px; font-size: 12.5px;
+    border: 1px solid var(--danger); border-radius: var(--radius-md);
+    color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent);
+}
+.sc .cell-strong { font-weight: 500; color: var(--text-primary); }

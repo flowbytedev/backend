@@ -1,0 +1,1328 @@
+@*
+    The step settings panel.
+
+    EVERY field is rendered from the catalogue's PipelineFieldSpec. There is no per-step-type form anywhere in
+    this project, and there must not be: adding a step type is a catalogue entry plus an executor, with no
+    Razor change at all. If you find yourself adding `if (Node.Type == ...)` markup here, add a field kind
+    instead.
+
+    The structured editors (column map, join keys, aggregates) are the exception that proves the rule — they
+    are generic controls driven by a kind, not by a type.
+*@
+@using System.Text.Json.Nodes
+@using Application.Shared.Models.Data.Pipelines
+@using Application.Shared.Services.Data.Pipelines
+
+<div class="pl-panel pl-panel--right">
+    <div class="pl-panel-head">
+        <span class="pl-panel-title">@(Node is null ? "Pipeline" : "Step")</span>
+    </div>
+
+    <div class="pl-panel-body">
+        @if (Node is null)
+        {
+            @* Nothing selected: the pipeline's own settings. *@
+            <div class="field">
+                <label class="field-label">Name</label>
+                <input class="input" value="@Name"
+                       @oninput="e => OnNameChanged.InvokeAsync(e.Value?.ToString() ?? string.Empty)" />
+            </div>
+
+            <div class="field">
+                <label class="field-label">Description</label>
+                <textarea class="textarea" style="min-height:56px;" value="@Description"
+                          @oninput="e => OnDescriptionChanged.InvokeAsync(e.Value?.ToString())"></textarea>
+            </div>
+
+            <details class="pl-group" open>
+                <summary>Triggers</summary>
+                <div class="pl-group-body">
+                    <label class="switch-row">
+                        <span class="switch @(IsEnabled ? "is-on" : "")"
+                              @onclick="() => OnEnabledChanged.InvokeAsync(!IsEnabled)"></span>
+                        <span class="switch-label">Enabled</span>
+                    </label>
+
+                    <label class="switch-row">
+                        <span class="switch @(ApiEnabled ? "is-on" : "")"
+                              @onclick="() => OnApiEnabledChanged.InvokeAsync(!ApiEnabled)"></span>
+                        <span class="switch-label">Can be started over the API</span>
+                    </label>
+
+                    <div class="field">
+                        <label class="field-label">Schedule</label>
+                        <input class="input input-mono" placeholder="0 3 * * *" value="@Cron"
+                               @oninput="e => OnCronChanged.InvokeAsync(e.Value?.ToString())" />
+                        <div class="field-help">
+                            Five fields. Leave empty to run it only by hand.
+                        </div>
+                    </div>
+
+                    @if (RequiresManualRun)
+                    {
+                        @* The compiler refuses this combination at save time; saying so here means the author
+                           finds out while editing rather than from a rejected save. *@
+                        <div class="field-error">
+                            A step reads a file you upload at run time, so this pipeline cannot be scheduled
+                            or triggered by API. Point that step at a folder or blob storage instead.
+                        </div>
+                    }
+                </div>
+            </details>
+
+            <details class="pl-group">
+                <summary>Limits</summary>
+                <div class="pl-group-body">
+                    <div class="field">
+                        <label class="field-label">Run timeout (seconds)</label>
+                        <input class="input" type="number" value="@Settings.TimeoutSeconds"
+                               @onchange="e => SetTimeout(e.Value?.ToString())" />
+                    </div>
+
+                    <label class="switch-row">
+                        <span class="switch @(Settings.FailOnEmptySource ? "is-on" : "")"
+                              @onclick="ToggleFailOnEmpty"></span>
+                        <span class="switch-label">Fail if a source returns no rows</span>
+                    </label>
+                </div>
+            </details>
+        }
+        else if (_spec is null)
+        {
+            <div class="pl-inspector-empty">
+                This step has type <code>@Node.Type</code>, which this version of FlowByte does not know.
+            </div>
+        }
+        else
+        {
+            <div class="field">
+                <label class="field-label">Name</label>
+                <input class="input" value="@Node.Label"
+                       @oninput="e => SetLabel(e.Value?.ToString())" />
+                <div class="field-help">
+                    <span style="font-family:var(--font-mono);">@Node.Id</span> · @_spec.Label
+                </div>
+            </div>
+
+            @foreach (var field in _spec.Fields)
+            {
+                if (!IsVisible(field)) continue;
+
+                <div class="field" @key="field.Key">
+                    <label class="field-label">
+                        @field.Label
+                        @if (field.Required)
+                        {
+                            <span style="color:var(--danger);"> *</span>
+                        }
+                    </label>
+
+                    @switch (field.Kind)
+                    {
+                        case PipelineFieldKinds.Text:
+                        case PipelineFieldKinds.FilePath:
+                            <input class="input @(field.Kind == PipelineFieldKinds.FilePath ? "input-mono" : "")"
+                                   placeholder="@field.Placeholder"
+                                   value="@Str(field.Key)"
+                                   @oninput="e => SetString(field.Key, e.Value?.ToString())" />
+                            break;
+
+                        case PipelineFieldKinds.TextArea:
+                            <textarea class="textarea" placeholder="@field.Placeholder"
+                                      value="@Str(field.Key)"
+                                      @oninput="e => SetString(field.Key, e.Value?.ToString())"></textarea>
+                            break;
+
+                        case PipelineFieldKinds.Sql:
+                            @* No Monaco here: the inspector is 320px wide and a code editor in it would be
+                               worse than a mono textarea. The YAML tab is where real editing happens. *@
+                            <textarea class="textarea textarea-mono" style="min-height:110px;"
+                                      placeholder="@field.Placeholder"
+                                      value="@Str(field.Key)"
+                                      @oninput="e => SetString(field.Key, e.Value?.ToString())"></textarea>
+                            break;
+
+                        case PipelineFieldKinds.Number:
+                            <input class="input" type="number" value="@Str(field.Key)"
+                                   @onchange="e => SetNumber(field.Key, e.Value?.ToString())" />
+                            break;
+
+                        case PipelineFieldKinds.Checkbox:
+                            <label class="switch-row">
+                                <span class="switch @(Bool(field.Key) ? "is-on" : "")"
+                                      @onclick="() => SetBool(field.Key, !Bool(field.Key))"></span>
+                                <span class="switch-label">@field.Label</span>
+                            </label>
+                            break;
+
+                        case PipelineFieldKinds.Select:
+                            @* The shared select, with `selected` on each option: `value` is not a reflected
+                               attribute on <select>, so without this the chosen value never sticks. *@
+                            <select class="select" @onchange="e => SetString(field.Key, e.Value?.ToString())">
+                                <option value="" selected="@(string.IsNullOrEmpty(Str(field.Key)))">
+                                    Choose…
+                                </option>
+                                @foreach (var option in field.Options ?? [])
+                                {
+                                    <option value="@option.Value" selected="@(Str(field.Key) == option.Value)">
+                                        @option.Label
+                                    </option>
+                                }
+                            </select>
+                            break;
+
+                        case PipelineFieldKinds.DatasetPicker:
+                            <select class="select" @onchange="e => SetString(field.Key, e.Value?.ToString())">
+                                <option value="">Choose a dataset…</option>
+                                @foreach (var option in Datasets)
+                                {
+                                    <option value="@option.Value" selected="@(Str(field.Key) == option.Value)">
+                                        @option.Label
+                                    </option>
+                                }
+                            </select>
+                            @if (Datasets.Count == 0)
+                            {
+                                <div class="field-help">Nothing to choose from — create a dataset first.</div>
+                            }
+                            break;
+
+                        case PipelineFieldKinds.ConnectionPicker:
+                            <select class="select" @onchange="e => SetString(field.Key, e.Value?.ToString())">
+                                <option value="">Choose a connection…</option>
+                                @foreach (var option in Connections)
+                                {
+                                    <option value="@option.Value" selected="@(Str(field.Key) == option.Value)">
+                                        @option.Label
+                                    </option>
+                                }
+                            </select>
+                            @if (Connections.Count == 0)
+                            {
+                                <div class="field-help">
+                                    No database connections are configured for this company.
+                                </div>
+                            }
+                            break;
+
+                        case PipelineFieldKinds.ApiCredentialPicker:
+                            <select class="select" @onchange="e => SetString(field.Key, e.Value?.ToString())">
+                                <option value="">Choose a credential…</option>
+                                @foreach (var option in ApiCredentials)
+                                {
+                                    <option value="@option.Value" selected="@(Str(field.Key) == option.Value)">
+                                        @option.Label
+                                    </option>
+                                }
+                            </select>
+                            @if (ApiCredentials.Count == 0)
+                            {
+                                <div class="field-help">
+                                    No API credentials are registered. Add one under Data &rsaquo; Connections.
+                                </div>
+                            }
+                            break;
+
+                        case PipelineFieldKinds.TablePicker:
+                            @* Depends on the dataset field, so it clears when that changes. *@
+                            @if (string.IsNullOrWhiteSpace(Str(field.DependsOn ?? "dataset")))
+                            {
+                                <div class="field-help">Choose a dataset first.</div>
+                            }
+                            else if (Tables.Count == 0)
+                            {
+                                <input class="input input-mono" placeholder="table name"
+                                       value="@Str(field.Key)"
+                                       @oninput="e => SetString(field.Key, e.Value?.ToString())" />
+                                <div class="field-help">That dataset has no tables yet, or they are loading.</div>
+                            }
+                            else
+                            {
+                                <select class="select" @onchange="e => SetString(field.Key, e.Value?.ToString())">
+                                    <option value="">Choose a table…</option>
+                                    @foreach (var table in Tables)
+                                    {
+                                        <option value="@table" selected="@(Str(field.Key) == table)">@table</option>
+                                    }
+                                </select>
+                            }
+                            break;
+
+                        case PipelineFieldKinds.ColumnList:
+                            @ColumnListEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.ColumnMap:
+                            @ColumnMapEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.ExpressionList:
+                            @ExpressionEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.AggregateList:
+                            @AggregateEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.JoinKeys:
+                            @JoinKeyEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.KeyValue:
+                            @KeyValueEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.SwitchList:
+                            @SwitchEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.SortList:
+                            @SortEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.WindowList:
+                            @WindowEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.TextOpList:
+                            @TextOpEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.ColumnNameList:
+                            @NameListEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.Note:
+                            @* Rendered from Help alone — a note has no value to bind. *@
+                            break;
+
+                        default:
+                            <input class="input" value="@Str(field.Key)"
+                                   @oninput="e => SetString(field.Key, e.Value?.ToString())" />
+                            break;
+                    }
+
+                    @if (field.Help is { Length: > 0 })
+                    {
+                        @* A note's help IS the note, so it gets the callout treatment rather than the
+                           small grey caption a normal field's help gets. *@
+                        <div class="@(field.Kind == PipelineFieldKinds.Note ? "pl-note" : "field-help")">
+                            @field.Help
+                        </div>
+                    }
+
+                    @if (field.SupportsTokens && _tokenFields.Contains(field.Kind))
+                    {
+                        <div class="pl-token-hint">
+                            @foreach (var token in PipelineTokens.RunKeys)
+                            {
+                                var t = token;
+                                <span class="pl-token-chip" title="Click to insert"
+                                      @onclick="() => AppendToken(field.Key, t)">@("{{ " + t + " }}")</span>
+                            }
+                        </div>
+                    }
+                </div>
+            }
+
+            <details class="pl-group">
+                <summary>Advanced</summary>
+                <div class="pl-group-body">
+                    <div class="field">
+                        <label class="field-label">If this step fails</label>
+                        <select class="select" @onchange="OnErrorModeChanged">
+                            <option value="" selected="@(Node.OnError is null)">Use the pipeline setting</option>
+                            <option value="@PipelineErrorMode.Fail"
+                                    selected="@(Node.OnError == PipelineErrorMode.Fail)">Stop the run</option>
+                            <option value="@PipelineErrorMode.Continue"
+                                    selected="@(Node.OnError == PipelineErrorMode.Continue)">
+                                Carry on with other branches
+                            </option>
+                        </select>
+                        <div class="field-help">
+                            Steps that read this one are skipped either way — they would have no data.
+                        </div>
+                    </div>
+
+                    <div class="field">
+                        <label class="field-label">Step timeout (seconds)</label>
+                        <input class="input" type="number" value="@Node.TimeoutSeconds"
+                               @onchange="e => SetStepTimeout(e.Value?.ToString())" />
+                    </div>
+
+                    <div class="field">
+                        <label class="field-label">Retry attempts</label>
+                        <input class="input" type="number" min="1" max="10"
+                               value="@(Node.Retry?.MaxAttempts ?? 1)"
+                               @onchange="e => SetRetry(e.Value?.ToString())" />
+                        <div class="field-help">
+                            Only a transient failure is retried — a busy dataset or an unreachable source.
+                        </div>
+                    </div>
+                </div>
+            </details>
+
+            @if (_upstreamColumns.Count > 0)
+            {
+                <details class="pl-group">
+                    <summary>Incoming columns (@_upstreamColumns.Count)</summary>
+                    <div class="pl-group-body">
+                        <div class="pl-cols">
+                            @foreach (var column in _upstreamColumns)
+                            {
+                                <span class="pl-col-chip sc-tip" data-tip="@column.Type">@column.Name</span>
+                            }
+                        </div>
+                        <div class="field-help" style="margin-top:6px;">
+                            From the last preview or run. Run a preview to refresh.
+                        </div>
+                    </div>
+                </details>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public PipelineNodeDef? Node { get; set; }
+    [Parameter, EditorRequired] public PipelineGraph Graph { get; set; } = new();
+
+    /// <summary>Columns the upstream step produced, from the graph's schema cache.</summary>
+    [Parameter] public List<PipelineColumn> UpstreamColumns { get; set; } = new();
+
+    [Parameter] public List<PipelineFieldOption> Datasets { get; set; } = new();
+    [Parameter] public List<PipelineFieldOption> Connections { get; set; } = new();
+    [Parameter] public List<PipelineFieldOption> ApiCredentials { get; set; } = new();
+    [Parameter] public List<string> Tables { get; set; } = new();
+
+    // Pipeline-level settings, shown when nothing is selected.
+    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string? Description { get; set; }
+    [Parameter] public bool IsEnabled { get; set; }
+    [Parameter] public bool ApiEnabled { get; set; }
+    [Parameter] public string? Cron { get; set; }
+    [Parameter] public bool RequiresManualRun { get; set; }
+    [Parameter] public PipelineSettings Settings { get; set; } = new();
+
+    [Parameter] public EventCallback<string> OnNameChanged { get; set; }
+    [Parameter] public EventCallback<string?> OnDescriptionChanged { get; set; }
+    [Parameter] public EventCallback<bool> OnEnabledChanged { get; set; }
+    [Parameter] public EventCallback<bool> OnApiEnabledChanged { get; set; }
+    [Parameter] public EventCallback<string?> OnCronChanged { get; set; }
+    [Parameter] public EventCallback OnSettingsChanged { get; set; }
+
+    /// <summary>
+    /// Raised after any step edit, with a coalesce key so a burst of typing in one field collapses into a
+    /// single undo entry.
+    /// </summary>
+    [Parameter] public EventCallback<string> OnNodeEdited { get; set; }
+
+    private PipelineNodeSpec? _spec;
+    private List<PipelineColumn> _upstreamColumns = new();
+
+    // Kinds where a {{ run.* }} token is meaningful. A number or a picker is not one of them.
+    private static readonly HashSet<string> _tokenFields = new(StringComparer.Ordinal)
+    {
+        PipelineFieldKinds.Text, PipelineFieldKinds.TextArea,
+        PipelineFieldKinds.Sql, PipelineFieldKinds.FilePath
+    };
+
+    protected override void OnParametersSet()
+    {
+        _spec = Node is null ? null : PipelineNodeCatalog.Get(Node.Type);
+        _upstreamColumns = UpstreamColumns;
+    }
+
+    private JsonObject Config()
+    {
+        Node!.Config ??= new JsonObject();
+        return Node.Config;
+    }
+
+    // ---------------- reads ----------------
+
+    private string? Str(string key)
+    {
+        var value = Config()[key];
+        return value is JsonValue v && v.TryGetValue<string>(out var s) ? s : value?.ToString();
+    }
+
+    private bool Bool(string key)
+    {
+        var value = Config()[key];
+        return value is JsonValue v && v.TryGetValue<bool>(out var b) && b;
+    }
+
+    private List<string> StringList(string key)
+    {
+        var result = new List<string>();
+        if (Config()[key] is not JsonArray array) return result;
+
+        foreach (var item in array)
+            if (item is JsonValue v && v.TryGetValue<string>(out var s))
+                result.Add(s);
+
+        return result;
+    }
+
+    private bool IsVisible(PipelineFieldSpec field)
+    {
+        if (string.IsNullOrWhiteSpace(field.VisibleWhen)) return true;
+
+        var parts = field.VisibleWhen.Split('=', 2);
+        if (parts.Length != 2) return true;
+
+        var actual = Config()[parts[0]];
+        var text = actual switch
+        {
+            null => null,
+            JsonValue v when v.TryGetValue<string>(out var s) => s,
+            JsonValue v when v.TryGetValue<bool>(out var b) => b ? "true" : "false",
+            _ => actual.ToString()
+        };
+
+        // "key=a|b" means any-of; see the matching comment in PipelineCompiler.IsVisible. These two must
+        // agree, or the compiler requires a field the form never showed.
+        return parts[1]
+            .Split('|', StringSplitOptions.RemoveEmptyEntries)
+            .Any(allowed => string.Equals(text, allowed, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ---------------- writes ----------------
+
+    private async Task Notify(string coalesceKey) => await OnNodeEdited.InvokeAsync(coalesceKey);
+
+    private async Task SetLabel(string? value)
+    {
+        Node!.Label = string.IsNullOrWhiteSpace(value) ? null : value;
+        await Notify($"{Node.Id}:label");
+    }
+
+    private async Task SetString(string key, string? value)
+    {
+        if (string.IsNullOrEmpty(value)) Config().Remove(key);
+        else Config()[key] = value;
+        await Notify($"{Node!.Id}:{key}");
+    }
+
+    private async Task SetNumber(string key, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) Config().Remove(key);
+        else if (int.TryParse(value, out var parsed)) Config()[key] = parsed;
+        await Notify($"{Node!.Id}:{key}");
+    }
+
+    private async Task SetBool(string key, bool value)
+    {
+        Config()[key] = value;
+        await Notify($"{Node!.Id}:{key}");
+    }
+
+    private async Task AppendToken(string key, string token)
+    {
+        Config()[key] = (Str(key) ?? string.Empty) + "{{ " + token + " }}";
+        await Notify($"{Node!.Id}:{key}:token");
+    }
+
+    private async Task OnErrorModeChanged(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        Node!.OnError = string.IsNullOrEmpty(value) ? null : value;
+        await Notify($"{Node.Id}:onError");
+    }
+
+    private async Task SetStepTimeout(string? value)
+    {
+        Node!.TimeoutSeconds = int.TryParse(value, out var parsed) && parsed > 0 ? parsed : null;
+        await Notify($"{Node.Id}:timeout");
+    }
+
+    private async Task SetRetry(string? value)
+    {
+        var attempts = int.TryParse(value, out var parsed) ? Math.Clamp(parsed, 1, 10) : 1;
+        Node!.Retry = attempts <= 1 ? null : new PipelineRetryDef { MaxAttempts = attempts };
+        await Notify($"{Node.Id}:retry");
+    }
+
+    private async Task SetTimeout(string? value)
+    {
+        if (int.TryParse(value, out var parsed) && parsed > 0) Settings.TimeoutSeconds = parsed;
+        await OnSettingsChanged.InvokeAsync();
+    }
+
+    private async Task ToggleFailOnEmpty()
+    {
+        Settings.FailOnEmptySource = !Settings.FailOnEmptySource;
+        await OnSettingsChanged.InvokeAsync();
+    }
+
+    // ---------------- structured editors ----------------
+
+    /// <summary>
+    /// THE mapping grid. One row per output column: where it comes from, and what to cast it to.
+    /// <para>
+    /// The source is a dropdown of the upstream step's real columns whenever they are known, because typing
+    /// a column name from memory is how a pipeline ends up failing at 3am on a typo. When they are not known
+    /// yet it degrades to a text box rather than blocking the author.
+    /// </para>
+    /// </summary>
+    private RenderFragment ColumnMapEditor(string key) => builder =>
+    {
+        var map = Config()[key] as JsonObject ?? new JsonObject();
+        var rows = map.Select(kv => kv.Key).ToList();
+        var known = _upstreamColumns.Select(c => c.Name).ToList();
+        var seq = 0;
+
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "pl-row-head pl-map-row");
+        builder.AddContent(seq++, Header("Output", "From", "Cast", string.Empty));
+        builder.CloseElement();
+
+        foreach (var name in rows)
+        {
+            var outName = name;
+            var spec = map[outName] as JsonObject ?? new JsonObject();
+            var source = spec["source"]?.ToString();
+            var constant = spec["const"]?.ToString();
+            var cast = spec["cast"]?.ToString();
+            var missing = source is { Length: > 0 } && known.Count > 0 && !known.Contains(source);
+
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "pl-map-row");
+            builder.SetKey(outName);
+
+            // output name
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "class", "input input-mono");
+            builder.AddAttribute(seq++, "value", outName);
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => RenameMapRow(key, outName, e.Value?.ToString())));
+            builder.CloseElement();
+
+            // source: a select when the columns are known, a text box otherwise
+            if (known.Count > 0 && constant is null)
+            {
+                builder.OpenElement(seq++, "select");
+                builder.AddAttribute(seq++, "class", missing ? "select pl-col-chip is-missing" : "select");
+                builder.AddAttribute(seq++, "onchange",
+                    EventCallback.Factory.Create<ChangeEventArgs>(this,
+                        e => SetMapField(key, outName, "source", e.Value?.ToString())));
+
+                builder.OpenElement(seq++, "option");
+                builder.AddAttribute(seq++, "value", string.Empty);
+                builder.AddContent(seq++, "Choose…");
+                builder.CloseElement();
+
+                // A column the upstream step no longer produces still has to be selectable, or the grid
+                // would silently drop the mapping the author needs to see and fix.
+                if (missing)
+                {
+                    builder.OpenElement(seq++, "option");
+                    builder.AddAttribute(seq++, "value", source!);
+                    builder.AddAttribute(seq++, "selected", true);
+                    builder.AddContent(seq++, source + " (missing)");
+                    builder.CloseElement();
+                }
+
+                foreach (var column in known)
+                {
+                    builder.OpenElement(seq++, "option");
+                    builder.AddAttribute(seq++, "value", column);
+                    builder.AddAttribute(seq++, "selected", source == column);
+                    builder.AddContent(seq++, column);
+                    builder.CloseElement();
+                }
+                builder.CloseElement();
+            }
+            else
+            {
+                builder.OpenElement(seq++, "input");
+                builder.AddAttribute(seq++, "class", "input input-mono");
+                builder.AddAttribute(seq++, "placeholder", constant is null ? "source column" : "fixed value");
+                builder.AddAttribute(seq++, "value", constant ?? source ?? string.Empty);
+                builder.AddAttribute(seq++, "onchange",
+                    EventCallback.Factory.Create<ChangeEventArgs>(this,
+                        e => SetMapField(key, outName, constant is null ? "source" : "const",
+                            e.Value?.ToString())));
+                builder.CloseElement();
+            }
+
+            // cast
+            builder.OpenElement(seq++, "select");
+            builder.AddAttribute(seq++, "class", "select");
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => SetMapField(key, outName, "cast", e.Value?.ToString())));
+            builder.OpenElement(seq++, "option");
+            builder.AddAttribute(seq++, "value", string.Empty);
+            builder.AddAttribute(seq++, "selected", string.IsNullOrEmpty(cast));
+            builder.AddContent(seq++, "as-is");
+            builder.CloseElement();
+            foreach (var type in CastTypes)
+            {
+                builder.OpenElement(seq++, "option");
+                builder.AddAttribute(seq++, "value", type);
+                builder.AddAttribute(seq++, "selected", cast == type);
+                builder.AddContent(seq++, type);
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+
+            builder.AddContent(seq++, DeleteButton(() => RemoveMapRow(key, outName)));
+            builder.CloseElement();
+        }
+
+        builder.AddContent(seq++, AddRowButton("Add a column", () => AddMapRow(key)));
+
+        // Bulk fill: one click to map every incoming column straight through. For a wide table this is the
+        // difference between usable and unusable, and it is what most authors want before editing a few rows.
+        if (known.Count > 0)
+        {
+            builder.AddContent(seq++, AddRowButton(
+                $"Map all {known.Count} incoming columns", () => MapAll(key)));
+        }
+    };
+
+    private RenderFragment ColumnListEditor(string key) => builder =>
+    {
+        var chosen = StringList(key);
+        var known = _upstreamColumns.Select(c => c.Name).ToList();
+        var seq = 0;
+
+        if (known.Count == 0)
+        {
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "class", "input input-mono");
+            builder.AddAttribute(seq++, "placeholder", "comma-separated column names");
+            builder.AddAttribute(seq++, "value", string.Join(", ", chosen));
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => SetStringList(key, (e.Value?.ToString() ?? string.Empty)
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))));
+            builder.CloseElement();
+            return;
+        }
+
+        // Toggle chips: faster than a multi-select and it shows what is available at the same time.
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "pl-cols");
+        foreach (var column in known)
+        {
+            var name = column;
+            var on = chosen.Contains(name, StringComparer.OrdinalIgnoreCase);
+            builder.OpenElement(seq++, "span");
+            builder.AddAttribute(seq++, "class", on ? "pl-col-chip is-on" : "pl-col-chip");
+            builder.AddAttribute(seq++, "onclick",
+                EventCallback.Factory.Create(this, () => ToggleColumn(key, name)));
+            builder.AddContent(seq++, name);
+            builder.CloseElement();
+        }
+        builder.CloseElement();
+
+        // Any name kept from a previous schema, so a stale key stays visible and fixable.
+        var stale = chosen.Where(c => !known.Contains(c, StringComparer.OrdinalIgnoreCase)).ToList();
+        if (stale.Count > 0)
+        {
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "pl-cols");
+            builder.AddAttribute(seq++, "style", "margin-top:4px;");
+            foreach (var column in stale)
+            {
+                var name = column;
+                builder.OpenElement(seq++, "span");
+                builder.AddAttribute(seq++, "class", "pl-col-chip is-missing");
+                builder.AddAttribute(seq++, "title", "Not in the incoming data any more");
+                builder.AddAttribute(seq++, "onclick",
+                    EventCallback.Factory.Create(this, () => ToggleColumn(key, name)));
+                builder.AddContent(seq++, name + " ✕");
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+        }
+    };
+
+    private RenderFragment ExpressionEditor(string key) => builder =>
+    {
+        var map = Config()[key] as JsonObject ?? new JsonObject();
+        var seq = 0;
+
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "pl-row-head pl-expr-row");
+        builder.AddContent(seq++, Header("Name", "Expression", string.Empty));
+        builder.CloseElement();
+
+        foreach (var entry in map.Select(kv => kv.Key).ToList())
+        {
+            var name = entry;
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "pl-expr-row");
+            builder.SetKey(name);
+
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "class", "input input-mono");
+            builder.AddAttribute(seq++, "value", name);
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => RenameObjectKey(key, name, e.Value?.ToString())));
+            builder.CloseElement();
+
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "class", "input input-mono");
+            builder.AddAttribute(seq++, "placeholder", "qty * unit_price");
+            builder.AddAttribute(seq++, "value", map[name]?.ToString());
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => SetObjectValue(key, name, e.Value?.ToString())));
+            builder.CloseElement();
+
+            builder.AddContent(seq++, DeleteButton(() => RemoveObjectKey(key, name)));
+            builder.CloseElement();
+        }
+
+        builder.AddContent(seq++, AddRowButton("Add a column", () => AddObjectKey(key, "new_column")));
+    };
+
+    private RenderFragment AggregateEditor(string key) => builder =>
+    {
+        var rows = Config()[key] as JsonArray ?? new JsonArray();
+        var known = _upstreamColumns.Select(c => c.Name).ToList();
+        var seq = 0;
+
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "pl-row-head pl-agg-row");
+        builder.AddContent(seq++, Header("Output", "Function", "Column", string.Empty));
+        builder.CloseElement();
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var index = i;
+            var row = rows[index] as JsonObject ?? new JsonObject();
+
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "pl-agg-row");
+            builder.SetKey(index);
+
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "class", "input input-mono");
+            builder.AddAttribute(seq++, "placeholder", "revenue");
+            builder.AddAttribute(seq++, "value", row["name"]?.ToString());
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => SetArrayField(key, index, "name", e.Value?.ToString())));
+            builder.CloseElement();
+
+            builder.OpenElement(seq++, "select");
+            builder.AddAttribute(seq++, "class", "select");
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => SetArrayField(key, index, "function", e.Value?.ToString())));
+            foreach (var fn in PipelineAggregateFunctions.All)
+            {
+                builder.OpenElement(seq++, "option");
+                builder.AddAttribute(seq++, "value", fn);
+                builder.AddAttribute(seq++, "selected", row["function"]?.ToString() == fn);
+                builder.AddContent(seq++, fn);
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+
+            builder.OpenElement(seq++, "select");
+            builder.AddAttribute(seq++, "class", "select");
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => SetArrayField(key, index, "column", e.Value?.ToString())));
+            // count(*) is the one aggregate that needs no column.
+            builder.OpenElement(seq++, "option");
+            builder.AddAttribute(seq++, "value", "*");
+            builder.AddAttribute(seq++, "selected", row["column"]?.ToString() is null or "*");
+            builder.AddContent(seq++, "* (all rows)");
+            builder.CloseElement();
+            foreach (var column in known)
+            {
+                builder.OpenElement(seq++, "option");
+                builder.AddAttribute(seq++, "value", column);
+                builder.AddAttribute(seq++, "selected", row["column"]?.ToString() == column);
+                builder.AddContent(seq++, column);
+                builder.CloseElement();
+            }
+            builder.CloseElement();
+
+            builder.AddContent(seq++, DeleteButton(() => RemoveArrayRow(key, index)));
+            builder.CloseElement();
+        }
+
+        builder.AddContent(seq++, AddRowButton("Add a summary", () => AddArrayRow(key, new JsonObject
+        {
+            ["name"] = string.Empty,
+            ["function"] = PipelineAggregateFunctions.Sum,
+            ["column"] = string.Empty
+        })));
+    };
+
+    /// <summary>
+    /// One column of a generic row grid. <paramref name="Options"/> makes it a dropdown;
+    /// <paramref name="FromColumns"/> makes it a dropdown of the incoming columns.
+    /// </summary>
+    private sealed record GridColumn(
+        string Field,
+        string Label,
+        string? Placeholder = null,
+        IReadOnlyList<string>? Options = null,
+        bool FromColumns = false,
+        bool Optional = false);
+
+    /// <summary>
+    /// A grid of object rows, driven by a spec.
+    /// <para>
+    /// Generic rather than one hand-written editor per step. The existing map/aggregate/join editors are
+    /// each ~60 lines of RenderTreeBuilder, and three more of those for sort, window and text cleanup would
+    /// be three more places for an off-by-one in the sequence numbers to hide.
+    /// </para>
+    /// </summary>
+    private RenderFragment RowGridEditor(
+        string key, string rowClass, string addLabel,
+        IReadOnlyList<GridColumn> spec, JsonObject template) => builder =>
+    {
+        var rows = Config()[key] as JsonArray ?? new JsonArray();
+        var known = _upstreamColumns.Select(c => c.Name).ToList();
+        var seq = 0;
+
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", $"pl-row-head {rowClass}");
+        foreach (var column in spec)
+        {
+            builder.OpenElement(seq++, "span");
+            builder.AddContent(seq++, column.Label);
+            builder.CloseElement();
+        }
+        builder.OpenElement(seq++, "span");
+        builder.CloseElement();
+        builder.CloseElement();
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var index = i;
+            var row = rows[index] as JsonObject ?? new JsonObject();
+
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", rowClass);
+            builder.SetKey(index);
+
+            foreach (var column in spec)
+            {
+                var field = column.Field;
+                var current = row[field]?.ToString();
+
+                if (column.Options is not null || column.FromColumns)
+                {
+                    builder.OpenElement(seq++, "select");
+                    builder.AddAttribute(seq++, "class", "select");
+                    builder.AddAttribute(seq++, "onchange",
+                        EventCallback.Factory.Create<ChangeEventArgs>(this,
+                            e => SetArrayField(key, index, field, e.Value?.ToString())));
+
+                    // An optional column needs an explicit empty choice, or there is no way back to
+                    // "not set" once something has been picked.
+                    if (column.Optional || column.FromColumns)
+                    {
+                        builder.OpenElement(seq++, "option");
+                        builder.AddAttribute(seq++, "value", string.Empty);
+                        builder.AddAttribute(seq++, "selected", string.IsNullOrEmpty(current));
+                        builder.AddContent(seq++, column.FromColumns ? "Choose…" : "—");
+                        builder.CloseElement();
+                    }
+
+                    foreach (var option in column.Options ?? known)
+                    {
+                        builder.OpenElement(seq++, "option");
+                        builder.AddAttribute(seq++, "value", option);
+                        builder.AddAttribute(seq++, "selected", current == option);
+                        builder.AddContent(seq++, option);
+                        builder.CloseElement();
+                    }
+
+                    builder.CloseElement();
+                }
+                else
+                {
+                    builder.OpenElement(seq++, "input");
+                    builder.AddAttribute(seq++, "class", "input input-mono");
+                    if (column.Placeholder is not null)
+                        builder.AddAttribute(seq++, "placeholder", column.Placeholder);
+                    builder.AddAttribute(seq++, "value", current);
+                    builder.AddAttribute(seq++, "onchange",
+                        EventCallback.Factory.Create<ChangeEventArgs>(this,
+                            e => SetArrayField(key, index, field, e.Value?.ToString())));
+                    builder.CloseElement();
+                }
+            }
+
+            builder.AddContent(seq++, DeleteButton(() => RemoveArrayRow(key, index)));
+            builder.CloseElement();
+        }
+
+        builder.AddContent(seq++, AddRowButton(addLabel, () => AddArrayRow(key, template.DeepClone().AsObject())));
+    };
+
+    private RenderFragment SwitchEditor(string key) => RowGridEditor(
+        key, "pl-grid-2", "Add an output",
+        [
+            new("port", "Output name", Placeholder: "high_value"),
+            new("condition", "When", Placeholder: "amount > 1000")
+        ],
+        new JsonObject { ["port"] = string.Empty, ["condition"] = string.Empty });
+
+    private RenderFragment SortEditor(string key) => RowGridEditor(
+        key, "pl-grid-2", "Add a sort column",
+        [
+            new("column", "Column", FromColumns: true),
+            new("direction", "Order", Options: ["asc", "desc"]),
+            new("nulls", "Empties", Options: ["first", "last"], Optional: true)
+        ],
+        new JsonObject { ["column"] = string.Empty, ["direction"] = "asc" });
+
+    private RenderFragment WindowEditor(string key) => RowGridEditor(
+        key, "pl-grid-3", "Add a column",
+        [
+            new("name", "New column", Placeholder: "running_total"),
+            new("function", "Calculation",
+                Options: ["sum", "avg", "min", "max", "count", "row_number", "rank", "dense_rank",
+                          "lag", "lead", "first_value", "last_value"]),
+            // Optional because the ranking functions take no argument.
+            new("column", "Of column", FromColumns: true, Optional: true)
+        ],
+        new JsonObject { ["name"] = string.Empty, ["function"] = "sum", ["column"] = string.Empty });
+
+    private RenderFragment TextOpEditor(string key) => RowGridEditor(
+        key, "pl-grid-5", "Add an operation",
+        [
+            new("column", "Column", FromColumns: true),
+            new("operation", "Do",
+                Options: ["trim", "ltrim", "rtrim", "upper", "lower", "initcap", "replace", "regexp_replace"]),
+            new("find", "Find", Placeholder: "only for replace"),
+            new("replace", "Replace with", Placeholder: "only for replace"),
+            new("into", "Into column", Placeholder: "blank = in place")
+        ],
+        new JsonObject { ["column"] = string.Empty, ["operation"] = "trim" });
+
+    /// <summary>
+    /// A list of plain strings, for names that do not come from the incoming schema — the new columns a
+    /// split produces, which by definition do not exist upstream yet.
+    /// </summary>
+    private RenderFragment NameListEditor(string key) => builder =>
+    {
+        var rows = Config()[key] as JsonArray ?? new JsonArray();
+        var seq = 0;
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var index = i;
+
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "pl-grid-1");
+            builder.SetKey(index);
+
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "class", "input input-mono");
+            builder.AddAttribute(seq++, "placeholder", $"part_{index + 1}");
+            builder.AddAttribute(seq++, "value", rows[index]?.ToString());
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => SetStringArrayItem(key, index, e.Value?.ToString())));
+            builder.CloseElement();
+
+            builder.AddContent(seq++, DeleteButton(() => RemoveArrayRow(key, index)));
+            builder.CloseElement();
+        }
+
+        builder.AddContent(seq++, AddRowButton("Add a column", () => AddStringArrayItem(key, string.Empty)));
+    };
+
+    private RenderFragment JoinKeyEditor(string key) => builder =>
+    {
+        var rows = Config()[key] as JsonArray ?? new JsonArray();
+        var seq = 0;
+
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "pl-row-head pl-join-row");
+        builder.AddContent(seq++, Header("Left column", "Right column", string.Empty));
+        builder.CloseElement();
+
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var index = i;
+            var row = rows[index] as JsonObject ?? new JsonObject();
+
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "pl-join-row");
+            builder.SetKey(index);
+
+            foreach (var side in new[] { "left", "right" })
+            {
+                var which = side;
+                builder.OpenElement(seq++, "input");
+                builder.AddAttribute(seq++, "class", "input input-mono");
+                builder.AddAttribute(seq++, "placeholder", which == "left" ? "store_id" : "STORE_CODE");
+                builder.AddAttribute(seq++, "value", row[which]?.ToString());
+                builder.AddAttribute(seq++, "onchange",
+                    EventCallback.Factory.Create<ChangeEventArgs>(this,
+                        e => SetArrayField(key, index, which, e.Value?.ToString())));
+                builder.CloseElement();
+            }
+
+            builder.AddContent(seq++, DeleteButton(() => RemoveArrayRow(key, index)));
+            builder.CloseElement();
+        }
+
+        builder.AddContent(seq++, AddRowButton("Add a pair", () => AddArrayRow(key, new JsonObject
+        {
+            ["left"] = string.Empty, ["right"] = string.Empty
+        })));
+    };
+
+    private RenderFragment KeyValueEditor(string key) => builder =>
+    {
+        var map = Config()[key] as JsonObject ?? new JsonObject();
+        var seq = 0;
+
+        builder.OpenElement(seq++, "div");
+        builder.AddAttribute(seq++, "class", "pl-row-head pl-kv-row");
+        builder.AddContent(seq++, Header("From", "To", string.Empty));
+        builder.CloseElement();
+
+        foreach (var entry in map.Select(kv => kv.Key).ToList())
+        {
+            var name = entry;
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "pl-kv-row");
+            builder.SetKey(name);
+
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "class", "input input-mono");
+            builder.AddAttribute(seq++, "value", name);
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => RenameObjectKey(key, name, e.Value?.ToString())));
+            builder.CloseElement();
+
+            builder.OpenElement(seq++, "input");
+            builder.AddAttribute(seq++, "class", "input input-mono");
+            builder.AddAttribute(seq++, "value", map[name]?.ToString());
+            builder.AddAttribute(seq++, "onchange",
+                EventCallback.Factory.Create<ChangeEventArgs>(this,
+                    e => SetObjectValue(key, name, e.Value?.ToString())));
+            builder.CloseElement();
+
+            builder.AddContent(seq++, DeleteButton(() => RemoveObjectKey(key, name)));
+            builder.CloseElement();
+        }
+
+        builder.AddContent(seq++, AddRowButton("Add", () => AddObjectKey(key, string.Empty)));
+    };
+
+    // ---------------- small shared fragments ----------------
+
+    private static RenderFragment Header(params string[] labels) => builder =>
+    {
+        var seq = 0;
+        foreach (var label in labels)
+        {
+            builder.OpenElement(seq++, "span");
+            builder.AddContent(seq++, label);
+            builder.CloseElement();
+        }
+    };
+
+    private RenderFragment DeleteButton(Func<Task> onClick) => builder =>
+    {
+        builder.OpenElement(0, "button");
+        builder.AddAttribute(1, "class", "pl-row-del");
+        builder.AddAttribute(2, "title", "Remove");
+        builder.AddAttribute(3, "onclick", EventCallback.Factory.Create(this, onClick));
+        builder.AddContent(4, "✕");
+        builder.CloseElement();
+    };
+
+    private RenderFragment AddRowButton(string label, Func<Task> onClick) => builder =>
+    {
+        builder.OpenElement(0, "button");
+        builder.AddAttribute(1, "class", "btn btn-ghost btn-sm");
+        builder.AddAttribute(2, "style", "padding-left:0;");
+        builder.AddAttribute(3, "onclick", EventCallback.Factory.Create(this, onClick));
+        builder.AddContent(4, "+ " + label);
+        builder.CloseElement();
+    };
+
+    // ---------------- structured-editor mutations ----------------
+
+    private static readonly string[] CastTypes =
+    [
+        "VARCHAR", "INTEGER", "BIGINT", "DOUBLE", "DECIMAL", "BOOLEAN", "DATE", "TIMESTAMP", "TIME"
+    ];
+
+    private JsonObject Obj(string key)
+    {
+        if (Config()[key] is JsonObject existing) return existing;
+        var created = new JsonObject();
+        Config()[key] = created;
+        return created;
+    }
+
+    private JsonArray Arr(string key)
+    {
+        if (Config()[key] is JsonArray existing) return existing;
+        var created = new JsonArray();
+        Config()[key] = created;
+        return created;
+    }
+
+    private async Task AddMapRow(string key)
+    {
+        var map = Obj(key);
+        var name = "column";
+        for (var n = 1; map.ContainsKey(name); n++) name = $"column{n + 1}";
+        map[name] = new JsonObject { ["source"] = string.Empty };
+        await Notify($"{Node!.Id}:{key}:add");
+    }
+
+    /// <summary>
+    /// Maps every incoming column straight through, keeping whatever the author already customised. Only
+    /// unmapped columns are added, so clicking this twice is harmless.
+    /// </summary>
+    private async Task MapAll(string key)
+    {
+        var map = Obj(key);
+        var alreadyMapped = map
+            .Select(kv => (kv.Value as JsonObject)?["source"]?.ToString())
+            .Where(s => s is not null)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
+
+        foreach (var column in _upstreamColumns)
+        {
+            if (alreadyMapped.Contains(column.Name) || map.ContainsKey(column.Name)) continue;
+            map[column.Name] = new JsonObject { ["source"] = column.Name };
+        }
+
+        await Notify($"{Node!.Id}:{key}:mapall");
+    }
+
+    private async Task SetMapField(string key, string row, string field, string? value)
+    {
+        var map = Obj(key);
+        if (map[row] is not JsonObject spec) map[row] = spec = new JsonObject();
+
+        if (string.IsNullOrEmpty(value)) spec.Remove(field);
+        else spec[field] = value;
+
+        await Notify($"{Node!.Id}:{key}:{row}:{field}");
+    }
+
+    private async Task RenameMapRow(string key, string from, string? to) =>
+        await RenameObjectKey(key, from, to);
+
+    private async Task RemoveMapRow(string key, string row) => await RemoveObjectKey(key, row);
+
+    private async Task ToggleColumn(string key, string column)
+    {
+        var current = StringList(key);
+        if (current.RemoveAll(c => string.Equals(c, column, StringComparison.OrdinalIgnoreCase)) == 0)
+            current.Add(column);
+
+        await SetStringList(key, current);
+    }
+
+    private async Task SetStringList(string key, IEnumerable<string> values)
+    {
+        var array = new JsonArray();
+        foreach (var value in values) array.Add(value);
+        Config()[key] = array;
+        await Notify($"{Node!.Id}:{key}:list");
+    }
+
+    private async Task AddObjectKey(string key, string name)
+    {
+        var map = Obj(key);
+        var candidate = name;
+        for (var n = 1; map.ContainsKey(candidate); n++) candidate = $"{name}{n + 1}";
+        map[candidate] = string.Empty;
+        await Notify($"{Node!.Id}:{key}:add");
+    }
+
+    /// <summary>
+    /// Renames a key while preserving insertion order. Rebuilding the object is deliberate: assigning a new
+    /// key and removing the old one would move the row to the bottom of the grid mid-edit.
+    /// </summary>
+    private async Task RenameObjectKey(string key, string from, string? to)
+    {
+        if (string.IsNullOrWhiteSpace(to) || to == from) return;
+
+        var map = Obj(key);
+        if (!map.ContainsKey(from) || map.ContainsKey(to)) return;
+
+        var rebuilt = new JsonObject();
+        foreach (var entry in map.Select(kv => kv.Key).ToList())
+        {
+            var value = map[entry];
+            map[entry] = null;                     // detach, so the node can be re-parented
+            rebuilt[entry == from ? to! : entry] = value;
+        }
+
+        Config()[key] = rebuilt;
+        await Notify($"{Node!.Id}:{key}:rename");
+    }
+
+    private async Task SetObjectValue(string key, string name, string? value)
+    {
+        Obj(key)[name] = value ?? string.Empty;
+        await Notify($"{Node!.Id}:{key}:{name}");
+    }
+
+    private async Task RemoveObjectKey(string key, string name)
+    {
+        Obj(key).Remove(name);
+        await Notify($"{Node!.Id}:{key}:remove");
+    }
+
+    private async Task AddArrayRow(string key, JsonObject row)
+    {
+        Arr(key).Add(row);
+        await Notify($"{Node!.Id}:{key}:add");
+    }
+
+    /// <summary>
+    /// Appends a plain string to a list field. Separate from <see cref="AddArrayRow"/> because a name list
+    /// holds strings, not objects — loosening that method to take JsonNode would let an object row into a
+    /// string list, which fails later and further away.
+    /// </summary>
+    private async Task AddStringArrayItem(string key, string value)
+    {
+        Arr(key).Add(JsonValue.Create(value));
+        await Notify($"{Node!.Id}:{key}:add");
+    }
+
+    private async Task SetStringArrayItem(string key, int index, string? value)
+    {
+        var array = Arr(key);
+        while (array.Count <= index) array.Add(JsonValue.Create(string.Empty));
+        array[index] = JsonValue.Create(value ?? string.Empty);
+        await Notify($"{Node!.Id}:{key}:{index}");
+    }
+
+    private async Task RemoveArrayRow(string key, int index)
+    {
+        var array = Arr(key);
+        if (index >= 0 && index < array.Count) array.RemoveAt(index);
+        await Notify($"{Node!.Id}:{key}:remove");
+    }
+
+    private async Task SetArrayField(string key, int index, string field, string? value)
+    {
+        var array = Arr(key);
+        if (index < 0 || index >= array.Count) return;
+        if (array[index] is not JsonObject row) array[index] = row = new JsonObject();
+
+        row[field] = value ?? string.Empty;
+        await Notify($"{Node!.Id}:{key}:{index}:{field}");
+    }
+}

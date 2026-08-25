@@ -18,7 +18,10 @@ using System.Threading.Tasks;
 
 namespace Application.Shared.Services.Data;
 
-public class DuckdbService : IDuckdbService
+// Split across two files: this one is the dataset/table/import surface (IDuckdbService); the pipeline
+// operations live in DuckdbService.Pipelines.cs. They share a class so the pipeline side can reuse the
+// private path resolution, quoting and PromoteRelationAsync rather than duplicating them.
+public partial class DuckdbService : IDuckdbService, Pipelines.IPipelineStore
 {
     private readonly DuckdbOption _option;
     private readonly ApplicationDbContext _db;
@@ -951,10 +954,11 @@ public class DuckdbService : IDuckdbService
 
     // ----- Ad-hoc SQL workbench --------------------------------------------------------------
 
-    // Hard ceiling on rows the workbench will return, regardless of a requested MaxRows — keeps a
-    // runaway "SELECT *" from materializing an entire table into memory.
-    private const int MaxAdHocRows = 5000;
-    private const int QueryTimeoutSeconds = 60;
+    // The row ceiling and the two timeouts used below live on DuckdbOption (ResolveMaxAdHocRows /
+    // ResolveQueryTimeoutSeconds / ResolveBuildTimeoutSeconds) rather than as consts here. They were
+    // consts, but one 60s limit was serving both an interactive workbench query and an unattended
+    // materialization driven by a Hangfire schedule, where it is just a wall. Unset config resolves to
+    // the original 5000 / 60 / 60, so nothing changes for a deployment that ignores the new keys.
 
     private enum SqlKind { Read, Write, Empty }
 
@@ -982,13 +986,15 @@ public class DuckdbService : IDuckdbService
             return result;
         }
 
-        var cap = maxRows > 0 ? Math.Min(maxRows, MaxAdHocRows) : MaxAdHocRows;
+        var adHocCap = _option.ResolveMaxAdHocRows();
+        var cap = maxRows > 0 ? Math.Min(maxRows, adHocCap) : adHocCap;
         result.IsSelect = kind == SqlKind.Read;
+        var timeoutSeconds = _option.ResolveQueryTimeoutSeconds();
 
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(QueryTimeoutSeconds));
+            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
             // Reads use a read-only handle: multiple readers can coexist (no single-writer lock) and
             // a VIEW_DATA user physically cannot mutate, even via a crafted WITH. Writes need a
@@ -1025,7 +1031,7 @@ public class DuckdbService : IDuckdbService
         }
         catch (OperationCanceledException)
         {
-            result.Error = $"The query was cancelled or exceeded the {QueryTimeoutSeconds}s time limit.";
+            result.Error = $"The query was cancelled or exceeded the {timeoutSeconds}s time limit.";
         }
         catch (Exception ex)
         {
@@ -1064,10 +1070,12 @@ public class DuckdbService : IDuckdbService
             return result;
         }
 
+        var timeoutSeconds = _option.ResolveBuildTimeoutSeconds();
+
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(QueryTimeoutSeconds));
+            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
             using var connection = new DuckDBConnection($"DataSource={duckdbFilePath}");
             await connection.OpenAsync(cts.Token);
@@ -1082,7 +1090,7 @@ public class DuckdbService : IDuckdbService
         }
         catch (OperationCanceledException)
         {
-            result.Error = $"The operation exceeded the {QueryTimeoutSeconds}s time limit.";
+            result.Error = $"The operation exceeded the {timeoutSeconds}s time limit.";
         }
         catch (Exception ex)
         {
@@ -1117,10 +1125,12 @@ public class DuckdbService : IDuckdbService
             return result;
         }
 
+        var timeoutSeconds = _option.ResolveBuildTimeoutSeconds();
+
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(QueryTimeoutSeconds));
+            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
             using var connection = new DuckDBConnection($"DataSource={duckdbFilePath}");
             await connection.OpenAsync(cts.Token);
@@ -1181,7 +1191,7 @@ public class DuckdbService : IDuckdbService
         }
         catch (OperationCanceledException)
         {
-            result.Error = $"The query exceeded the {QueryTimeoutSeconds}s time limit.";
+            result.Error = $"The query exceeded the {timeoutSeconds}s time limit.";
         }
         catch (Exception ex)
         {
@@ -1435,81 +1445,25 @@ public class DuckdbService : IDuckdbService
                 .Select(t => (Target: t.Name, Type: t.Type, Staging: stagingByKey[NormalizeColumnKey(t.Name)]))
                 .ToList();
 
-            if (common.Count == 0)
+            // Staging is all-VARCHAR (see StageFileAsync), which is exactly why the cast machinery inside
+            // PromoteRelationAsync exists. Identifiers are quoted here, where they are known to be names.
+            var promoteColumns = common
+                .Select(c => (c.Target, c.Type, Source: Q(c.Staging)))
+                .ToList();
+
+            var promoted = await PromoteRelationAsync(
+                connection, StagingTable, tableName, promoteColumns, mode, keyColumns, skipInvalidRows,
+                "file", ct);
+
+            if (!promoted.Success)
             {
-                result.Error = "None of the file's columns match the target table.";
-                return result;
+                await connection.CloseAsync();
+                return promoted;
             }
 
-            // skipInvalidRows → TRY_CAST + a per-column validity filter (bad rows are dropped, counted).
-            // Otherwise → strict CAST, so a bad value aborts the whole import (the file is rejected).
-            var castFn = skipInvalidRows ? "TRY_CAST" : "CAST";
-            var insertList = string.Join(", ", common.Select(c => Q(c.Target)));
-            var selectList = string.Join(", ", common.Select(c => $"{castFn}({Q(c.Staging)} AS {c.Type})"));
-
-            string validFilter = string.Empty;
-            if (skipInvalidRows)
-            {
-                var conds = common.Select(c => $"({Q(c.Staging)} IS NULL OR TRY_CAST({Q(c.Staging)} AS {c.Type}) IS NOT NULL)");
-                validFilter = " WHERE " + string.Join(" AND ", conds);
-            }
-
-            var stagedCount = (int)await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {StagingTable}", ct);
-            var validCount = skipInvalidRows
-                ? (int)await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {StagingTable}{validFilter}", ct)
-                : stagedCount;
-            result.RowsSkipped = stagedCount - validCount;
-
-            var insertSql = $"INSERT INTO {Q(tableName)} ({insertList}) SELECT {selectList} FROM {StagingTable}{validFilter}";
-
-            // Wrap the mutations in a transaction so a failed INSERT (e.g. strict CAST on a bad value)
-            // rolls back any preceding DELETE — Replace/Upsert must never leave the table half-emptied.
-            await ExecAsync(connection, "BEGIN TRANSACTION", ct);
-            try
-            {
-                if (mode == ImportMode.Replace)
-                {
-                    await ExecAsync(connection, $"DELETE FROM {Q(tableName)}", ct);
-                    await ExecAsync(connection, insertSql, ct);
-                    result.RowsInserted = validCount;
-                }
-                else if (mode == ImportMode.Upsert)
-                {
-                    var keys = ResolveKeyColumns(keyColumns, common);
-                    if (keys.Count == 0)
-                    {
-                        await ExecAsync(connection, "ROLLBACK", ct);
-                        result.Error = "Upsert requires at least one key column that exists in both the file and the table.";
-                        return result;
-                    }
-
-                    var targetTuple = string.Join(", ", keys.Select(k => Q(k.Target)));
-                    var stagingKeySelect = string.Join(", ", keys.Select(k => $"TRY_CAST({Q(k.Staging)} AS {k.Type})"));
-                    var keySubquery = $"SELECT {stagingKeySelect} FROM {StagingTable}{validFilter}";
-
-                    // Rows in the target that the file replaces (matched on the key tuple) = "updated".
-                    var updated = (int)await ScalarLongAsync(connection,
-                        $"SELECT COUNT(*) FROM {Q(tableName)} WHERE ({targetTuple}) IN ({keySubquery})", ct);
-
-                    await ExecAsync(connection, $"DELETE FROM {Q(tableName)} WHERE ({targetTuple}) IN ({keySubquery})", ct);
-                    await ExecAsync(connection, insertSql, ct);
-
-                    result.RowsUpdated = updated;
-                    result.RowsInserted = Math.Max(0, validCount - updated);
-                }
-                else // Append
-                {
-                    await ExecAsync(connection, insertSql, ct);
-                    result.RowsInserted = validCount;
-                }
-
-                await ExecAsync(connection, "COMMIT", ct);
-            }
-            catch
-            {
-                try { await ExecAsync(connection, "ROLLBACK", ct); } catch { /* best-effort */ }
-                throw;
-            }
+            result.RowsInserted = promoted.RowsInserted;
+            result.RowsUpdated = promoted.RowsUpdated;
+            result.RowsSkipped = promoted.RowsSkipped;
 
             await connection.CloseAsync();
             result.Success = true;
@@ -1530,8 +1484,127 @@ public class DuckdbService : IDuckdbService
         return result;
     }
 
-    // Resolves the requested upsert key columns (given as target names) to common columns.
-    private static List<(string Target, string Type, string Staging)> ResolveKeyColumns(
+    /// <summary>
+    /// Writes a relation into an existing table in the SAME DuckDB catalog, honouring Append / Replace /
+    /// Upsert atomically. Extracted from <see cref="ImportFileAsync"/> so the ETL pipeline's destination
+    /// step and file import share one implementation of the part that is genuinely delicate.
+    /// </summary>
+    /// <param name="sourceRelation">
+    /// A relation expression to read from, ready to drop into SQL — a quoted table name, or the staging
+    /// table constant. Never interpolate an unquoted user-supplied string here.
+    /// </param>
+    /// <param name="targetTable">Raw target table name; quoted internally.</param>
+    /// <param name="columns">
+    /// Target column, target type, and the SQL expression producing it. <c>Source</c> is an
+    /// <em>expression</em>, not a name — the caller has already quoted any identifier. Building this list is
+    /// deliberately the caller's job, because matching columns by normalized name (what a file import
+    /// wants) and mapping them explicitly (what a pipeline wants) are different problems.
+    /// </param>
+    /// <param name="skipInvalidRows">
+    /// TRY_CAST plus a validity filter, so unconvertible rows are dropped and counted instead of a strict
+    /// CAST aborting the whole write. NOTE this only does useful work when the source is text: a pipeline
+    /// relation is already typed, where CAST(1.7 AS INTEGER) rounds rather than failing, so pipelines
+    /// validate types at their transform steps rather than relying on this.
+    /// </param>
+    /// <param name="sourceNoun">Names the source in error messages ("file", "pipeline").</param>
+    /// <remarks>
+    /// Target and source must live in the same catalog. DuckDB cannot hold one transaction across two
+    /// attached databases (see MoveTableAsync), and without a transaction a failed INSERT after a Replace's
+    /// DELETE would leave the table empty.
+    /// </remarks>
+    private static async Task<ImportResult> PromoteRelationAsync(
+        DuckDBConnection connection,
+        string sourceRelation,
+        string targetTable,
+        List<(string Target, string Type, string Source)> columns,
+        ImportMode mode,
+        List<string> keyColumns,
+        bool skipInvalidRows,
+        string sourceNoun,
+        CancellationToken ct)
+    {
+        var result = new ImportResult();
+
+        if (columns.Count == 0)
+        {
+            result.Error = $"None of the {sourceNoun}'s columns match the target table.";
+            return result;
+        }
+
+        var castFn = skipInvalidRows ? "TRY_CAST" : "CAST";
+        var insertList = string.Join(", ", columns.Select(c => Q(c.Target)));
+        var selectList = string.Join(", ", columns.Select(c => $"{castFn}({c.Source} AS {c.Type})"));
+
+        string validFilter = string.Empty;
+        if (skipInvalidRows)
+        {
+            var conds = columns.Select(c => $"({c.Source} IS NULL OR TRY_CAST({c.Source} AS {c.Type}) IS NOT NULL)");
+            validFilter = " WHERE " + string.Join(" AND ", conds);
+        }
+
+        var stagedCount = (int)await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {sourceRelation}", ct);
+        var validCount = skipInvalidRows
+            ? (int)await ScalarLongAsync(connection, $"SELECT COUNT(*) FROM {sourceRelation}{validFilter}", ct)
+            : stagedCount;
+        result.RowsSkipped = stagedCount - validCount;
+
+        var insertSql = $"INSERT INTO {Q(targetTable)} ({insertList}) SELECT {selectList} FROM {sourceRelation}{validFilter}";
+
+        // Wrap the mutations in a transaction so a failed INSERT (e.g. strict CAST on a bad value)
+        // rolls back any preceding DELETE — Replace/Upsert must never leave the table half-emptied.
+        await ExecAsync(connection, "BEGIN TRANSACTION", ct);
+        try
+        {
+            if (mode == ImportMode.Replace)
+            {
+                await ExecAsync(connection, $"DELETE FROM {Q(targetTable)}", ct);
+                await ExecAsync(connection, insertSql, ct);
+                result.RowsInserted = validCount;
+            }
+            else if (mode == ImportMode.Upsert)
+            {
+                var keys = ResolveKeyColumns(keyColumns, columns);
+                if (keys.Count == 0)
+                {
+                    await ExecAsync(connection, "ROLLBACK", ct);
+                    result.Error = $"Upsert requires at least one key column that exists in both the {sourceNoun} and the table.";
+                    return result;
+                }
+
+                var targetTuple = string.Join(", ", keys.Select(k => Q(k.Target)));
+                var sourceKeySelect = string.Join(", ", keys.Select(k => $"TRY_CAST({k.Source} AS {k.Type})"));
+                var keySubquery = $"SELECT {sourceKeySelect} FROM {sourceRelation}{validFilter}";
+
+                // Rows in the target that the source replaces (matched on the key tuple) = "updated".
+                var updated = (int)await ScalarLongAsync(connection,
+                    $"SELECT COUNT(*) FROM {Q(targetTable)} WHERE ({targetTuple}) IN ({keySubquery})", ct);
+
+                await ExecAsync(connection, $"DELETE FROM {Q(targetTable)} WHERE ({targetTuple}) IN ({keySubquery})", ct);
+                await ExecAsync(connection, insertSql, ct);
+
+                result.RowsUpdated = updated;
+                result.RowsInserted = Math.Max(0, validCount - updated);
+            }
+            else // Append
+            {
+                await ExecAsync(connection, insertSql, ct);
+                result.RowsInserted = validCount;
+            }
+
+            await ExecAsync(connection, "COMMIT", ct);
+        }
+        catch
+        {
+            try { await ExecAsync(connection, "ROLLBACK", ct); } catch { /* best-effort */ }
+            throw;
+        }
+
+        result.Success = true;
+        return result;
+    }
+
+    // Resolves the requested upsert key columns (given as target names) to promote columns.
+    private static List<(string Target, string Type, string Source)> ResolveKeyColumns(
         List<string> keyColumns, List<(string Target, string Type, string Staging)> common)
     {
         if (keyColumns == null) return new();

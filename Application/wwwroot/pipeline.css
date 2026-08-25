@@ -1,0 +1,528 @@
+/* =====================================================================================================
+   Pipeline editor — the canvas, its chrome, the inspector, and the run views.
+
+   Ported from relay's `.wf-*` rules. Class names are `.pl-*` and are NOT scoped to `.sc`, unlike the
+   primitives in shadcn.css: these names are unique to this feature, so there is nothing to collide with,
+   and leaving them unscoped means the canvas still renders correctly if a container forgets the wrapper.
+
+   Depends on the tokens in shadcn.css. Load this after it.
+   ===================================================================================================== */
+
+
+/* ---------- shell ---------- */
+.pl-shell {
+    height: calc(100dvh - var(--header-height) - var(--footer-height));
+    display: grid;
+    grid-template-rows: 44px 1fr auto;
+    overflow: hidden;
+    background: var(--bg);
+    font-family: var(--font-body);
+    color: var(--text-primary);
+}
+
+.pl-topbar {
+    display: flex; align-items: center; gap: 10px; padding: 0 14px; min-width: 0;
+    border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.pl-topbar-spacer { flex: 1 1 auto; }
+
+.pl-crumbs { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 13px; }
+.pl-crumbs a { color: var(--text-muted); text-decoration: none; }
+.pl-crumbs a:hover { color: var(--text-primary); }
+.pl-crumb-sep { color: var(--text-muted); }
+.pl-crumb-current {
+    font-weight: 600; color: var(--text-primary); white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 320px;
+}
+
+.pl-pill {
+    font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--text-muted); background: var(--surface-subtle);
+}
+.pl-pill.is-dirty { color: var(--warning); border-color: var(--warning-border); background: var(--warning-subtle); }
+.pl-pill.is-valid { color: var(--success); border-color: var(--success-border); background: var(--success-subtle); }
+.pl-pill.is-invalid { color: var(--danger); border-color: var(--danger-border); background: var(--danger-subtle); }
+
+.pl-body {
+    display: grid; min-height: 0;
+    grid-template-columns: var(--pl-palette-w, 220px) 4px 1fr 4px var(--pl-inspector-w, 320px);
+}
+.pl-body.no-palette { grid-template-columns: 0 0 1fr 4px var(--pl-inspector-w, 320px); }
+.pl-body.no-inspector { grid-template-columns: var(--pl-palette-w, 220px) 4px 1fr 0 0; }
+
+.pl-panel {
+    min-width: 0; min-height: 0; overflow: auto; background: var(--surface);
+    display: flex; flex-direction: column;
+}
+.pl-panel--left { border-right: 1px solid var(--border); }
+.pl-panel--right { border-left: 1px solid var(--border); }
+.pl-panel-head {
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+    border-bottom: 1px solid var(--border); position: sticky; top: 0;
+    background: var(--surface); z-index: 2;
+}
+.pl-panel-title {
+    font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-muted);
+}
+.pl-panel-body { padding: 10px 12px; }
+
+/* The drag itself is done in JS, writing a CSS custom property — no Blazor render per pixel. */
+.pl-resizer { cursor: col-resize; background: transparent; transition: background .12s ease; }
+.pl-resizer:hover, .pl-resizer.is-dragging { background: var(--accent-border); }
+.pl-resizer--v { cursor: row-resize; height: 4px; }
+
+/* ---------- validation bar ---------- */
+.pl-issues {
+    display: flex; flex-direction: column; gap: 2px;
+    border-top: 1px solid var(--border); background: var(--surface);
+    padding: 6px 14px; max-height: 132px; overflow: auto;
+}
+.pl-issue {
+    display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary);
+    background: none; border: 0; padding: 2px 0; text-align: left; cursor: pointer;
+}
+.pl-issue:hover { color: var(--text-primary); }
+.pl-issue.is-error { color: var(--danger); }
+.pl-issue.is-warn { color: var(--warning); }
+.pl-issue-node { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+
+/* ---------- palette ---------- */
+.pl-palette-search { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.pl-palette-group {
+    padding: 8px 8px 2px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-muted);
+}
+.pl-palette-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 10px;
+    border: 0; background: none; border-radius: var(--radius-sm); cursor: pointer;
+    font-size: 13px; color: var(--text-primary); text-align: left;
+}
+.pl-palette-item:hover { background: var(--surface-subtle); }
+.pl-palette-item:disabled { opacity: .45; cursor: not-allowed; }
+.pl-palette-icon {
+    flex: 0 0 auto; width: 22px; height: 22px; display: grid; place-items: center;
+    border-radius: var(--radius-sm); background: var(--surface-subtle); color: var(--text-secondary);
+}
+.pl-palette-label { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- canvas ---------- */
+.pl-canvas {
+    position: relative; overflow: hidden; min-width: 0; min-height: 0;
+    background: var(--bg); outline: none;
+    /* Without this, a touch device scrolls the page instead of panning the graph. */
+    touch-action: none;
+}
+.pl-canvas.is-panning { cursor: grabbing; }
+.pl-canvas.is-linking { cursor: crosshair; }
+/* During a node drag the edges are stale until the drop recomputes layout, so fade them rather than
+   showing connections that no longer line up. */
+.pl-canvas.is-nodedrag .pl-edges { opacity: .3; }
+.pl-canvas.is-nodedrag .pl-node { transition: none; cursor: grabbing; }
+.pl-canvas.is-nodedrag .pl-edge-insert { display: none; }
+.pl-canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+
+.pl-viewport { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+
+/* Dots live on the viewport, so scale() scales them for free — no JS background-position bookkeeping. */
+.pl-grid {
+    position: absolute; pointer-events: none;
+    background-image: radial-gradient(var(--pl-grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+}
+
+.pl-edges { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+.pl-edges path { fill: none; }
+.pl-edge { stroke: var(--pl-edge); stroke-width: 1.75; vector-effect: non-scaling-stroke; }
+/* An unfilled path will not receive interior clicks, so every edge gets a fat transparent twin. */
+.pl-edge-hit { stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+.pl-edge-hit:hover + .pl-edge, .pl-edge.is-hot { stroke: var(--accent); stroke-width: 2.5; }
+.pl-edge--back { stroke-dasharray: 5 4; stroke: var(--text-muted); }
+.pl-edge--ok { stroke: var(--success); }
+.pl-edge--bad { stroke: var(--danger); }
+.pl-edge--skipped { stroke: var(--text-muted); stroke-dasharray: 4 4; opacity: .4; }
+.pl-edge--active { stroke: var(--accent); stroke-dasharray: 6 4; animation: pl-dash 1s linear infinite; }
+@keyframes pl-dash { to { stroke-dashoffset: -20; } }
+.pl-linkghost { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 4 3; fill: none; }
+.pl-edge-label { font-family: var(--font-body); font-size: 10.5px; fill: var(--text-muted); }
+
+.pl-marquee {
+    position: absolute; border: 1px solid var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent); pointer-events: none;
+}
+
+/* ---------- node ---------- */
+.pl-node {
+    position: absolute; box-sizing: border-box; display: flex; flex-direction: column; gap: 2px;
+    padding: 8px 10px; background: var(--surface); border: 1px solid var(--border);
+    border-left: 3px solid var(--pl-node-accent, var(--border-strong));
+    border-radius: var(--radius-md); box-shadow: var(--shadow-xs);
+    cursor: grab; user-select: none;
+    /* `contain: layout` only. `paint` would clip descendants to the node box, silently hiding the
+       append-a-step button positioned outside the right edge. */
+    contain: layout;
+    /* Above the edge-insert affordances, so grabbing a node is never swallowed by an invisible plus. */
+    z-index: 2;
+    transition: transform .18s ease, box-shadow .12s ease, border-color .12s ease;
+}
+.pl-node:active { cursor: grabbing; }
+.pl-node:hover { box-shadow: var(--shadow-sm); }
+.pl-node.is-selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-subtle); }
+.pl-node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pl-node.is-match { box-shadow: 0 0 0 2px var(--accent); }
+.pl-node.is-dim { opacity: .35; }
+.pl-node.is-detached { border-style: dashed; }
+.pl-node.is-pinned .pl-node-pin { display: inline-flex; }
+.pl-node-pin { display: none; color: var(--text-muted); }
+
+.pl-node-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pl-node-icon {
+    flex: 0 0 auto; width: 16px; height: 16px;
+    color: var(--pl-node-accent, var(--text-secondary));
+}
+.pl-node-title {
+    flex: 1 1 auto; font-size: 13px; font-weight: 600; color: var(--text-primary);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pl-node-sub {
+    font-size: 11px; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pl-node-meta {
+    display: flex; align-items: center; gap: 6px;
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted);
+}
+.pl-node-badges { position: absolute; top: -8px; right: 8px; display: inline-flex; gap: 4px; }
+
+/* Category accents, matching PipelineNodeCategories. */
+.pl-node--sources     { --pl-node-accent: #7c3aed; }
+.pl-node--shape       { --pl-node-accent: #2563eb; }
+.pl-node--combine     { --pl-node-accent: #0891b2; }
+.pl-node--summarize   { --pl-node-accent: #059669; }
+.pl-node--sql         { --pl-node-accent: #ca8a04; }
+.pl-node--destination { --pl-node-accent: #475569; }
+
+/* Run states, mapped onto the semantic tokens so dark mode needs no extra rules. */
+.pl-node.is-running { border-color: var(--accent); background: var(--accent-subtle); }
+.pl-node.is-ok { border-color: var(--success-border); }
+.pl-node.is-failed { border-color: var(--danger); background: var(--danger-subtle); }
+.pl-node.is-skipped { border-style: dashed; opacity: .45; }
+.pl-node.is-canceled { border-style: dashed; border-color: var(--warning); }
+.pl-node.is-pending { opacity: .75; }
+
+/* ---------- ports ---------- */
+.pl-port {
+    position: absolute; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--surface); border: 2px solid var(--border-strong);
+    cursor: crosshair; z-index: 2;
+}
+/* A 10px dot is a punishing drag target, so expand the hit area without changing how it looks. Generous
+   horizontally (where a drag starts) but tight vertically: a join's two ports are only 18px apart, so a
+   taller area would have neighbours stealing each other's hits. */
+.pl-port::after { content: ''; position: absolute; inset: -4px -10px; }
+.pl-port:hover, .pl-port.is-valid {
+    border-color: var(--accent); background: var(--accent-subtle); transform: scale(1.25);
+}
+/* While a link is being dragged, every candidate input port is highlighted. */
+.pl-canvas.is-linking .pl-port--in { border-color: var(--accent); background: var(--accent-subtle); }
+.pl-canvas.is-linking .pl-port--out { opacity: .35; }
+.pl-port.is-connected { background: var(--border-strong); }
+.pl-port.is-invalid { opacity: .25; cursor: not-allowed; }
+.pl-port--in { left: -6px; }
+.pl-port--out { right: -6px; }
+.pl-port-label {
+    position: absolute; font-size: 10px; color: var(--text-muted);
+    white-space: nowrap; pointer-events: none;
+}
+.pl-port-label--in { left: 10px; }
+.pl-port-label--out { right: 10px; }
+
+/* ---------- insert affordances ---------- */
+.pl-node-insert, .pl-edge-insert {
+    position: absolute; width: 18px; height: 18px; border-radius: 50%;
+    display: grid; place-items: center; background: var(--surface);
+    border: 1px solid var(--border); color: var(--text-muted);
+    font-size: 13px; line-height: 1; cursor: pointer; padding: 0;
+    transition: opacity .12s ease, border-color .12s ease;
+}
+/* The append button lives inside a node, so it can reveal on node hover. */
+.pl-node-insert { opacity: 0; z-index: 3; }
+.pl-node:hover .pl-node-insert { opacity: 1; }
+/* Edge-insert buttons are siblings of the SVG, not descendants of it, so no ":hover the edge" selector can
+   reach them. They are therefore faintly visible at rest — invisible-but-clickable is worse than slightly
+   noisy, and it made them undiscoverable. z-index keeps them under the nodes. */
+.pl-edge-insert { opacity: .32; z-index: 1; }
+.pl-edge-insert:hover { opacity: 1; }
+.pl-node-insert:hover, .pl-edge-insert:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Never let an affordance intercept a gesture in progress. */
+.pl-canvas.is-panning .pl-edge-insert,
+.pl-canvas.is-linking .pl-edge-insert { display: none; }
+
+/* ---------- level of detail: JS writes one class + --pl-k, CSS does the rest, zero re-renders ---------- */
+.pl-canvas.is-far .pl-node-sub,
+.pl-canvas.is-far .pl-node-meta,
+.pl-canvas.is-far .pl-node-badges,
+.pl-canvas.is-far .pl-port-label,
+.pl-canvas.is-far .pl-edge-label,
+.pl-canvas.is-far .pl-node-insert,
+.pl-canvas.is-far .pl-edge-insert { display: none; }
+.pl-canvas.is-far .pl-grid { background-image: none; }
+.pl-canvas.is-far .pl-port { width: 5px; height: 5px; border-width: 1px; }
+.pl-canvas.is-mid .pl-node-meta, .pl-canvas.is-mid .pl-edge-label { display: none; }
+/* Counter-scale the title so a zoomed-out graph stays readable. */
+.pl-canvas.is-far .pl-node-title {
+    transform: scale(calc(1 / var(--pl-k, 1))); transform-origin: left center;
+}
+
+/* ---------- chrome: toolbar, zoom, minimap, search ---------- */
+.pl-toolbar {
+    position: absolute; left: 12px; bottom: 12px; z-index: 5;
+    display: flex; align-items: center; gap: 6px; padding: 4px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+}
+.pl-tool-btn {
+    display: grid; place-items: center; width: 28px; height: 28px; border: 0; padding: 0;
+    background: none; border-radius: var(--radius-sm); color: var(--text-secondary); cursor: pointer;
+}
+.pl-tool-btn:hover { background: var(--surface-subtle); color: var(--text-primary); }
+.pl-tool-btn.is-active { background: var(--accent); color: var(--text-on-accent); }
+.pl-tool-sep { width: 1px; height: 20px; background: var(--border); }
+.pl-zoom-label {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);
+    min-width: 40px; text-align: center;
+}
+
+.pl-minimap {
+    position: absolute; right: 12px; bottom: 12px; z-index: 5; width: 168px; height: 108px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-md); overflow: hidden; box-shadow: var(--shadow-sm);
+}
+.pl-minimap svg { display: block; width: 100%; height: 100%; }
+.pl-minimap-node { fill: var(--border-strong); }
+.pl-minimap-node.is-ok { fill: var(--success); }
+.pl-minimap-node.is-failed { fill: var(--danger); }
+.pl-minimap-node.is-running { fill: var(--accent); }
+.pl-minimap-view {
+    fill: color-mix(in srgb, var(--accent) 14%, transparent);
+    stroke: var(--accent); stroke-width: 1;
+}
+
+.pl-search {
+    position: absolute; top: 12px; left: 12px; z-index: 5;
+    display: flex; align-items: center; gap: 6px; padding: 4px 8px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-sm);
+}
+.pl-search input {
+    border: 0; outline: none; background: none; font-size: 12.5px; width: 160px;
+    color: var(--text-primary);
+}
+.pl-search-count { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+
+/* Node-anchored popovers render inside the viewport, so they pan with the graph and need no measurement.
+   Not .popover — Bootstrap owns that. */
+.pl-popover {
+    position: absolute; z-index: 20; min-width: 190px; padding: 4px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+}
+.pl-picker { max-height: 260px; overflow: auto; }
+.pl-picker-item {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: 0;
+    background: none; border-radius: var(--radius-sm); font-size: 12.5px;
+    color: var(--text-primary); text-align: left; cursor: pointer;
+}
+.pl-picker-item:hover, .pl-picker-item.is-active { background: var(--surface-subtle); }
+.pl-picker-group {
+    padding: 6px 8px 2px; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-muted);
+}
+
+/* ---------- inspector ---------- */
+.pl-inspector-empty { padding: 24px 12px; text-align: center; font-size: 12.5px; color: var(--text-muted); }
+.pl-group { border: 1px solid var(--border); border-radius: var(--radius-md); margin-bottom: 10px; }
+.pl-group > summary {
+    cursor: pointer; padding: 8px 10px; font-size: 12px; font-weight: 600;
+    color: var(--text-secondary); list-style: none;
+}
+.pl-group > summary::-webkit-details-marker { display: none; }
+.pl-group > summary::before { content: '▸ '; color: var(--text-muted); }
+.pl-group[open] > summary::before { content: '▾ '; }
+.pl-group-body { padding: 4px 10px 10px; border-top: 1px solid var(--border); }
+
+/* Structured row editors. The column-mapping grid is the most important control in the feature, so it gets
+   its own wider layout rather than sharing the generic key/value one. */
+.pl-kv-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-bottom: 6px; }
+.pl-map-row { display: grid; grid-template-columns: 1fr 1fr 88px auto; gap: 6px; margin-bottom: 6px; }
+.pl-expr-row { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 6px; margin-bottom: 6px; }
+.pl-agg-row { display: grid; grid-template-columns: 1fr 96px 1fr auto; gap: 6px; margin-bottom: 6px; }
+.pl-join-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-bottom: 6px; }
+/* Generic grids for the round-two steps. One class per column count rather than one per step: the shapes
+   repeat, and a bespoke class for each new grid is how a stylesheet stops being readable. */
+.pl-grid-2 { display: grid; grid-template-columns: 1fr 110px auto; gap: 6px; margin-bottom: 6px; }
+.pl-grid-3 { display: grid; grid-template-columns: 1fr 120px 1fr auto; gap: 6px; margin-bottom: 6px; }
+.pl-grid-5 { display: grid; grid-template-columns: 1fr 116px 1fr 1fr 1fr auto; gap: 6px; margin-bottom: 6px; }
+.pl-grid-1 { display: grid; grid-template-columns: 1fr auto; gap: 6px; margin-bottom: 6px; }
+
+/* A caveat that belongs to a whole step rather than one field. */
+.pl-note {
+    padding: 8px 10px; margin-bottom: 10px; font-size: 12px; line-height: 1.5;
+    border-left: 2px solid var(--warning); background: var(--surface-subtle);
+    color: var(--text-secondary);
+}
+.pl-row-head {
+    display: grid; gap: 6px; margin-bottom: 4px;
+    font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+    color: var(--text-muted);
+}
+.pl-row-del {
+    display: grid; place-items: center; width: 26px; height: 34px; border: 0; padding: 0;
+    background: none; color: var(--text-muted); border-radius: var(--radius-sm); cursor: pointer;
+}
+.pl-row-del:hover { background: var(--danger-subtle); color: var(--danger); }
+
+.pl-token-hint { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.pl-token-chip {
+    font-family: var(--font-mono); font-size: 10.5px; padding: 1px 5px;
+    border-radius: var(--radius-sm); background: var(--accent-subtle); color: var(--accent);
+    border: 1px solid var(--accent-border); cursor: pointer;
+}
+
+/* Column pills, offered from the upstream step's cached schema. */
+.pl-cols { display: flex; flex-wrap: wrap; gap: 4px; }
+.pl-col-chip {
+    font-family: var(--font-mono); font-size: 10.5px; padding: 1px 6px;
+    border-radius: var(--radius-sm); background: var(--surface-subtle);
+    color: var(--text-secondary); border: 1px solid var(--border); cursor: pointer;
+}
+.pl-col-chip.is-on { background: var(--accent-subtle); color: var(--accent); border-color: var(--accent-border); }
+.pl-col-chip.is-missing { background: var(--danger-subtle); color: var(--danger); border-color: var(--danger-border); }
+
+/* ---------- run view: waterfall ---------- */
+.pl-runbar {
+    display: flex; align-items: center; gap: 12px; padding: 8px 14px;
+    border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.pl-fall { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; overflow: auto; }
+.pl-fall-row {
+    display: grid; grid-template-columns: 160px 1fr 92px; gap: 10px; align-items: center;
+    font-size: 12px; background: none; border: 0; padding: 2px 0; cursor: pointer; text-align: left;
+}
+.pl-fall-row:hover { background: var(--surface-subtle); }
+.pl-fall-name {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary);
+}
+.pl-fall-track { position: relative; height: 14px; background: var(--surface-subtle); border-radius: 3px; }
+/* Positioned by the step's offset from the run start, so a concurrent wave visibly overlaps. */
+.pl-fall-bar { position: absolute; top: 0; height: 100%; border-radius: 3px; background: var(--accent); min-width: 2px; }
+.pl-fall-bar.is-ok { background: var(--success); }
+.pl-fall-bar.is-failed { background: var(--danger); }
+.pl-fall-bar.is-skipped { background: var(--border-strong); }
+.pl-fall-meta {
+    font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); text-align: right;
+}
+
+/* ---------- test panel: a bottom sheet inside the editor, not a modal, so the graph stays visible ------ */
+.pl-testpanel {
+    display: grid; grid-template-rows: auto 1fr;
+    border-top: 1px solid var(--border); background: var(--surface);
+    height: var(--pl-test-h, 240px); min-height: 0;
+}
+.pl-testpanel-head {
+    display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+}
+.pl-testpanel-body { overflow: auto; padding: 10px 14px; min-height: 0; }
+.pl-preview-table { width: 100%; border-collapse: collapse; font-family: var(--font-mono); font-size: 11.5px; }
+.pl-preview-table th {
+    position: sticky; top: 0; background: var(--surface-subtle); text-align: left;
+    padding: 4px 8px; border-bottom: 1px solid var(--border); color: var(--text-muted); white-space: nowrap;
+}
+.pl-preview-table td {
+    padding: 3px 8px; border-bottom: 1px solid var(--border);
+    white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis;
+}
+.pl-preview-null { color: var(--text-muted); font-style: italic; }
+
+/* ---------- list / tree fallback: also the print view and the mobile view ---------- */
+.pl-outline { padding: 10px 14px; overflow: auto; font-size: 13px; }
+.pl-outline-row {
+    display: flex; align-items: center; gap: 8px; padding: 3px 0;
+    background: none; border: 0; width: 100%; text-align: left; cursor: pointer;
+    color: var(--text-primary);
+}
+.pl-outline-row:hover { background: var(--surface-subtle); }
+.pl-outline-row.is-selected { color: var(--accent); font-weight: 600; }
+.pl-outline-rail { color: var(--text-muted); font-family: var(--font-mono); white-space: pre; }
+.pl-outline-note { font-size: 11px; color: var(--text-muted); }
+.pl-outline-group {
+    margin-top: 10px; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-muted);
+}
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+    .pl-node, .pl-edge-insert, .pl-node-insert, .pl-port { transition: none; }
+    .pl-edge--active { animation: none; }
+    .pl-spin { animation-duration: 2s; }
+}
+
+/* ---------- mobile: a pan/zoom canvas on a phone is a bad experience, so force the outline ---------- */
+@media (max-width: 900px) {
+    .pl-body { grid-template-columns: 1fr; }
+    .pl-panel--left, .pl-panel--right, .pl-resizer { display: none; }
+    .pl-canvas { display: none; }
+    .pl-outline-fallback { display: block; }
+}
+.pl-outline-fallback { display: none; }
+
+/* ---------- print: the outline again, because a transformed canvas does not paginate ---------- */
+@media print {
+    .pl-topbar, .pl-panel--left, .pl-panel--right, .pl-resizer,
+    .pl-canvas, .pl-testpanel, .pl-toolbar, .pl-minimap { display: none !important; }
+    .pl-outline-fallback { display: block !important; }
+    .pl-shell { height: auto; display: block; }
+}
+
+/* ==========================================================================================
+   Focus mode: the editor takes over the whole body, and its palette becomes the nav.
+   Set by pipelineChrome.focus() from the editor page, cleared on dispose.
+
+   Hiding the app nav rather than rendering the palette inside it: the palette's Add callback
+   belongs to the editor, and routing that through the layout would mean a shared mutable
+   state container for one page's benefit.
+   ========================================================================================== */
+body.pl-focus .nav-sidebar,
+body.pl-focus .nav-backdrop { display: none; }
+
+/* The graph needs to reach the window edge for the palette to read as the nav, so the layout's
+   own page padding comes off too. */
+body.pl-focus .al-main { padding: 0; overflow: hidden; }
+
+/* ---------- palette: collapsible groups, inset items ---------- */
+.pl-palette-list { display: flex; flex-direction: column; padding: 0 8px 10px; }
+
+.pl-palette-group {
+    display: flex; align-items: center; gap: 6px; width: 100%;
+    padding: 9px 12px 5px; border: 0; background: none; cursor: pointer;
+    font-family: inherit; font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-muted); text-align: left;
+}
+.pl-palette-group:hover { color: var(--text-secondary); }
+.pl-palette-group-label { flex: 1 1 auto; }
+.pl-palette-group-count {
+    font-size: 10px; font-weight: 600; letter-spacing: 0;
+    padding: 1px 5px; border-radius: 999px;
+    background: var(--surface-subtle); color: var(--text-muted);
+}
+/* No transition, deliberately. Animating CSS `transform` on an SVG element (transform-box: view-box)
+   does not reach its target here: measured, a click left the caret at identity instead of -90deg, so it
+   pointed the wrong way. Setting an explicit rotate(0deg) base did not help either. Applied instantly it
+   is exact in both directions. Animating this would mean wrapping the svg in a span to rotate that
+   instead — more markup than a caret is worth. */
+.pl-palette-caret { flex: 0 0 auto; }
+.pl-palette-group.is-collapsed .pl-palette-caret { transform: rotate(-90deg); }
+
+.pl-palette-item { padding: 7px 12px; }

@@ -1,0 +1,153 @@
+@*
+    A depth-first outline of the same graph. Required, not optional: it is the keyboard view, the print view,
+    and (forced by CSS under 900px) the mobile view — a pan/zoom canvas on a phone is a bad experience.
+
+    A step reached from more than one place prints once, with a note saying where else it comes from. A back
+    edge prints as a "loops back to" line rather than being drawn.
+*@
+@using Application.Client.Pipelines
+@using Application.Shared.Models.Data.Pipelines
+@using Application.Shared.Services.Data.Pipelines
+
+<div class="pl-outline">
+    @if (_roots.Count == 0)
+    {
+        <div class="pl-inspector-empty">Nothing to show yet — add a source.</div>
+    }
+
+    @foreach (var line in _lines)
+    {
+        var id = line.NodeId;
+        <button class="pl-outline-row @(Selected.Contains(id) ? "is-selected" : "")"
+                @onclick="() => OnSelect.InvokeAsync((id, false))">
+            <span class="pl-outline-rail">@line.Rail</span>
+            <span>@line.Title</span>
+            @if (line.State is { Length: > 0 })
+            {
+                <span class="pl-outline-note">@line.State</span>
+            }
+            @if (line.Note is { Length: > 0 })
+            {
+                <span class="pl-outline-note">— @line.Note</span>
+            }
+        </button>
+    }
+
+    @if (_orphans.Count > 0)
+    {
+        <div class="pl-outline-group">Not connected</div>
+        @foreach (var id in _orphans)
+        {
+            var nodeId = id;
+            <button class="pl-outline-row @(Selected.Contains(nodeId) ? "is-selected" : "")"
+                    @onclick="() => OnSelect.InvokeAsync((nodeId, false))">
+                <span class="pl-outline-rail">· </span>
+                <span>@TitleOf(nodeId)</span>
+            </button>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public PipelineGraph Graph { get; set; } = new();
+    [Parameter] public Dictionary<string, NodeRunState>? RunState { get; set; }
+    [Parameter] public HashSet<string> Selected { get; set; } = new();
+    [Parameter] public EventCallback<(string NodeId, bool Additive)> OnSelect { get; set; }
+
+    private sealed record Line(string NodeId, string Rail, string Title, string? State, string? Note);
+
+    private readonly List<Line> _lines = new();
+    private List<string> _roots = new();
+    private List<string> _orphans = new();
+
+    protected override void OnParametersSet()
+    {
+        _lines.Clear();
+
+        var nodes = Graph.Nodes
+            .Where(n => !string.IsNullOrWhiteSpace(n.Id))
+            .GroupBy(n => n.Id, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        var successors = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var predecessors = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var id in nodes.Keys) { successors[id] = new(); predecessors[id] = new(); }
+
+        foreach (var edge in Graph.Edges)
+        {
+            if (edge.From is null || edge.To is null) continue;
+            if (!nodes.ContainsKey(edge.From) || !nodes.ContainsKey(edge.To)) continue;
+            successors[edge.From].Add(edge.To);
+            predecessors[edge.To].Add(edge.From);
+        }
+
+        // Sources first, then anything else with no inbound edge, in document order both times.
+        var order = Graph.Nodes.Select((n, i) => (n.Id, i))
+            .ToDictionary(t => t.Id, t => t.i, StringComparer.Ordinal);
+
+        _roots = nodes.Keys
+            .Where(id => predecessors[id].Count == 0)
+            .OrderByDescending(id => PipelineNodeCatalog.Get(nodes[id].Type)?.IsSource == true)
+            .ThenBy(id => order.GetValueOrDefault(id))
+            .ToList();
+
+        var printed = new HashSet<string>(StringComparer.Ordinal);
+
+        void Walk(string id, string rail, bool last, HashSet<string> path)
+        {
+            var node = nodes[id];
+            var state = RunState?.GetValueOrDefault(id);
+            var glyph = state is null ? null : NodeIcons.StateOf(state.Status).Glyph;
+
+            // A cycle: print where it goes back to and stop, rather than recursing forever.
+            if (path.Contains(id))
+            {
+                _lines.Add(new Line(id, rail, TitleOf(id), glyph, $"loops back to {TitleOf(id)}"));
+                return;
+            }
+
+            string? note = null;
+            if (printed.Contains(id))
+            {
+                // Reached from more than one place. Print the reference and do not expand it twice.
+                var others = predecessors[id].Select(TitleOf).Distinct().ToList();
+                _lines.Add(new Line(id, rail, TitleOf(id), glyph,
+                    others.Count > 1 ? "also reached from " + string.Join(", ", others) : "shown above"));
+                return;
+            }
+
+            if (predecessors[id].Count > 1)
+                note = "joins " + string.Join(" + ", predecessors[id].Select(TitleOf));
+
+            printed.Add(id);
+            _lines.Add(new Line(id, rail, TitleOf(id), glyph, note));
+
+            var children = successors[id].Distinct(StringComparer.Ordinal)
+                .OrderBy(c => order.GetValueOrDefault(c)).ToList();
+
+            var nextPath = new HashSet<string>(path, StringComparer.Ordinal) { id };
+            var childRail = rail.Length == 0 ? "  " : rail.Replace("└─ ", "   ").Replace("├─ ", "│  ");
+
+            for (var i = 0; i < children.Count; i++)
+            {
+                var isLast = i == children.Count - 1;
+                Walk(children[i], childRail + (isLast ? "└─ " : "├─ "), isLast, nextPath);
+            }
+        }
+
+        foreach (var root in _roots)
+            Walk(root, string.Empty, true, new HashSet<string>(StringComparer.Ordinal));
+
+        _orphans = nodes.Keys.Where(id => !printed.Contains(id))
+            .OrderBy(id => order.GetValueOrDefault(id)).ToList();
+    }
+
+    private string TitleOf(string id)
+    {
+        var node = Graph.Nodes.FirstOrDefault(n => n.Id == id);
+        if (node is null) return id;
+        return string.IsNullOrWhiteSpace(node.Label)
+            ? PipelineNodeCatalog.Get(node.Type)?.Label ?? node.Id
+            : node.Label!;
+    }
+}

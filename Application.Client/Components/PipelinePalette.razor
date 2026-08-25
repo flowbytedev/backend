@@ -1,0 +1,142 @@
+@*
+    The step palette. Click to add, NOT drag: with a computed layout there is no meaningful "where" to drop a
+    step, so dragging from here would be a lie about what happens next. The step lands connected to the
+    current selection, or unattached if there is none.
+
+    In the editor this stands in for the app's nav menu (see body.pl-focus in pipeline.css), which is why the
+    groups collapse and the items are inset like nav items rather than packed like a toolbar.
+*@
+@using Application.Shared.Models.Data.Pipelines
+@using Application.Shared.Services.Data.Pipelines
+@inject IJSRuntime _js
+
+<div class="pl-panel pl-panel--left">
+    <div class="pl-panel-head">
+        <span class="pl-panel-title">Add a step</span>
+    </div>
+
+    <div class="pl-palette-search">
+        <input class="input" placeholder="Filter…" value="@_filter" @oninput="OnFilter" />
+    </div>
+
+    <div class="pl-palette-list">
+        @foreach (var category in PipelineNodeCategories.Ordered)
+        {
+            var items = Visible(category);
+            if (items.Count == 0) continue;
+
+            var collapsed = IsCollapsed(category);
+            var name = category;
+
+            <button class="pl-palette-group @(collapsed ? "is-collapsed" : "")"
+                    aria-expanded="@((!collapsed).ToString().ToLowerInvariant())"
+                    @onclick="() => Toggle(name)">
+                <svg class="pl-palette-caret" viewBox="0 0 24 24" width="11" height="11" fill="none"
+                     stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"
+                     aria-hidden="true">
+                    <polyline points="6 9 12 15 18 9" />
+                </svg>
+                <span class="pl-palette-group-label">@category</span>
+                <span class="pl-palette-group-count">@items.Count</span>
+            </button>
+
+            @if (!collapsed)
+            {
+                @foreach (var spec in items)
+                {
+                    var type = spec.Type;
+                    <button class="pl-palette-item sc-tip"
+                            data-tip="@spec.Description"
+                            @onclick="() => OnAdd.InvokeAsync(type)">
+                        <span class="pl-palette-icon">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                @NodeIcons.Path(spec.Icon)
+                            </svg>
+                        </span>
+                        <span class="pl-palette-label">@spec.Label</span>
+                    </button>
+                }
+            }
+        }
+
+        @if (!Any())
+        {
+            <div class="pl-inspector-empty">Nothing matches “@_filter”.</div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback<string> OnAdd { get; set; }
+
+    private const string StorageKey = "pl.palette.collapsed";
+
+    private string _filter = string.Empty;
+    private readonly HashSet<string> _collapsed = new(StringComparer.Ordinal);
+    private bool _restored;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _restored) return;
+        _restored = true;
+
+        // Which groups are shut is a per-person habit, so it outlives the page. Failing to read it is not
+        // worth surfacing — everything simply starts expanded.
+        try
+        {
+            var stored = await _js.InvokeAsync<string?>("pipelineStorage.get", StorageKey);
+            if (string.IsNullOrWhiteSpace(stored)) return;
+
+            foreach (var name in stored!.Split('|', StringSplitOptions.RemoveEmptyEntries))
+                if (PipelineNodeCategories.Ordered.Contains(name))
+                    _collapsed.Add(name);
+
+            if (_collapsed.Count > 0) StateHasChanged();
+        }
+        catch (JSException) { }
+        catch (InvalidOperationException) { }
+    }
+
+    private void OnFilter(ChangeEventArgs e) => _filter = e.Value?.ToString() ?? string.Empty;
+
+    /// <summary>
+    /// A filter overrides collapse. A group hiding matches while the user is actively searching reads as
+    /// "no such step", which is the one wrong answer this control can give.
+    /// </summary>
+    private bool IsCollapsed(string category) =>
+        string.IsNullOrWhiteSpace(_filter) && _collapsed.Contains(category);
+
+    private async Task Toggle(string category)
+    {
+        if (!_collapsed.Remove(category)) _collapsed.Add(category);
+
+        try
+        {
+            await _js.InvokeVoidAsync("pipelineStorage.set", StorageKey, string.Join('|', _collapsed));
+        }
+        catch (JSException) { }
+        catch (InvalidOperationException) { }
+    }
+
+    private List<PipelineNodeSpec> Visible(string category) =>
+        PipelineNodeCatalog.All
+            .Where(s => s.Category == category)
+            .Where(Matches)
+            .ToList();
+
+    private bool Any() => PipelineNodeCatalog.All.Any(Matches);
+
+    /// <summary>
+    /// Matches the label, the description and the type key. Including the type means someone who has read the
+    /// YAML can find a step by the name they saw there.
+    /// </summary>
+    private bool Matches(PipelineNodeSpec spec)
+    {
+        if (string.IsNullOrWhiteSpace(_filter)) return true;
+
+        return spec.Label.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+            || spec.Description.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+            || spec.Type.Contains(_filter, StringComparison.OrdinalIgnoreCase);
+    }
+}

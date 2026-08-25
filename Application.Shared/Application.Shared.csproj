@@ -23,6 +23,10 @@
     <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.2" />
     <PackageReference Include="MySqlConnector" Version="2.4.0" />
     <PackageReference Include="Npgsql" Version="9.0.2" />
+    <!-- Pinned to a version already in the local NuGet cache: this machine cannot restore new
+         packages (the corporate proxy presents an untrusted SSL root). Used only to render and
+         parse the YAML view of a pipeline; the stored document is always JSON. -->
+    <PackageReference Include="YamlDotNet" Version="16.0.0" />
     <PackageReference Include="Parquet.Net" Version="5.0.3-pre.3" />
     <PackageReference Include="SSH.NET" Version="2024.2.0" />
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" Version="4.11.3" />
