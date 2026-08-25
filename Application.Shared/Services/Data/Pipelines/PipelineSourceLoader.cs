@@ -307,7 +307,14 @@ public class PipelineSourceLoader(
                 ? string.Join(", ", columns.Select(PipelineSql.Q))
                 : "*";
             var filter = string.IsNullOrWhiteSpace(where) ? string.Empty : $" WHERE ({where})";
-            var query = $"SELECT {projection} FROM {PipelineSql.Q(table!)}{filter}";
+
+            // Same rule as the destination: a dotted name is a schema and a table, not one identifier
+            // containing a dot. Quoting it whole produced "product.item", which resolves to nothing.
+            var sourceRef = PipelineTableRef.Parse(table);
+            if (sourceRef.Error is not null)
+                return PipelineRelationResult.Fail(sourceRef.Error, PipelineErrorType.Invalid);
+
+            var query = $"SELECT {projection} FROM {sourceRef.ForDuckDb()}{filter}";
 
             request.Progress?.WriteLine(
                 $"  reading {table} from external dataset '{dataset.Name}'");
@@ -366,7 +373,13 @@ public class PipelineSourceLoader(
         Dataset dataset, string table, CancellationToken ct)
     {
         var column = incremental.Column!;
-        var sql = $"SELECT MAX({PipelineSql.Q(column)}) FROM {PipelineSql.Q(table)}";
+
+        // Qualified the same way as the read itself — a ceiling measured against a different table than the
+        // one loaded would move the watermark past rows that were never read.
+        var tableRef = PipelineTableRef.Parse(table);
+        if (tableRef.Error is not null) return null;
+
+        var sql = $"SELECT MAX({PipelineSql.Q(column)}) FROM {tableRef.ForDuckDb()}";
 
         string? high;
         string? type;

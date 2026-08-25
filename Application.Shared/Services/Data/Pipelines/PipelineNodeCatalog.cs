@@ -538,7 +538,8 @@ public static class PipelineNodeCatalog
                 [
                     new("dataset", "Dataset", PipelineFieldKinds.DatasetPicker, Required: true),
                     new("table", "Table", PipelineFieldKinds.Text, Required: true,
-                        Help: "An existing table, or a new name if you let it be created below."),
+                        Placeholder: "item  or  product.item",
+                        Help: "An existing table, or a new name if you let it be created below. Write schema.table to choose a schema - a plain name uses the connection's default. For ClickHouse and MySQL the first part is the database."),
                     new("mode", "How to write", PipelineFieldKinds.Select, Required: true,
                         Options:
                         [

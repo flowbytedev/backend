@@ -517,6 +517,13 @@ public class PipelineEngine(
         if (upstream is null)
             return NodeOutcome.Failed("This step has no input.", PipelineErrorType.Invalid);
 
+        // "product.item" splits into schema + table. The destination step has no schema field of its own,
+        // so a dotted name is the only way to say it here; a bare name keeps the engine's default schema,
+        // exactly as before.
+        var tableRef = PipelineTableRef.Parse(table, Str(config, "schema"));
+        if (tableRef.Error is not null)
+            return NodeOutcome.Failed(tableRef.Error, PipelineErrorType.Invalid);
+
         var mode = ParseMode(Str(config, "mode"));
         var keys = StringList(config, "keys");
         var createIfMissing = Bool(config, "createIfMissing");
@@ -526,9 +533,9 @@ public class PipelineEngine(
         // connection — writing "Sales Dataset.item" would name a database that does not exist. The writer
         // logs the true target once it has resolved the connection.
         ctx.Log.WriteLine(dataset.SourceType == DatasetSourceType.External
-            ? $"      writing to external dataset '{dataset.Name}' -> {table} "
+            ? $"      writing to external dataset '{dataset.Name}' -> {tableRef.Display()} "
               + $"({mode.ToString().ToLowerInvariant()})"
-            : $"      writing into {dataset.Name}.{table} ({mode.ToString().ToLowerInvariant()})");
+            : $"      writing into {dataset.Name}.{tableRef.Table} ({mode.ToString().ToLowerInvariant()})");
 
         ImportResult written;
 
@@ -556,8 +563,8 @@ public class PipelineEngine(
                 CompanyId = ctx.CompanyId,
                 SourceDatasetId = ctx.ScratchDatasetId,
                 SourceRelation = upstream,
-                Schema = Str(config, "schema"),
-                Table = table!,
+                Schema = tableRef.Schema,
+                Table = tableRef.Table,
                 Mode = mode,
                 KeyColumns = keys,
                 CreateIfMissing = createIfMissing,
@@ -567,8 +574,17 @@ public class PipelineEngine(
         }
         else
         {
+            if (tableRef.IsQualified)
+            {
+                // Dropping the schema quietly would write to a different table than the one named.
+                return NodeOutcome.Failed(
+                    $"'{tableRef.Display()}' names a schema, but '{dataset.Name}' is a local dataset and has "
+                    + "no schemas. Use just the table name.",
+                    PipelineErrorType.Invalid);
+            }
+
             written = await store.WriteRelationToTableAsync(
-                ctx.ScratchDatasetId, upstream, dataset.Id!, table!, mode, keys, createIfMissing, ct);
+                ctx.ScratchDatasetId, upstream, dataset.Id!, tableRef.Table, mode, keys, createIfMissing, ct);
         }
 
         if (!written.Success)
