@@ -1,0 +1,41 @@
+name: Deploy Scheduler to IIS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ dev, main ]
+    paths:
+      - 'Application.Scheduler/**'
+      - 'Application.Shared/**'
+
+jobs:
+  build:
+    runs-on: spinsrv3
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Build with dotnet
+      shell: cmd
+      run: dotnet build Application.Scheduler/Application.Scheduler.csproj --configuration Release
+
+  deploy:
+    runs-on: spinsrv3
+
+    environment: ${{ github.ref_name == 'dev' && 'test' || 'prod' }}
+
+    needs: build
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Publish with dotnet
+      shell: cmd
+      run: dotnet publish Application.Scheduler/Application.Scheduler.csproj --configuration Release --output .\scheduler
+
+    - name: Deploy to IIS
+      shell: cmd
+      run: |
+        iisreset /stop
+        xcopy /s /y  .\scheduler\* ${{ secrets.SCHEDULER_IIS_PATH }}\
+        iisreset /start
