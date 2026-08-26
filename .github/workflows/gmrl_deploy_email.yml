@@ -1,0 +1,61 @@
+name: Deploy Email to IIS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ dev, main ]
+    paths:
+      - 'Application.Email/**'
+
+jobs:
+  build:
+    runs-on: spinsrv3
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: Application.Email/package-lock.json
+
+    - name: Install dependencies
+      working-directory: Application.Email
+      run: npm ci
+
+    - name: Build email templates
+      working-directory: Application.Email
+      run: npm run build
+
+  deploy:
+    runs-on: spinsrv3
+
+    environment: ${{ github.ref_name == 'dev' && 'test' || 'prod' }}
+
+    needs: build
+
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+        cache-dependency-path: Application.Email/package-lock.json
+
+    - name: Install dependencies
+      working-directory: Application.Email
+      run: npm ci
+
+    - name: Build email templates
+      working-directory: Application.Email
+      run: npm run build
+
+    - name: Copy Files
+      shell: cmd
+      run: |
+        
+        xcopy /s /y  .\Application.Email\.next\* ${{ secrets.EMAIL_IIS_PATH }}\
