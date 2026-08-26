@@ -12,7 +12,7 @@ jobs:
     runs-on: spinsrv3
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -25,7 +25,7 @@ jobs:
       working-directory: Application.Email
       run: npm ci
 
-    - name: Build email templates
+    - name: Build Next.js app
       working-directory: Application.Email
       run: npm run build
 
@@ -37,7 +37,7 @@ jobs:
     needs: build
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -50,12 +50,20 @@ jobs:
       working-directory: Application.Email
       run: npm ci
 
-    - name: Build email templates
+    - name: Build Next.js app
       working-directory: Application.Email
       run: npm run build
 
-    - name: Copy Files
+    - name: Deploy
       shell: cmd
+      env:
+        EMAIL_IIS_PATH: ${{ secrets.EMAIL_IIS_PATH }}
       run: |
-        
-        xcopy /s /y  .\Application.Email\.next\* ${{ secrets.EMAIL_IIS_PATH }}\
+        rem Copy only. The service is not stopped or restarted here, so the
+        rem running process keeps serving the previous build until it is
+        rem restarted by hand.
+        rem `shell: cmd` only surfaces the LAST command's exit code, so each
+        rem copy gets an explicit `|| exit /b 1`.
+        xcopy /s /y /i /q .\Application.Email\.next\* "%EMAIL_IIS_PATH%\.next\" || exit /b 1
+        copy /y .\Application.Email\package.json "%EMAIL_IIS_PATH%\" || exit /b 1
+        copy /y .\Application.Email\package-lock.json "%EMAIL_IIS_PATH%\" || exit /b 1

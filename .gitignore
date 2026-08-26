@@ -419,6 +419,11 @@ Migrations/*.cs
 .next/
 
 
+# REACT EMAIL (preview app + `email export` output)
+.react-email/
+Application.Email/out/
+
+
 # ASP.NET Core Data Protection keys (server credential encryption) — never commit
 **/App_Data/keys/
 App_Data/keys/
