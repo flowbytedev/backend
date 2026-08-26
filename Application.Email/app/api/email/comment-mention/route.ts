@@ -1,9 +1,7 @@
 import type { ReactElement } from 'react';
 import { NextResponse } from 'next/server';
-import { Resend } from 'resend';
+import { getResend } from '../../../../emails/src/lib/resend';
 import CommentMentionEmail from '../../../../emails/comment-mention';
-
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 interface CommentMentionEmailRequest {
   from: string;
@@ -49,7 +47,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    await resend.emails.send({
+    await getResend().emails.send({
       from: payload.from,
       to: payload.to,
       subject: payload.subject,
