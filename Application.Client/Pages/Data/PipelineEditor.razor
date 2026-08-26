@@ -345,6 +345,13 @@ else
         public bool IsEnabled { get; set; }
     }
 
+    /// <summary>What POST api/pipelines/{id}/runs returns. Only the run id is needed here.</summary>
+    private sealed class QueuedRunResponse
+    {
+        public string? RunId { get; set; }
+        public string? JobId { get; set; }
+    }
+
     private string UndoTip => _history.NextUndoLabel is { } l ? $"Undo {l} (Ctrl+Z)" : "Undo (Ctrl+Z)";
     private string RedoTip => _history.NextRedoLabel is { } l ? $"Redo {l} (Ctrl+Y)" : "Redo (Ctrl+Y)";
 
@@ -1078,8 +1085,16 @@ else
                 return;
             }
 
+            // Straight to the run that was just queued, not the history list. The run view polls and
+            // colours the canvas as each step finishes, so landing on the specific run is the difference
+            // between watching it happen and being handed a list to go and find it in.
+            var queued = await response.Content.ReadFromJsonAsync<QueuedRunResponse>();
+
             _toastService.ShowSuccess("Queued.");
-            _navigationManager.NavigateTo($"data/pipelines/{Id}/runs?c={_companyId}");
+
+            _navigationManager.NavigateTo(string.IsNullOrWhiteSpace(queued?.RunId)
+                ? $"data/pipelines/{Id}/runs?c={_companyId}"
+                : $"data/pipelines/{Id}/runs/{queued!.RunId}?c={_companyId}");
         }
         catch (Exception ex)
         {

@@ -1,4 +1,4 @@
-using Application.Shared.Models.Data.Pipelines;
+﻿using Application.Shared.Models.Data.Pipelines;
 
 namespace Application.Shared.Services.Data.Pipelines;
 
@@ -584,6 +584,73 @@ public static class PipelineNodeCatalog
                         SupportsTokens: false,
                         Help: "On by default. Rows already accepted stay accepted either way - there is no rollback over HTTP.")
                 ],
+                IsTerminal: true),
+
+            // Like destination.api this has no write mode, and for a stronger reason: an email cannot be
+            // recalled at all. It also has no dataset and no table - the artefact it produces is a file,
+            // which is why the size fields below exist and no other destination needs them.
+            new(PipelineNodeTypes.DestinationEmail, PipelineNodeCategories.Destination, "Email a file",
+                "Exports the incoming rows as a file and emails it. Cannot be undone once sent.",
+                "mail", [PipelinePorts.In], [],
+                [
+                    new("to", "To", PipelineFieldKinds.StringList, Required: true,
+                        Placeholder: "someone@example.com",
+                        Help: "One address per row. Commas and semicolons in a row are split too."),
+                    new("cc", "Cc", PipelineFieldKinds.StringList),
+                    new("bcc", "Bcc", PipelineFieldKinds.StringList),
+                    new("replyTo", "Reply to", PipelineFieldKinds.StringList,
+                        Help: "Where replies go. Leave empty to use the sending address."),
+
+                    new("subject", "Subject", PipelineFieldKinds.Text, Required: true,
+                        Placeholder: "Daily orders - {{ run.date }}"),
+                    new("body", "Message", PipelineFieldKinds.TextArea,
+                        Help: "Shown above the summary. Plain text - it is escaped, not rendered as HTML."),
+
+                    new("format", "Attach as", PipelineFieldKinds.Select, Required: true,
+                        Options:
+                        [
+                            new(PipelineExportFormats.Csv, "CSV"),
+                            new(PipelineExportFormats.Xlsx, "Excel (.xlsx)"),
+                            new(PipelineExportFormats.Json, "JSON")
+                        ]),
+                    new("fileName", "File name", PipelineFieldKinds.Text,
+                        Placeholder: "orders_{{ run.date }}",
+                        Help: "Without the extension - the format adds it. Defaults to the pipeline name and run date."),
+                    new("delimiter", "Delimiter", PipelineFieldKinds.Text,
+                        VisibleWhen: $"format={PipelineExportFormats.Csv}", Placeholder: ",",
+                        Help: "One character. Write \\t for a tab."),
+                    new("includeHeader", "Include the header row", PipelineFieldKinds.Checkbox,
+                        VisibleWhen: $"format={PipelineExportFormats.Csv}", SupportsTokens: false,
+                        Help: "On unless you turn it off."),
+                    new("sheetName", "Sheet name", PipelineFieldKinds.Text,
+                        VisibleWhen: $"format={PipelineExportFormats.Xlsx}", Placeholder: "Data",
+                        Help: "Excel rejects a name over 31 characters or containing : \\ / ? * [ ]; those are replaced."),
+                    new("compress", "Zip the file", PipelineFieldKinds.Checkbox, SupportsTokens: false,
+                        Help: "A delimited export usually shrinks 5-10x, which is the difference between fitting in an email and not."),
+
+                    new("onEmpty", "When there are no rows", PipelineFieldKinds.Select,
+                        Options:
+                        [
+                            new(PipelineEmailEmptyBehaviour.Send, "Send it anyway"),
+                            new(PipelineEmailEmptyBehaviour.Skip, "Send nothing, succeed"),
+                            new(PipelineEmailEmptyBehaviour.Fail, "Fail the step")
+                        ],
+                        Help: "Sending an empty file is the default, because a mail that arrives proves the schedule ran."),
+
+                    new("onOversize", "When it is too big to attach", PipelineFieldKinds.Select,
+                        Options:
+                        [
+                            new(PipelineEmailOversizeBehaviour.Fail, "Fail the step"),
+                            new(PipelineEmailOversizeBehaviour.DatasetLink, "Write to a dataset and send a link")
+                        ],
+                        Help: "There is a hard size ceiling on an attachment that this app does not set. A link keeps the recipient's dataset permissions; an attachment has none."),
+                    new("linkDataset", "Write it to", PipelineFieldKinds.DatasetPicker,
+                        VisibleWhen: $"onOversize={PipelineEmailOversizeBehaviour.DatasetLink}"),
+                    new("linkTable", "Table", PipelineFieldKinds.Text,
+                        VisibleWhen: $"onOversize={PipelineEmailOversizeBehaviour.DatasetLink}",
+                        Placeholder: "orders_export",
+                        Help: "Replaced on every run, so the linked table always matches the email that pointed at it. Created if missing.")
+                ],
                 IsTerminal: true)
         };
 
@@ -695,6 +762,13 @@ public static class PipelineFieldKinds
 
     /// <summary>A free list of new column names, not chosen from the incoming schema.</summary>
     public const string ColumnNameList = "columnnamelist";
+
+    /// <summary>
+    /// A free list of plain strings — email recipients, and anything else that is a list of values rather
+    /// than a list of columns. Shares <see cref="ColumnNameList"/>'s editor; separate because the field's
+    /// own placeholder and add-row label make sense only when the kind says what the values are.
+    /// </summary>
+    public const string StringList = "stringlist";
 
     /// <summary>
     /// Not an input at all — help text the inspector renders on its own. For a caveat that belongs beside a

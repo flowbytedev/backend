@@ -1,4 +1,4 @@
-namespace Application.Shared.Models.Data.Pipelines;
+﻿namespace Application.Shared.Models.Data.Pipelines;
 
 /// <summary>
 /// Every node type a pipeline graph can contain. These strings are the contract: they appear in stored
@@ -53,13 +53,15 @@ public static class PipelineNodeTypes
     // ---- Destinations: terminal. A graph needs at least one. --------------------------------------
     public const string DestinationDataset = "destination.dataset";
     public const string DestinationApi = "destination.api";
+    public const string DestinationEmail = "destination.email";
 
     /// <summary>True for the node types that read data in rather than from another node.</summary>
     public static bool IsSource(string? type) =>
         type is SourceDataset or SourceDatabase or SourceFile or SourceApi;
 
     /// <summary>True for terminal node types — nothing may be connected downstream of these.</summary>
-    public static bool IsDestination(string? type) => type is DestinationDataset or DestinationApi;
+    public static bool IsDestination(string? type) =>
+        type is DestinationDataset or DestinationApi or DestinationEmail;
 }
 
 /// <summary>Sort direction and null placement for the sort step.</summary>
@@ -241,6 +243,94 @@ public static class PipelineApiWriteShapes
     public const string Row = "row";
 
     public static readonly string[] All = [Batch, Row];
+}
+
+/// <summary>
+/// The file a <c>destination.email</c> step attaches. Stored strings, so a contract.
+/// <para>
+/// Note which formats are <em>absent</em>: Parquet is not here, and neither is anything else DuckDB can
+/// COPY to. An emailed file has to be openable by whoever receives it, and a recipient who can open Parquet
+/// would rather have a dataset grant than an attachment.
+/// </para>
+/// </summary>
+public static class PipelineExportFormats
+{
+    /// <summary>Delimited text. The delimiter is a separate field, so this covers TSV and semicolon files.</summary>
+    public const string Csv = "csv";
+
+    /// <summary>
+    /// A real workbook, written by ClosedXML rather than by DuckDB. DuckDB's xlsx writer lives in the
+    /// <c>excel</c> extension, and that extension cannot be relied on: <c>INSTALL excel</c> downloads over
+    /// plain HTTP, gets a 307 to the CDN and does not follow it, so on a machine with no pre-seeded
+    /// extension directory it simply fails. An export format that works on one server and not another is
+    /// worse than a dependency.
+    /// </summary>
+    public const string Xlsx = "xlsx";
+
+    /// <summary>A JSON array of row objects.</summary>
+    public const string Json = "json";
+
+    public static readonly string[] All = [Csv, Xlsx, Json];
+
+    /// <summary>The extension, without the dot. Also what the default file name is built from.</summary>
+    public static string Extension(string? format) => format switch
+    {
+        Xlsx => "xlsx",
+        Json => "json",
+        _ => "csv"
+    };
+
+    public static string ContentType(string? format) => format switch
+    {
+        Xlsx => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Json => "application/json",
+        _ => "text/csv"
+    };
+}
+
+/// <summary>
+/// What a <c>destination.email</c> step does when the run produced no rows.
+/// <para>
+/// Configurable rather than fixed, because the three answers are genuinely different intentions and no
+/// default is right for all of them: "send it" proves the schedule ran, "skip it" keeps a quiet mailbox
+/// quiet, and "fail" treats an empty result as the anomaly it sometimes is.
+/// </para>
+/// </summary>
+public static class PipelineEmailEmptyBehaviour
+{
+    /// <summary>Send the mail with an empty file (header row only). The default.</summary>
+    public const string Send = "send";
+
+    /// <summary>Send nothing and succeed. The step records zero rows, so the run still shows what happened.</summary>
+    public const string Skip = "skip";
+
+    /// <summary>Fail the step.</summary>
+    public const string Fail = "fail";
+
+    public static readonly string[] All = [Send, Skip, Fail];
+}
+
+/// <summary>
+/// What a <c>destination.email</c> step does when the export is too large to attach.
+/// <para>
+/// There is a real ceiling here and it is not ours to raise: the mail goes out through Resend, whose limit
+/// is on the assembled message, and the attachment travels to it base64-encoded inside a JSON body — about
+/// a third larger than the file on disk. So this is not a tuning knob that can be turned up until it works.
+/// </para>
+/// </summary>
+public static class PipelineEmailOversizeBehaviour
+{
+    /// <summary>Fail the step, naming the size. The default.</summary>
+    public const string Fail = "fail";
+
+    /// <summary>
+    /// Write the rows into a dataset table instead and email a link to it. Uses the same write path as
+    /// <c>destination.dataset</c> — no new download endpoint, and the recipient's existing dataset
+    /// permissions still apply, which an emailed file bypasses entirely.
+    /// </summary>
+    public const string DatasetLink = "link";
+
+    public static readonly string[] All = [Fail, DatasetLink];
 }
 
 /// <summary>

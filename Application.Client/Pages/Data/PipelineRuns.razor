@@ -126,6 +126,16 @@ else if (_run is not null)
                 <span class="pl-spin" aria-hidden="true"></span>
             }
 
+            @* A run sits Queued until the scheduler picks it up. If that process is not running, nothing
+               ever happens and the page gives no clue why — so say so rather than spinning indefinitely. *@
+            @if (StuckInQueue)
+            {
+                <span class="pl-queue-hint">
+                    Still queued after @QueuedSeconds s — waiting for the scheduler to pick it up.
+                    Runs execute in Application.Scheduler, not the web app.
+                </span>
+            }
+
             <span class="pl-topbar-spacer"></span>
 
             <span class="chip">@_run.RowsRead.ToString("N0") read</span>
@@ -475,6 +485,20 @@ else if (_run is not null)
     /// A cancellable loop, never a Timer: a Timer in WASM keeps firing after the component is gone. Backs
     /// off when nothing changes and stops outright once the run is terminal.
     /// </summary>
+    /// <summary>
+    /// Seconds this run has been waiting to start. Measured from StartedAt, which for a queued run is when
+    /// it was created rather than when it began.
+    /// </summary>
+    private int QueuedSeconds =>
+        _run is null ? 0 : (int)Math.Max(0, (DateTime.UtcNow - _run.StartedAt).TotalSeconds);
+
+    /// <summary>
+    /// Queued for long enough that something is probably wrong. Generous, because a busy scheduler
+    /// legitimately takes a few seconds — this should read as information, not an alarm.
+    /// </summary>
+    private bool StuckInQueue =>
+        _run is not null && _run.Status == PipelineRunStatus.Queued && QueuedSeconds > 20;
+
     private void StartPolling()
     {
         StopPolling();
@@ -488,11 +512,17 @@ else if (_run is not null)
             var lastRev = -1;
             var cursor = 0;
 
+            // The first pass does not wait. Arriving from the Run button, a step has often already finished
+            // by the time the page renders, and sitting on an empty canvas for a second and a half reads as
+            // "nothing is happening" at exactly the moment something is.
+            var first = true;
+
             while (!token.IsCancellationRequested)
             {
                 try
                 {
-                    await Task.Delay(interval, token);
+                    if (!first) await Task.Delay(interval, token);
+                    first = false;
                     if (token.IsCancellationRequested) return;
 
                     _polling = true;

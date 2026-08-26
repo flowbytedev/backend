@@ -1,4 +1,4 @@
-using System.Text.Json.Nodes;
+﻿using System.Text.Json.Nodes;
 using Application.Shared.Models.Data.Pipelines;
 
 namespace Application.Shared.Services.Data.Pipelines;
@@ -408,6 +408,75 @@ public static class PipelineCompiler
                         $"'{node.Label ?? node.Id}' updates matching rows, so it needs the columns that " +
                         "identify a row."));
                 }
+                break;
+            }
+
+            case PipelineNodeTypes.DestinationEmail:
+            {
+                // Recipients: caught here rather than at run time because an email step with an empty To is
+                // a graph that cannot ever succeed, and finding that out from a failed 3am run is worse than
+                // finding it out while editing.
+                var recipients = (config?["to"] as JsonArray)?
+                    .Select(v => v?.ToString())
+                    .Where(v => !string.IsNullOrWhiteSpace(v))
+                    .ToList() ?? [];
+
+                if (recipients.Count == 0)
+                {
+                    issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldRequired,
+                        $"'{node.Label ?? node.Id}' has no recipient."));
+                }
+
+                // A token resolves at run time, so only a literal can be checked. A row with neither an @
+                // nor a token is a typo every time.
+                foreach (var address in recipients)
+                {
+                    if (address!.Contains("{{", StringComparison.Ordinal)) continue;
+                    if (address.Contains('@', StringComparison.Ordinal)) continue;
+
+                    issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldInvalid,
+                        $"'{address}' is not an email address."));
+                }
+
+                var format = Str(config, "format");
+                if (format is not null && !PipelineExportFormats.All.Contains(format))
+                {
+                    issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldInvalid,
+                        $"'{format}' is not a file format this can attach."));
+                }
+
+                if (string.IsNullOrWhiteSpace(Str(config, "subject")))
+                {
+                    issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldRequired,
+                        $"'{node.Label ?? node.Id}' has no subject."));
+                }
+
+                // The oversize fallback is the one setting whose absence only bites on the day the data
+                // grows past the limit — which is exactly the day nobody is watching. So it is an error at
+                // save time, not a run-time surprise.
+                if (Str(config, "onOversize") == PipelineEmailOversizeBehaviour.DatasetLink)
+                {
+                    if (string.IsNullOrWhiteSpace(Str(config, "linkDataset")))
+                        issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldRequired,
+                            $"'{node.Label ?? node.Id}' sends a dataset link when the export is too big, " +
+                            "so it needs the dataset to write into."));
+
+                    if (string.IsNullOrWhiteSpace(Str(config, "linkTable")))
+                        issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldRequired,
+                            $"'{node.Label ?? node.Id}' sends a dataset link when the export is too big, " +
+                            "so it needs the table to write into."));
+                }
+
+                // A multi-character delimiter is silently truncated to its first character downstream, and
+                // silent truncation of a field somebody typed deserves a word here.
+                var delimiter = Str(config, "delimiter");
+                if (delimiter is { Length: > 1 } && delimiter != "\\t")
+                {
+                    issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldInvalid,
+                        $"A CSV delimiter is one character; only the '{delimiter[0]}' in '{delimiter}' " +
+                        "would be used.", PipelineIssueSeverity.Warning));
+                }
+
                 break;
             }
         }

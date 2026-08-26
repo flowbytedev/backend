@@ -1,4 +1,4 @@
-@*
+﻿@*
     The step settings panel.
 
     EVERY field is rendered from the catalogue's PipelineFieldSpec. There is no per-step-type form anywhere in
@@ -290,6 +290,10 @@
 
                         case PipelineFieldKinds.ColumnNameList:
                             @NameListEditor(field.Key)
+                            break;
+
+                        case PipelineFieldKinds.StringList:
+                            @NameListEditor(field.Key, field.Placeholder, "Add")
                             break;
 
                         case PipelineFieldKinds.Note:
@@ -1010,7 +1014,12 @@
     /// A list of plain strings, for names that do not come from the incoming schema — the new columns a
     /// split produces, which by definition do not exist upstream yet.
     /// </summary>
-    private RenderFragment NameListEditor(string key) => builder =>
+    /// <summary>
+    /// One text input per array entry. Serves both ColumnNameList and StringList — the only difference is
+    /// what the empty row suggests and what the add button says.
+    /// </summary>
+    private RenderFragment NameListEditor(
+        string key, string? placeholder = null, string addLabel = "Add a column") => builder =>
     {
         var rows = Config()[key] as JsonArray ?? new JsonArray();
         var seq = 0;
@@ -1025,7 +1034,8 @@
 
             builder.OpenElement(seq++, "input");
             builder.AddAttribute(seq++, "class", "input input-mono");
-            builder.AddAttribute(seq++, "placeholder", $"part_{index + 1}");
+            builder.AddAttribute(seq++, "placeholder",
+                string.IsNullOrWhiteSpace(placeholder) ? $"part_{index + 1}" : placeholder);
             builder.AddAttribute(seq++, "value", rows[index]?.ToString());
             builder.AddAttribute(seq++, "onchange",
                 EventCallback.Factory.Create<ChangeEventArgs>(this,
@@ -1036,7 +1046,7 @@
             builder.CloseElement();
         }
 
-        builder.AddContent(seq++, AddRowButton("Add a column", () => AddStringArrayItem(key, string.Empty)));
+        builder.AddContent(seq++, AddRowButton(addLabel, () => AddStringArrayItem(key, string.Empty)));
     };
 
     private RenderFragment JoinKeyEditor(string key) => builder =>

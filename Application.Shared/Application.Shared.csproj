@@ -12,6 +12,10 @@
     <PackageReference Include="Azure.AI.OpenAI" Version="2.1.0" />
     <PackageReference Include="ClickHouse.Client" Version="7.5.0" />
     <PackageReference Include="Azure.Storage.Blobs" Version="12.23.0" />
+    <!-- Writes the .xlsx for the pipeline email destination. Needed because DuckDB cannot: its xlsx
+         writer is in the `excel` extension, and INSTALL excel fetches over plain HTTP, gets a 307 to the
+         CDN and does not follow it - so it fails on any machine without a pre-seeded extension cache. -->
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
     <PackageReference Include="CsvHelper" Version="33.0.1" />
     <PackageReference Include="DuckDB.NET.Data.Full" Version="1.3.0" />
     <!-- Hangfire job wrapper + console/progress reporting for ingestion runs (dashboard log + progress bar). -->

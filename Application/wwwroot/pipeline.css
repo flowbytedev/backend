@@ -87,6 +87,14 @@
 .pl-issue.is-warn { color: var(--warning); }
 .pl-issue-node { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 
+/* A queued run that is not being picked up. Informational, not an error: the run is fine, something
+   else is not running. */
+.pl-queue-hint {
+    font-size: 12px; line-height: 1.4; color: var(--warning);
+    padding: 3px 8px; border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+
 /* ---------- palette ---------- */
 .pl-palette-search { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .pl-palette-group {

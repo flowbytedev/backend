@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import CommentMentionEmail from '../../../../emails/comment-mention';
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
         tableName: payload.tableName,
         commentContent: payload.commentContent,
         commentUrl: payload.commentUrl,
-      }),
+      }) as ReactElement,
     });
 
     return NextResponse.json({

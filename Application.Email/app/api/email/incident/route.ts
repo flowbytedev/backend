@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import IncidentNotificationEmail from '../../../../emails/incident-notification';
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
         severity: payload.severity,
         message: payload.message,
         statusUrl: payload.statusUrl,
-      }),
+      }) as ReactElement,
     });
 
     return NextResponse.json({

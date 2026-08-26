@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -8,6 +8,7 @@ using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Application.Shared.Models.Data.Pipelines;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Application.Shared.Services.Data.Pipelines;
 
@@ -38,7 +39,7 @@ public interface IPipelineEngine
     Task<PipelinePreviewResult> PreviewAsync(PipelinePreviewRequest request, CancellationToken ct = default);
 }
 
-public class PipelineEngine(
+public partial class PipelineEngine(
     ApplicationDbContext db,
     IPipelineStore store,
     IDuckdbService duckdb,
@@ -48,7 +49,13 @@ public class PipelineEngine(
     // Optional: the scheduler and the web app both register it, but a host that only needs local datasets
     // can leave it out and get a clear refusal rather than a resolution failure at startup.
     IExternalTableWriter? externalWriter = null,
-    IPipelineApiWriter? apiWriter = null) : IPipelineEngine
+    IPipelineApiWriter? apiWriter = null,
+    IPipelineExportWriter? exportWriter = null,
+    IPipelineEmailSender? emailSender = null,
+    // Used only to write in-flight row counts, on its own short-lived context. It cannot share the
+    // engine's DbContext: the count arrives on a Progress<T> callback while the engine is blocked awaiting
+    // the fetch, and two threads on one DbContext is a crash, not a race you get away with.
+    IServiceScopeFactory? scopes = null) : IPipelineEngine
 {
     /// <summary>Prefix for hidden per-run scratch datasets. Also what the sweeper looks for.</summary>
     public const string ScratchNamePrefix = "_pipeline_run_";
@@ -323,6 +330,11 @@ public class PipelineEngine(
             stepIndex++;
             ctx.Log.WriteLine($"[{stepIndex}/{ctx.Plan.Order.Count}] {label}");
 
+            // Marked running BEFORE the work, so the run view can show this step in progress and the live
+            // row counter has a row to write into. Without it a long fetch is indistinguishable from a
+            // stalled run.
+            await BeginStepAsync(ctx, nodeId, node, stepIndex, ct);
+
             var stepWatch = Stopwatch.StartNew();
             var result = await ExecuteNodeWithRetryAsync(ctx, nodeId, node, spec, outcome, ct);
             stepWatch.Stop();
@@ -453,6 +465,7 @@ public class PipelineEngine(
                 RowLimit = ctx.RowLimit,
                 UploadedFilePath = ctx.UploadedFilePath,
                 Progress = ctx.Log,
+                RowsFetched = LiveRowCounter(ctx, nodeId),
                 IncrementalLow = ctx.WatermarkLows.GetValueOrDefault(nodeId),
                 OnWindowCaptured = window => ctx.CapturedWindows[nodeId] = window
             }, ct);
@@ -472,9 +485,12 @@ public class PipelineEngine(
 
         if (spec.IsTerminal)
         {
-            return node.Type == PipelineNodeTypes.DestinationApi
-                ? await ExecuteApiDestinationAsync(ctx, node, Resolve, ct)
-                : await ExecuteDestinationAsync(ctx, node, Resolve, ct);
+            return node.Type switch
+            {
+                PipelineNodeTypes.DestinationApi => await ExecuteApiDestinationAsync(ctx, node, Resolve, ct),
+                PipelineNodeTypes.DestinationEmail => await ExecuteEmailDestinationAsync(ctx, node, Resolve, ct),
+                _ => await ExecuteDestinationAsync(ctx, node, Resolve, ct)
+            };
         }
 
         // The one step that writes several relations rather than one.
@@ -813,6 +829,102 @@ public class PipelineEngine(
 
     // ------------------------------------------------------------------ recording
 
+    /// <summary>
+    /// Marks a step as running, before it starts.
+    /// <para>
+    /// Without this a step is invisible until it finishes: the run view has no row to show, so a source
+    /// spending eighty seconds fetching looks identical to nothing happening. It also gives the in-flight
+    /// row counter somewhere to write.
+    /// </para>
+    /// </summary>
+    private async Task BeginStepAsync(
+        ExecutionContext ctx, string nodeId, PipelineNodeDef node, int stepIndex, CancellationToken ct)
+    {
+        if (ctx.Run is null) return;
+
+        var existing = await db.PipelineRunStep
+            .FirstOrDefaultAsync(x => x.RunId == ctx.Run.Id && x.NodeId == nodeId, ct);
+
+        if (existing is not null)
+        {
+            // A retry re-enters the same step; reset it rather than leaving the previous attempt's numbers.
+            existing.Status = PipelineStepStatus.Running;
+            existing.StartedAt = DateTime.UtcNow;
+            existing.RowsOut = null;
+            existing.Error = null;
+        }
+        else
+        {
+            db.PipelineRunStep.Add(new PipelineRunStep
+            {
+                RunId = ctx.Run.Id,
+                CompanyId = ctx.Run.CompanyId,
+                PipelineId = ctx.Run.PipelineId,
+                NodeId = nodeId,
+                NodeType = node.Type,
+                NodeLabel = node.Label,
+                StepIndex = stepIndex,
+                Status = PipelineStepStatus.Running,
+                StartedAt = DateTime.UtcNow
+            });
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>
+    /// A row counter that writes what a step has fetched so far, so the run view can count up live.
+    /// <para>
+    /// Two things make this safe. It writes on its OWN DbContext from a fresh scope, because the callback
+    /// fires on a pool thread while the engine is blocked inside the fetch — sharing the engine's context
+    /// would be concurrent use of one DbContext. And it is throttled by time rather than by row count: a
+    /// row-count throttle either floods a fast source or never fires on a slow one.
+    /// </para>
+    /// <para>
+    /// Failures are swallowed. This is a progress indicator; it must never be the thing that fails a load.
+    /// </para>
+    /// </summary>
+    private IProgress<long>? LiveRowCounter(ExecutionContext ctx, string nodeId)
+    {
+        if (ctx.Run is null || scopes is null) return null;
+
+        var runId = ctx.Run.Id;
+        var lastWrite = DateTime.UtcNow;
+        var writing = 0;
+
+        return new Progress<long>(rows =>
+        {
+            if (DateTime.UtcNow - lastWrite < TimeSpan.FromSeconds(1.5)) return;
+
+            // One write in flight at a time. Progress<T> can fire again while the previous write is still
+            // going, and queuing them up would turn a fast fetch into a write storm.
+            if (Interlocked.Exchange(ref writing, 1) == 1) return;
+
+            lastWrite = DateTime.UtcNow;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var scope = scopes.CreateScope();
+                    var fresh = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                    await fresh.PipelineRunStep
+                        .Where(x => x.RunId == runId && x.NodeId == nodeId)
+                        .ExecuteUpdateAsync(u => u.SetProperty(x => x.RowsOut, rows));
+                }
+                catch
+                {
+                    // Progress only. A failed counter update must not disturb the run.
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref writing, 0);
+                }
+            });
+        });
+    }
+
     private async Task RecordStepAsync(
         ExecutionContext ctx, string nodeId, PipelineNodeDef node, int stepIndex, string status,
         NodeOutcome? result, string? sql, int durationMs, CancellationToken ct)
@@ -836,6 +948,31 @@ public class PipelineEngine(
             {
                 // A preview is a nicety; never let it turn a successful step into a failure.
             }
+        }
+
+        // The row already exists — BeginStepAsync inserted it as Running so the run view could show the
+        // step working. Update it rather than adding a second row for the same step.
+        var row = await db.PipelineRunStep
+            .FirstOrDefaultAsync(x => x.RunId == ctx.Run.Id && x.NodeId == nodeId, ct);
+
+        if (row is not null)
+        {
+            row.Status = status;
+            row.StepIndex = stepIndex;
+            row.RowsOut = result?.RowsOut;
+            row.RowsRejected = result is null or { RowsRejected: 0 } ? null : result.RowsRejected;
+            row.SqlText = sql;
+            row.OutputPreviewJson = previewJson;
+            row.OutputColumnsJson = result is { Columns.Count: > 0 }
+                ? JsonSerializer.Serialize(result.Columns)
+                : null;
+            row.Error = result?.Error;
+            row.ErrorType = result?.ErrorType;
+            row.DurationMs = durationMs;
+            row.CompletedAt = DateTime.UtcNow;
+
+            await db.SaveChangesAsync(ct);
+            return;
         }
 
         db.PipelineRunStep.Add(new PipelineRunStep

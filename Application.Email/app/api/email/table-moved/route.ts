@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import TableMovedEmail from '../../../../emails/table-moved';
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
         oldDatasetName: payload.oldDatasetName,
         newDatasetName: payload.newDatasetName,
         newDatasetUrl: payload.newDatasetUrl,
-      }),
+      }) as ReactElement,
     });
 
     return NextResponse.json({

@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import SalesSnapshotEmail from '../../../../../emails/sales-snapshot';
@@ -98,7 +99,7 @@ export async function POST(request: Request) {
         schemeKpis: payload.schemeKpis ?? [],
         Columns: payload.Columns ?? [],
         Rows: payload.Rows ?? [],
-      }),
+      }) as ReactElement,
     });
 
     return NextResponse.json({

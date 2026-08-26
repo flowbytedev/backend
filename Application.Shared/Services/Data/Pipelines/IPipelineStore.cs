@@ -1,4 +1,4 @@
-using Application.Shared.Models.Data;
+﻿using Application.Shared.Models.Data;
 using Application.Shared.Models.Data.Pipelines;
 
 namespace Application.Shared.Services.Data.Pipelines;
@@ -79,6 +79,21 @@ public interface IPipelineStore
         string datasetId, string sql, int? timeoutSeconds = null, CancellationToken ct = default);
 
     Task<int> DropRelationsAsync(string datasetId, string prefix, CancellationToken ct = default);
+
+    /// <summary>
+    /// Copies a relation straight out to a file with DuckDB's own <c>COPY … TO</c>, for the email export.
+    /// <para>
+    /// Here rather than in the export writer for the reason the rest of this interface exists: the path
+    /// resolution, the read-only handle and the lock retry all live in the implementing class. It also
+    /// cannot go through <see cref="ReadScalarAsync"/>, which is <c>SelectOnlyGuard</c>-ed and would reject
+    /// a COPY — so the SQL is composed entirely here, from a validated format and a single-character
+    /// delimiter, and never from anything a graph author typed.
+    /// </para>
+    /// </summary>
+    Task<PipelineRelationResult> ExportRelationToFileAsync(
+        string datasetId, string relation, string filePath, string format,
+        bool includeHeader = true, string delimiter = ",", int? timeoutSeconds = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Streams a relation to a consumer as an open reader.

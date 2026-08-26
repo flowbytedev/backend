@@ -1,3 +1,4 @@
+import type { ReactElement } from 'react';
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 import DatasetSharedEmail from '../../../../emails/dataset-shared';
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
         accessLevel: payload.accessLevel,
         datasetUrl: payload.datasetUrl,
         message: payload.message,
-      }),
+      }) as ReactElement,
     });
 
     return NextResponse.json({

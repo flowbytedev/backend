@@ -65,6 +65,13 @@ public sealed class SourceLoadRequest
     /// and the skipped rows would never be read again.
     /// </summary>
     public Action<PipelineWatermarkWindow>? OnWindowCaptured { get; init; }
+
+    /// <summary>
+    /// Rows fetched so far, reported while the read is still going. Distinct from <see cref="Progress"/>,
+    /// which writes lines into the run log: this one drives the live count in the run view, so it needs the
+    /// number rather than a sentence.
+    /// </summary>
+    public IProgress<long>? RowsFetched { get; init; }
 }
 
 public class PipelineSourceLoader(
@@ -547,12 +554,12 @@ public class PipelineSourceLoader(
             {
                 fetched = await databaseTables.ReadToTempCsvBatchedAsync(
                     connection, spec.Query, spec.BatchKeyColumn!, spec.BatchSize ?? 100_000, temp, ct,
-                    spec.CommandTimeoutSeconds, RowProgress(request.Progress));
+                    spec.CommandTimeoutSeconds, RowProgress(request.Progress, request.RowsFetched));
             }
             else
             {
                 fetched = await databaseTables.ReadToTempCsvAsync(
-                    connection, spec.Query, temp, ct, spec.CommandTimeoutSeconds, RowProgress(request.Progress));
+                    connection, spec.Query, temp, ct, spec.CommandTimeoutSeconds, RowProgress(request.Progress, request.RowsFetched));
             }
 
             request.Progress?.WriteLine($"  fetched {fetched:N0} rows");
@@ -650,13 +657,22 @@ public class PipelineSourceLoader(
             ? "\"" + value.Replace("\"", "\"\"") + "\""
             : value;
 
-    private static IProgress<long>? RowProgress(IJobProgress? progress)
+    /// <summary>
+    /// Fans one row count out to both consumers: the run log (a line every 100k, for the record) and the
+    /// live counter (every report, throttled on its own terms, for the screen). They want different
+    /// cadences, so neither can be derived from the other.
+    /// </summary>
+    private static IProgress<long>? RowProgress(IJobProgress? progress, IProgress<long>? live = null)
     {
-        if (progress is null) return null;
+        if (progress is null && live is null) return null;
 
         var last = 0L;
         return new Progress<long>(rows =>
         {
+            live?.Report(rows);
+
+            if (progress is null) return;
+
             // One line per 100k rows: enough to show a long fetch is alive, not enough to bury the log.
             if (rows - last < 100_000) return;
             last = rows;

@@ -472,7 +472,10 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
         if (run is null) return null;
 
         var ticks = await db.PipelineRunStep.AsNoTracking()
-            .Where(s => s.RunId == runId && s.StepIndex > since)
+            // A running step is re-sent on EVERY poll, not just once. The cursor exists so a finished
+            // step is delivered a single time — but a step in progress has a row count that keeps
+            // changing, and under the cursor alone it would be sent once and then appear frozen.
+            .Where(s => s.RunId == runId && (s.StepIndex > since || s.Status == PipelineStepStatus.Running))
             .OrderBy(s => s.StepIndex)
             .Select(s => new PipelineStepTickDto
             {
@@ -489,8 +492,7 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
         {
             Id = run.Id,
             Status = run.Status,
-            // Every term only ever grows, so the client can compare revisions and discard a stale response.
-            Rev = run.StepsCompleted + run.StepsFailed + run.StepsSkipped + ticks.Count,
+            Rev = PipelineStepTicks.Revision(run.StepsCompleted, run.StepsFailed, run.StepsSkipped),
             StepsTotal = run.StepsTotal,
             StepsCompleted = run.StepsCompleted,
             StepsFailed = run.StepsFailed,
@@ -503,7 +505,7 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
             ErrorNodeId = run.ErrorNodeId,
             StartedAt = run.StartedAt,
             FinishedAt = run.FinishedAt,
-            Cursor = ticks.Count > 0 ? ticks[^1].StepIndex : since,
+            Cursor = PipelineStepTicks.NextCursor(ticks, since),
             Steps = ticks
         };
     }

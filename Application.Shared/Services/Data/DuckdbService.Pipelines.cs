@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Application.Shared.Models.Data;
 using Application.Shared.Models.Data.Pipelines;
 using Application.Shared.Services.Data.Pipelines;
@@ -533,6 +533,80 @@ public partial class DuckdbService
 
         await connection.CloseAsync();
         return result;
+    }
+
+    // ------------------------------------------------------------------ export
+
+    /// <summary>
+    /// <c>COPY (SELECT * FROM rel) TO 'file' (…)</c> on a read-only handle.
+    /// <para>
+    /// Read-only is safe and deliberate: COPY TO reads the catalog and writes the operating-system file, so
+    /// it never needs the write handle — and taking one would block the data viewer for the length of the
+    /// export.
+    /// </para>
+    /// </summary>
+    public async Task<PipelineRelationResult> ExportRelationToFileAsync(
+        string datasetId, string relation, string filePath, string format,
+        bool includeHeader = true, string delimiter = ",", int? timeoutSeconds = null,
+        CancellationToken ct = default)
+    {
+        var path = ResolveDbPath(datasetId);
+        if (!File.Exists(path))
+            return PipelineRelationResult.Fail(
+                $"Dataset database not found at '{path}'.", PipelineErrorType.SourceUnavailable);
+
+        // Whitelist, not passthrough: the only two formats routed here, spelled out so a new value in the
+        // catalogue cannot reach DuckDB as an unchecked COPY option.
+        string options;
+        if (format == PipelineExportFormats.Json)
+        {
+            options = "FORMAT json, ARRAY true";
+        }
+        else if (format == PipelineExportFormats.Csv)
+        {
+            // One character, and only after Esc — a delimiter is the one part of this a person types.
+            var d = string.IsNullOrEmpty(delimiter) ? "," : delimiter[..1];
+            options = $"FORMAT csv, HEADER {(includeHeader ? "true" : "false")}, DELIMITER '{Esc(d)}'";
+        }
+        else
+        {
+            return PipelineRelationResult.Fail(
+                $"'{format}' cannot be written by DuckDB. Excel workbooks are built in-process.",
+                PipelineErrorType.Invalid);
+        }
+
+        var sql = $"COPY (SELECT * FROM {Q(relation)}) TO '{Esc(filePath)}' ({options})";
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds ?? _option.ResolveBuildTimeoutSeconds()));
+
+        try
+        {
+            await using var connection = await OpenWithRetryAsync(path, readOnly: true, cts.Token);
+
+            var columns = await DescribeOnAsync(connection, relation, cts.Token);
+            await ExecAsync(connection, sql, cts.Token);
+
+            var rows = await ScalarLongAsync(
+                connection, $"SELECT count(*) FROM {Q(relation)}", cts.Token);
+
+            await connection.CloseAsync();
+            return PipelineRelationResult.Ok(rows, columns, sql);
+        }
+        catch (DuckDbBusyException ex)
+        {
+            return PipelineRelationResult.Fail(ex.Message, PipelineErrorType.SourceUnavailable, sql);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return PipelineRelationResult.Fail(
+                "The export timed out.", PipelineErrorType.Timeout, sql);
+        }
+        catch (Exception ex)
+        {
+            return PipelineRelationResult.Fail(
+                ex.Message.Split('\n')[0], PipelineErrorType.SqlError, sql);
+        }
     }
 
     // -------------------------------------------------------------------- helpers
