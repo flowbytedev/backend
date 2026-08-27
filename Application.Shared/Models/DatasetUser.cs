@@ -1,4 +1,4 @@
-using Application.Shared.Models.User;
+﻿using Application.Shared.Models.User;
 using Microsoft.EntityFrameworkCore;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
@@ -142,6 +142,14 @@ public class SetUserAccessRequest
 }
 
 /// <summary>The current per-user access to a dataset, for prefilling the User Access editor.</summary>
+/// <summary>An email address that resolved to a real user.</summary>
+public class ResolvedShareUser
+{
+    public string Email { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+}
+
 public class UserDatasetAccessDto
 {
     public bool HasAccess { get; set; }

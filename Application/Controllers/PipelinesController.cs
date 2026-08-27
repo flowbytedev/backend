@@ -197,6 +197,39 @@ public class PipelinesController(
     }
 
     /// <summary>
+    /// Reports which recipients of this pipeline's email steps cannot receive what those steps send.
+    /// <para>
+    /// Called by the editor straight after a save. Read-only on purpose: it names the problem and the
+    /// grants that would fix it, but performs none of them — widening who can read data must not be a side
+    /// effect of pressing Save.
+    /// </para>
+    /// </summary>
+    [HttpGet("{id}/email-audit")]
+    public async Task<ActionResult<PipelineEmailAudit>> EmailAudit(string id)
+    {
+        if (!TryContext(out var companyId, out _, out var failure)) return failure!;
+
+        var auditor = serviceProvider.GetService<IPipelineEmailAuditService>();
+        if (auditor is null)
+        {
+            // Not configured on this host. An empty audit is the honest answer — "nothing to report" would
+            // be a lie, but the editor treats no findings as no dialog, and a 500 on save would be worse.
+            return Ok(new PipelineEmailAudit());
+        }
+
+        var audit = await auditor.AuditAsync(companyId, id, HttpContext.RequestAborted);
+
+        // The identity app lives outside this app, and the WASM client cannot read appsettings — so the
+        // "add them as a user" destination has to travel in the response.
+        audit.IdentityAppUrl = (configuration["UserManagement:ApplicationUrl"] ?? string.Empty)
+            .TrimEnd('/');
+
+        if (string.IsNullOrWhiteSpace(audit.IdentityAppUrl)) audit.IdentityAppUrl = null;
+
+        return Ok(audit);
+    }
+
+    /// <summary>
     /// Forgets the incremental watermarks so the next run starts over. Destination data is untouched — which
     /// means an append destination will load everything a second time. The response says how many marks were
     /// cleared so the UI can be specific about what just happened.

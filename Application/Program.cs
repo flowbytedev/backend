@@ -283,6 +283,11 @@ builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineE
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineEmailSender,
     Application.Shared.Services.Data.Pipelines.PipelineEmailSender>();
 
+// Save-time check on an email step's recipients. Registered on the web app ONLY: it exists to answer a
+// question the editor asks, and the scheduler never asks it. The controller treats it as optional.
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineEmailAuditService,
+    Application.Shared.Services.Data.Pipelines.PipelineEmailAuditService>();
+
 
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineService,
     Application.Shared.Services.Data.Pipelines.PipelineService>();

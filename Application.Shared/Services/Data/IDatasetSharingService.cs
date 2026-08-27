@@ -1,10 +1,23 @@
-using Application.Shared.Models;
+﻿using Application.Shared.Models;
 
 namespace Application.Shared.Services.Data;
 
 public interface IDatasetSharingService
 {
     Task<List<DatasetUserDto>> GetDatasetUsersAsync(string datasetId);
+
+    /// <summary>
+    /// Resolves email addresses to user ids, keyed by the address as given. An address with no user is
+    /// absent from the result rather than mapped to null, so "is this a user" is a ContainsKey.
+    /// <para>
+    /// Public because the pipeline email destination has to answer "can this recipient actually open a
+    /// dataset link?" at save time, and it must use the same duplicate-tolerant lookup the share itself
+    /// uses — a second implementation would disagree with GrantTableAccessAsync exactly when duplicate
+    /// Identity rows exist.
+    /// </para>
+    /// </summary>
+    Task<Dictionary<string, ResolvedShareUser>> ResolveUsersByEmailAsync(
+        IEnumerable<string> emails, CancellationToken ct = default);
     Task<bool> ShareDatasetAsync(ShareDatasetRequest request, string sharedByUserId);
 
     /// <summary>Additively grants a single table to a user. Creates the share (restricted to that table)

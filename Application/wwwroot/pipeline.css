@@ -537,3 +537,47 @@ body.pl-focus .al-main { padding: 0; overflow: hidden; }
 .pl-palette-group.is-collapsed .pl-palette-caret { transform: rotate(-90deg); }
 
 .pl-palette-item { padding: 7px 12px; }
+
+/* ---- email recipient audit dialog ------------------------------------------------------------- */
+/* One block per email step. The border is what separates two steps' findings when a pipeline has
+   several email destinations — without it the lists read as one long list. */
+.pl-audit-step {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg, 8px);
+    padding: 12px;
+    margin-bottom: 12px;
+}
+.pl-audit-step:last-child { margin-bottom: 0; }
+
+.pl-audit-step-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 10px; font-size: 13px;
+}
+
+.pl-audit-block {
+    border-radius: var(--radius, 6px);
+    padding: 10px 12px;
+    margin-top: 8px;
+    background: var(--accent-subtle);
+}
+/* An error here means "this recipient cannot open what you are sending them" — the only finding in
+   this dialog that is a defect rather than a note. */
+.pl-audit-block.is-error {
+    background: var(--danger-subtle); border: 1px solid var(--danger-border);
+}
+.pl-audit-block.is-info {
+    background: var(--warning-subtle); border: 1px solid var(--warning-border);
+}
+
+.pl-audit-block-title { font-size: 12px; font-weight: 600; margin-bottom: 6px; }
+.pl-audit-block.is-error .pl-audit-block-title { color: var(--danger); }
+.pl-audit-block.is-info .pl-audit-block-title { color: var(--warning); }
+
+.pl-audit-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 3px 0; font-size: 13px;
+}
+/* The address is the identifier here, so it gets the mono treatment and takes the slack. */
+.pl-audit-email { font-family: var(--font-mono); font-size: 12px; flex: 1 1 auto; word-break: break-all; }
+.pl-audit-actions { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.pl-audit-check { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1 1 auto; }

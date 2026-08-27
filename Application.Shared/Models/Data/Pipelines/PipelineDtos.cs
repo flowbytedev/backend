@@ -258,3 +258,78 @@ public class PipelineRunRequest
     /// </summary>
     public List<string>? NodeIds { get; set; }
 }
+
+/// <summary>
+/// The result of checking a pipeline's email recipients. Returned after a save so the editor can say what,
+/// if anything, will not reach its recipient.
+/// </summary>
+public class PipelineEmailAudit
+{
+    public List<PipelineEmailStepAudit> Steps { get; set; } = new();
+
+    /// <summary>Base URL of the identity app, for the "add them as a user" action. Null when unconfigured.</summary>
+    public string? IdentityAppUrl { get; set; }
+
+    /// <summary>A recipient who cannot receive what the step sends. Worth interrupting a save for.</summary>
+    public bool HasBlockers => Steps.Any(s => s.Blockers.Count > 0);
+
+    /// <summary>True when there is anything at all to tell the operator.</summary>
+    public bool HasFindings => Steps.Any(s =>
+        s.Blockers.Count > 0 || s.NonUsers.Count > 0 || s.Grantable.Count > 0 || s.Unresolved.Count > 0);
+}
+
+public class PipelineEmailStepAudit
+{
+    public string NodeId { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>True when this step falls back to writing a dataset and emailing a link to it.</summary>
+    public bool SendsDatasetLink { get; set; }
+
+    public string? LinkDatasetId { get; set; }
+    public string? LinkDatasetName { get; set; }
+    public string? LinkTable { get; set; }
+
+    /// <summary>
+    /// The link dataset is external, so its access is governed by another database. A share row here would
+    /// promise something this app cannot enforce, so no grant is offered.
+    /// </summary>
+    public bool LinkDatasetIsExternal { get; set; }
+
+    /// <summary>
+    /// Not users, on a step that sends a dataset link — they will get the email and be unable to open it.
+    /// The one finding that is an error rather than a note.
+    /// </summary>
+    public List<string> Blockers { get; set; } = new();
+
+    /// <summary>Not users, on a step that only attaches a file. Informational: an attachment reaches anyone.</summary>
+    public List<string> NonUsers { get; set; } = new();
+
+    /// <summary>Users who cannot yet read the linked table. These are the grant candidates.</summary>
+    public List<PipelineEmailRecipient> Grantable { get; set; } = new();
+
+    /// <summary>Users who can already read the linked table. Listed so the dialog can show them as done.</summary>
+    public List<PipelineEmailRecipient> AlreadyShared { get; set; } = new();
+
+    /// <summary>Users with nothing outstanding — an attachment-only step, or an external link dataset.</summary>
+    public List<PipelineEmailRecipient> Users { get; set; } = new();
+
+    /// <summary>
+    /// Recipients written as <c>{{ tokens }}</c>. Resolved when the run starts, so unknowable here — and
+    /// reported rather than ignored, because silence would read as "checked and fine".
+    /// </summary>
+    public List<string> Unresolved { get; set; } = new();
+
+    /// <summary>True when a grant is possible: a local link dataset, a table, and somebody to grant to.</summary>
+    public bool CanGrant =>
+        SendsDatasetLink && !LinkDatasetIsExternal
+        && !string.IsNullOrWhiteSpace(LinkDatasetId) && !string.IsNullOrWhiteSpace(LinkTable)
+        && Grantable.Count > 0;
+}
+
+public class PipelineEmailRecipient
+{
+    public string Email { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+}

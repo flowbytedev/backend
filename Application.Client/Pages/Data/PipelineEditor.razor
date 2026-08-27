@@ -1,5 +1,7 @@
 ﻿@page "/data/pipelines/{Id}"
 @using System.Net.Http.Json
+@using System.Text.Json.Nodes
+@using Application.Shared.Models
 @using Application.Client.Pipelines
 @using Application.Shared.Authorization
 @using Application.Shared.Models.Data.Pipelines
@@ -306,6 +308,172 @@ else
     </div>
 }
 
+@* ---------- email recipient audit ---------- *@
+@if (_audit is not null)
+{
+    <div class="fb-modal-backdrop" @onclick="CloseAudit">
+        <div class="fb-modal fb-modal-wide" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+            <div class="fb-modal-head">
+                <h2 class="fb-modal-title">Email recipients</h2>
+            </div>
+            <div class="fb-modal-body">
+                <p class="field-help" style="margin-bottom:12px;">
+                    Saved. These are the recipients of this pipeline's email steps that need attention.
+                </p>
+
+                @foreach (var step in _audit.Steps.Where(x =>
+                    x.Blockers.Count > 0 || x.NonUsers.Count > 0 || x.Grantable.Count > 0
+                    || x.Unresolved.Count > 0))
+                {
+                    var current = step;
+
+                    <div class="pl-audit-step">
+                        <div class="pl-audit-step-head">
+                            <strong>@current.Label</strong>
+                            @if (current.SendsDatasetLink)
+                            {
+                                <span class="pl-pill is-scoped">sends a dataset link when too large</span>
+                            }
+                            else
+                            {
+                                <span class="pl-pill">attachment only</span>
+                            }
+                        </div>
+
+                        @* The one finding that is an error: not a user, on a step that sends a link. *@
+                        @if (current.Blockers.Count > 0)
+                        {
+                            <div class="pl-audit-block is-error">
+                                <div class="pl-audit-block-title">
+                                    ✖ Cannot open the dataset link — not a user
+                                </div>
+                                @foreach (var email in current.Blockers)
+                                {
+                                    var address = email;
+                                    <div class="pl-audit-row">
+                                        <span class="pl-audit-email">@address</span>
+                                        <span class="pl-audit-actions">
+                                            <button class="btn btn-ghost btn-sm"
+                                                    @onclick="() => ToggleRemoval(current.NodeId, address)">
+                                                @(IsMarkedForRemoval(current.NodeId, address) ? "Keep" : "Remove")
+                                            </button>
+                                            @if (_audit.IdentityAppUrl is { Length: > 0 })
+                                            {
+                                                <a class="btn btn-secondary btn-sm" target="_blank"
+                                                   href="@_audit.IdentityAppUrl">Add as user</a>
+                                            }
+                                        </span>
+                                    </div>
+                                }
+                                <div class="field-help">
+                                    They will receive the email, but the link goes into this app and needs a
+                                    sign-in. An attachment would reach them; a link will not.
+                                </div>
+                            </div>
+                        }
+
+                        @* Informational: not a user, but the step only ever attaches a file. *@
+                        @if (current.NonUsers.Count > 0)
+                        {
+                            <div class="pl-audit-block is-info">
+                                <div class="pl-audit-block-title">
+                                    ℹ Not users — fine for an attachment
+                                </div>
+                                @foreach (var email in current.NonUsers)
+                                {
+                                    var address = email;
+                                    <div class="pl-audit-row">
+                                        <span class="pl-audit-email">@address</span>
+                                        <span class="pl-audit-actions">
+                                            <button class="btn btn-ghost btn-sm"
+                                                    @onclick="() => ToggleRemoval(current.NodeId, address)">
+                                                @(IsMarkedForRemoval(current.NodeId, address) ? "Keep" : "Remove")
+                                            </button>
+                                        </span>
+                                    </div>
+                                }
+                                <div class="field-help">
+                                    This step attaches the file, so a mailbox is all they need. Listed only in
+                                    case one of them is a typo.
+                                </div>
+                            </div>
+                        }
+
+                        @* The grants. Nothing happens until "Grant access" is pressed. *@
+                        @if (current.CanGrant)
+                        {
+                            <div class="pl-audit-block">
+                                <div class="pl-audit-block-title">
+                                    Give access to @current.LinkDatasetName · @current.LinkTable
+                                </div>
+                                @foreach (var user in current.Grantable)
+                                {
+                                    var recipient = user;
+                                    <div class="pl-audit-row">
+                                        <label class="pl-audit-check">
+                                            <input type="checkbox"
+                                                   checked="@IsGrantChecked(current.NodeId, recipient.Email)"
+                                                   @onchange="e => ToggleGrant(current.NodeId, recipient.Email, e)" />
+                                            <span class="pl-audit-email">@recipient.Email</span>
+                                        </label>
+                                    </div>
+                                }
+                                <div class="field-help">
+                                    Grants Viewer access to this one table, not the whole dataset.
+                                </div>
+                            </div>
+                        }
+
+                        @if (current.AlreadyShared.Count > 0)
+                        {
+                            <div class="field-help" style="margin-top:6px;">
+                                Already has access: @string.Join(", ", current.AlreadyShared.Select(u => u.Email))
+                            </div>
+                        }
+
+                        @if (current.SendsDatasetLink && current.LinkDatasetIsExternal)
+                        {
+                            <div class="pl-audit-block is-info">
+                                <div class="pl-audit-block-title">ℹ External dataset</div>
+                                <div class="field-help">
+                                    The linked dataset is a live view over another database, so access is
+                                    governed there rather than here. A share created in FlowByte would not
+                                    grant anything real, so none is offered.
+                                </div>
+                            </div>
+                        }
+
+                        @if (current.Unresolved.Count > 0)
+                        {
+                            <div class="pl-audit-block is-info">
+                                <div class="pl-audit-block-title">ℹ Not checked — resolved at run time</div>
+                                <div class="field-help">
+                                    @string.Join(", ", current.Unresolved) — these use a token, so the actual
+                                    address is only known once a run starts.
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+            <div class="fb-modal-foot">
+                @if (_removals.Count > 0)
+                {
+                    <span class="field-help" style="margin-right:auto;">
+                        @_removals.Sum(kv => kv.Value.Count) recipient(s) will be removed and the pipeline saved again.
+                    </span>
+                }
+                <button class="btn btn-ghost btn-sm" @onclick="CloseAudit">Close</button>
+                <button class="btn btn-primary btn-sm" disabled="@_applyingAudit"
+                        @onclick="ApplyAuditAsync">
+                    @(_applyingAudit ? "Applying…" : ApplyAuditLabel)
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+
 @code {
     [Parameter] public string Id { get; set; } = string.Empty;
     [SupplyParameterFromQuery(Name = "c")] public string? c { get; set; }
@@ -338,6 +506,21 @@ else
 
     private List<PipelineIssueDto> _issues = new();
     private int _errorCount;
+
+    // ---------------- email recipient audit ----------------
+
+    /// <summary>Non-null while the recipient dialog is open.</summary>
+    private PipelineEmailAudit? _audit;
+
+    /// <summary>Addresses the operator chose to drop, per email node. Applied on confirm, not on click.</summary>
+    private readonly Dictionary<string, HashSet<string>> _removals =
+        new(StringComparer.Ordinal);
+
+    /// <summary>Ticked grant candidates, per email node.</summary>
+    private readonly Dictionary<string, HashSet<string>> _grants =
+        new(StringComparer.Ordinal);
+
+    private bool _applyingAudit;
 
     /// <summary>
     /// The steps a "Run selected" would actually execute: the selection plus every ancestor it needs.
@@ -1097,6 +1280,10 @@ else
             _history.MarkSaved();
             Recompute(false);
 
+            // After the save, never instead of it. A recipient problem is worth telling somebody about, but
+            // it is not a reason to refuse to store their work.
+            await AuditEmailRecipientsAsync();
+
             if (_errorCount > 0)
                 _toastService.ShowWarning($"Saved with {_errorCount} problem(s) — it can't run yet.");
             else
@@ -1187,6 +1374,233 @@ else
         {
             _running = false;
         }
+    }
+
+    // ---------------- email recipient audit ----------------
+
+    /// <summary>
+    /// Asks the server which email recipients cannot receive what their step sends, and opens the dialog if
+    /// there is anything to say.
+    /// <para>
+    /// Server-side because the answer lives in the Identity store, which the browser cannot reach — and
+    /// because "is this address a user" must be decided by the same lookup the share itself uses.
+    /// </para>
+    /// <para>
+    /// Silent on failure. This runs immediately after a successful save, and an audit that cannot be
+    /// fetched must not make a completed save look like it went wrong.
+    /// </para>
+    /// </summary>
+    private async Task AuditEmailRecipientsAsync()
+    {
+        if (!_graph.Nodes.Any(n => n.Type == PipelineNodeTypes.DestinationEmail)) return;
+
+        try
+        {
+            var audit = await _httpClient
+                .GetFromJsonAsync<PipelineEmailAudit>($"api/pipelines/{Id}/email-audit");
+
+            if (audit is null || !audit.HasFindings) return;
+
+            _removals.Clear();
+            _grants.Clear();
+
+            // Every grant candidate starts ticked: reaching this dialog means the operator already chose to
+            // send these people a link, so granting is the expected outcome rather than the surprising one.
+            foreach (var step in audit.Steps.Where(x => x.CanGrant))
+                _grants[step.NodeId] = new HashSet<string>(
+                    step.Grantable.Select(u => u.Email), StringComparer.OrdinalIgnoreCase);
+
+            _audit = audit;
+        }
+        catch
+        {
+            // Deliberately swallowed — see the summary.
+        }
+    }
+
+    private bool IsMarkedForRemoval(string nodeId, string email) =>
+        _removals.TryGetValue(nodeId, out var set) && set.Contains(email);
+
+    private void ToggleRemoval(string nodeId, string email)
+    {
+        if (!_removals.TryGetValue(nodeId, out var set))
+            _removals[nodeId] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (!set.Add(email)) set.Remove(email);
+        if (set.Count == 0) _removals.Remove(nodeId);
+    }
+
+    private bool IsGrantChecked(string nodeId, string email) =>
+        _grants.TryGetValue(nodeId, out var set) && set.Contains(email);
+
+    private void ToggleGrant(string nodeId, string email, ChangeEventArgs e)
+    {
+        if (!_grants.TryGetValue(nodeId, out var set))
+            _grants[nodeId] = set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (e.Value is true) set.Add(email);
+        else set.Remove(email);
+    }
+
+    private int PendingGrantCount =>
+        _audit?.Steps.Where(s => s.CanGrant)
+            .Sum(s => _grants.TryGetValue(s.NodeId, out var set) ? set.Count : 0) ?? 0;
+
+    private string ApplyAuditLabel
+    {
+        get
+        {
+            var removals = _removals.Sum(kv => kv.Value.Count);
+            var grants = PendingGrantCount;
+
+            if (removals > 0 && grants > 0) return $"Remove {removals} · grant {grants}";
+            if (removals > 0) return $"Remove {removals} and save";
+            if (grants > 0) return $"Grant access to {grants}";
+            return "Done";
+        }
+    }
+
+    private void CloseAudit()
+    {
+        _audit = null;
+        _removals.Clear();
+        _grants.Clear();
+    }
+
+    /// <summary>
+    /// Applies the dialog: grants first, then removals.
+    /// <para>
+    /// That order matters. A removal re-saves the pipeline, which re-runs the audit and would reopen this
+    /// dialog on top of a half-applied set of grants. Doing the grants first means the reopened dialog
+    /// reflects reality.
+    /// </para>
+    /// </summary>
+    private async Task ApplyAuditAsync()
+    {
+        if (_audit is null) return;
+
+        _applyingAudit = true;
+
+        try
+        {
+            var granted = 0;
+            var failed = new List<string>();
+
+            foreach (var step in _audit.Steps.Where(x => x.CanGrant))
+            {
+                if (!_grants.TryGetValue(step.NodeId, out var emails) || emails.Count == 0) continue;
+
+                foreach (var email in emails)
+                {
+                    // The existing dataset-sharing endpoint, unchanged: it does its own EDIT_DATA check and
+                    // its own additive-grant logic, so this feature adds no second path to granting access.
+                    var response = await _httpClient.PostAsJsonAsync(
+                        $"api/datasets/{step.LinkDatasetId}/sharing/grant-table",
+                        new GrantTableShareRequest
+                        {
+                            Email = email,
+                            DatasetId = step.LinkDatasetId!,
+                            TableName = step.LinkTable!,
+                            UserType = DatasetUserType.Viewer
+                        });
+
+                    if (response.IsSuccessStatusCode) granted++;
+                    else failed.Add(email);
+                }
+            }
+
+            if (granted > 0)
+                _toastService.ShowSuccess($"Granted access to {granted} user(s).");
+
+            if (failed.Count > 0)
+                _toastService.ShowError($"Could not grant access to: {string.Join(", ", failed)}");
+
+            var removed = ApplyRemovals();
+
+            CloseAudit();
+
+            if (removed > 0)
+            {
+                _toastService.ShowInfo($"Removed {removed} recipient(s).");
+                await SaveAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not apply the changes: {ex.Message}");
+        }
+        finally
+        {
+            _applyingAudit = false;
+        }
+    }
+
+    /// <summary>
+    /// Strips the marked addresses out of each email node's to/cc/bcc arrays and returns how many were
+    /// removed. Goes through the undo history like any other edit, so it can be undone.
+    /// <para>
+    /// A row may hold several addresses ("a@x.com, b@y.com"), which is why this rewrites each row rather
+    /// than removing whole entries — dropping the row would take a recipient nobody asked to remove.
+    /// </para>
+    /// </summary>
+    private int ApplyRemovals()
+    {
+        if (_removals.Count == 0) return 0;
+
+        var removed = 0;
+
+        foreach (var (nodeId, addresses) in _removals)
+        {
+            var node = _graph.Node(nodeId);
+            if (node?.Config is null) continue;
+
+            var before = SetNodeConfigCommand.Snapshot(node);
+            var touched = false;
+
+            foreach (var key in new[] { "to", "cc", "bcc" })
+            {
+                if (node.Config[key] is not JsonArray array) continue;
+
+                var rewritten = new JsonArray();
+
+                foreach (var item in array)
+                {
+                    if (item is not JsonValue v || !v.TryGetValue<string>(out var row) || row is null)
+                    {
+                        rewritten.Add(item?.DeepClone());
+                        continue;
+                    }
+
+                    var kept = row
+                        .Split([',', ';', '\n', '\r'], StringSplitOptions.RemoveEmptyEntries)
+                        .Select(a => a.Trim())
+                        .Where(a => a.Length > 0)
+                        .Where(a =>
+                        {
+                            if (!addresses.Contains(a)) return true;
+                            removed++;
+                            return false;
+                        })
+                        .ToList();
+
+                    if (kept.Count > 0) rewritten.Add(string.Join(", ", kept));
+                }
+
+                if (rewritten.Count != array.Count
+                    || !rewritten.Select(x => x?.ToString()).SequenceEqual(array.Select(x => x?.ToString())))
+                {
+                    node.Config[key] = rewritten;
+                    touched = true;
+                }
+            }
+
+            if (!touched) continue;
+
+            var after = SetNodeConfigCommand.Snapshot(node);
+            Apply(new SetNodeConfigCommand(node.Id, before, after, "Remove recipients"));
+        }
+
+        return removed;
     }
 
     /// <summary>

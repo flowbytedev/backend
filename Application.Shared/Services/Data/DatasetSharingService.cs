@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Application.Shared.Data;
 using Application.Shared.Models;
 using Application.Shared.Models.User;
@@ -45,6 +45,33 @@ public class DatasetSharingService : IDatasetSharingService
 
         // Duplicate accounts share this email — pick deterministically rather than fail the share.
         return matches.OrderBy(u => u.Id, StringComparer.Ordinal).First();
+    }
+
+    public async Task<Dictionary<string, ResolvedShareUser>> ResolveUsersByEmailAsync(
+        IEnumerable<string> emails, CancellationToken ct = default)
+    {
+        var result = new Dictionary<string, ResolvedShareUser>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var email in emails)
+        {
+            if (string.IsNullOrWhiteSpace(email)) continue;
+
+            var key = email.Trim();
+            if (result.ContainsKey(key)) continue;
+
+            // Same duplicate-tolerant lookup GrantTableAccessAsync uses, deliberately. See the interface.
+            var user = await FindUserByEmailAsync(key);
+            if (user is null) continue;
+
+            result[key] = new ResolvedShareUser
+            {
+                Email = key,
+                UserId = user.Id,
+                DisplayName = string.IsNullOrWhiteSpace(user.UserName) ? key : user.UserName!
+            };
+        }
+
+        return result;
     }
 
     public async Task<List<DatasetUserDto>> GetDatasetUsersAsync(string datasetId)
