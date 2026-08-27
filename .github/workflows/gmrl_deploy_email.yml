@@ -12,7 +12,7 @@ jobs:
     runs-on: spinsrv3
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -25,7 +25,7 @@ jobs:
       working-directory: Application.Email
       run: npm ci
 
-    - name: Build email templates
+    - name: Build Next.js app
       working-directory: Application.Email
       run: npm run build
 
@@ -37,7 +37,7 @@ jobs:
     needs: build
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: Setup Node.js
       uses: actions/setup-node@v4
@@ -50,15 +50,18 @@ jobs:
       working-directory: Application.Email
       run: npm ci
 
-    - name: Build email templates
+    - name: Build Next.js app
       working-directory: Application.Email
       run: npm run build
 
     - name: Deploy
       shell: cmd
+      env:
+        EMAIL_IIS_PATH: ${{ secrets.EMAIL_IIS_PATH }}
       run: |
         net stop backend_email
         echo node_modules > %TEMP%\xcopy_exclude.txt
         xcopy /s /y /exclude:%TEMP%\xcopy_exclude.txt .\Application.Email\* ${{ secrets.EMAIL_IIS_PATH }}\
         cd /d ${{ secrets.EMAIL_IIS_PATH }} && npm ci --omit=dev
         net start backend_email
+
