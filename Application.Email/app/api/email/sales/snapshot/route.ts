@@ -1,8 +1,7 @@
+import type { ReactElement } from 'react';
 import { NextResponse } from 'next/server';
-import { Resend } from 'resend';
+import { getResend } from '../../../../../emails/src/lib/resend';
 import SalesSnapshotEmail from '../../../../../emails/sales-snapshot';
-
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 type TrendDirection = 'up' | 'down' | 'flat';
 
@@ -85,7 +84,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    await resend.emails.send({
+    await getResend().emails.send({
       from: payload.from,
       to: payload.to,
       subject: payload.title,
@@ -98,7 +97,7 @@ export async function POST(request: Request) {
         schemeKpis: payload.schemeKpis ?? [],
         Columns: payload.Columns ?? [],
         Rows: payload.Rows ?? [],
-      }),
+      }) as ReactElement,
     });
 
     return NextResponse.json({

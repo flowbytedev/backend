@@ -36,11 +36,12 @@ internal static class ExternalConnectionFactory
     /// database. Needed for SQL Server, where <c>CREATE LOGIN</c> is a server-level statement that has to run
     /// against <c>master</c> while <c>CREATE USER</c> runs against the target database.
     /// </summary>
-    public static DbConnection CreateForCatalog(DatabaseConnection c, string? catalog, bool readOnly) => c.DatabaseType switch
+    public static DbConnection CreateForCatalog(
+        DatabaseConnection c, string? catalog, bool readOnly, bool forBulkLoad = false) => c.DatabaseType switch
     {
         DataSourceType.SQLServer => new SqlConnection(BuildSqlServerConnectionString(c, catalog, readOnly)),
         DataSourceType.PostgreSQL => new NpgsqlConnection(BuildPostgresConnectionString(c, catalog)),
-        DataSourceType.MySQL => new MySqlConnection(BuildMySqlConnectionString(c, catalog)),
+        DataSourceType.MySQL => new MySqlConnection(BuildMySqlConnectionString(c, catalog, forBulkLoad)),
         DataSourceType.DuckDB => new DuckDBConnection(BuildDuckDbConnectionString(c, readOnly)),
         _ => throw new NotSupportedException($"No ADO.NET driver for database type: {c.DatabaseType}.")
     };
@@ -59,9 +60,17 @@ internal static class ExternalConnectionFactory
         $"Host={c.Host};Port={(c.Port > 0 ? c.Port : 5432)};Database={catalog ?? c.DatabaseName};Username={c.Username};Password={c.SecretEncrypted};" +
         $"SSL Mode={(c.UseSsl ? "Require" : "Prefer")};Trust Server Certificate=true;Timeout=15;";
 
-    private static string BuildMySqlConnectionString(DatabaseConnection c, string? catalog) =>
-        $"Server={c.Host};Port={(c.Port > 0 ? c.Port : 3306)};Database={catalog ?? c.DatabaseName};User ID={c.Username};Password={c.SecretEncrypted};" +
-        $"SslMode={(c.UseSsl ? "Required" : "Preferred")};Connection Timeout=15;";
+    private static string BuildMySqlConnectionString(
+        DatabaseConnection c, string? catalog, bool forBulkLoad = false)
+    {
+        // MySqlBulkCopy refuses to run without this, and the server also needs local_infile=1. Set only for
+        // a bulk load, because it widens what the client is allowed to do with local files.
+        var localInfile = forBulkLoad ? "AllowLoadLocalInfile=True;" : string.Empty;
+
+        return $"Server={c.Host};Port={(c.Port > 0 ? c.Port : 3306)};Database={catalog ?? c.DatabaseName};" +
+               $"User ID={c.Username};Password={c.SecretEncrypted};" +
+               $"SslMode={(c.UseSsl ? "Required" : "Preferred")};{localInfile}Connection Timeout=15;";
+    }
 
     private static string BuildDuckDbConnectionString(DatabaseConnection c, bool readOnly) =>
         // READ_ONLY opens the file without taking a write lock and rejects any modification.

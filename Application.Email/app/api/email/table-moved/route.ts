@@ -1,8 +1,7 @@
+import type { ReactElement } from 'react';
 import { NextResponse } from 'next/server';
-import { Resend } from 'resend';
+import { getResend } from '../../../../emails/src/lib/resend';
 import TableMovedEmail from '../../../../emails/table-moved';
-
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 interface TableMovedEmailRequest {
   from: string;
@@ -48,7 +47,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    await resend.emails.send({
+    await getResend().emails.send({
       from: payload.from,
       to: payload.to,
       subject: payload.subject,
@@ -59,7 +58,7 @@ export async function POST(request: Request) {
         oldDatasetName: payload.oldDatasetName,
         newDatasetName: payload.newDatasetName,
         newDatasetUrl: payload.newDatasetUrl,
-      }),
+      }) as ReactElement,
     });
 
     return NextResponse.json({

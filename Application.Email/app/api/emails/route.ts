@@ -1,9 +1,7 @@
-import { Resend } from "resend";
+import { getResend } from "../../../emails/src/lib/resend";
 // import SubscribeEmail from "@/app/emails/subscribe";
 import DynamicTableEmail from '../../../emails/dynamic-table';
 import { NextResponse } from "next/server";
-
-const resend = new Resend(process.env.RESEND_API_KEY);
 
 // TypeScript interfaces to match your C# classes
 interface DataTableRow {
@@ -41,7 +39,7 @@ export async function POST(request: Request) {
   }
 
 
-  await resend.emails.send({
+  await getResend().emails.send({
 
     from: from,
     to: recipientName,

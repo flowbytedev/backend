@@ -84,15 +84,81 @@ builder.Services.AddHttpClient();
 var duckdbOption = new DuckdbOption();
 builder.Configuration.Bind("Duckdb", duckdbOption);
 builder.Services.AddSingleton(duckdbOption);
+
+var pipelineOptions = new Application.Shared.Models.Data.Pipelines.PipelineOptions();
+builder.Configuration.Bind("Pipelines", pipelineOptions);
+builder.Services.AddSingleton(pipelineOptions);
+
+var azureBlobOption = new Application.Shared.Models.Data.Pipelines.AzureBlobOption();
+builder.Configuration.Bind("AzureBlob", azureBlobOption);
+builder.Services.AddSingleton(azureBlobOption);
 // Surfaces config drift immediately: this must match the web app's Duckdb:DuckdbFilePath, or ingestion
 // imports fail with "Dataset database not found".
 Console.WriteLine($"[Scheduler] DuckDB file path: '{duckdbOption.DuckdbFilePath ?? "(null — Duckdb config missing!)"}'");
 builder.Services.AddScoped<Application.Shared.Services.Data.IDuckdbService,
     Application.Shared.Services.Data.DuckdbService>();
+
+// ---- ETL pipelines -------------------------------------------------------------------------------
+// Registered here as well as in the web app because the scheduler is what actually executes a run.
+// Everything below depends only on ApplicationDbContext, StatusDbContext and DuckDB, all already
+// registered — nothing here touches Identity, which the scheduler does not wire up.
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineStore>(
+    sp => (Application.Shared.Services.Data.DuckdbService)
+        sp.GetRequiredService<Application.Shared.Services.Data.IDuckdbService>());
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineFileResolver,
+    Application.Shared.Services.Data.Pipelines.PipelineFileResolver>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineSourceLoader,
+    Application.Shared.Services.Data.Pipelines.PipelineSourceLoader>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineEngine,
+    Application.Shared.Services.Data.Pipelines.PipelineEngine>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IExternalTableWriter,
+    Application.Shared.Services.Data.Pipelines.ExternalTableWriter>();
+
 builder.Services.AddScoped<Application.Shared.Services.Data.IIngestionService,
     Application.Shared.Services.Data.IngestionService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.IngestionJob>();
 builder.Services.AddScoped<IngestionRegistrarJob>();
+
+// The API source and destination. One named HttpClient for both, with automatic redirects DISABLED on
+// purpose: .NET drops the Authorization header when it follows a redirect to another origin, but it keeps
+// custom headers, so an X-Api-Key credential would be handed to whatever host a remote server named in a
+// Location response. PipelineApiClient follows same-origin redirects itself and refuses the rest.
+builder.Services.AddHttpClient(Application.Shared.Services.Data.Pipelines.PipelineApiClient.HttpClientName)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = false
+    });
+
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineApiClient, Application.Shared.Services.Data.Pipelines.PipelineApiClient>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineApiReader, Application.Shared.Services.Data.Pipelines.PipelineApiReader>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineApiWriter, Application.Shared.Services.Data.Pipelines.PipelineApiWriter>();
+
+// ---- Pipeline export email (destination.email) ----------------------------------------------------
+// Same Next.js/Resend service as every other email here, but registered for the pipeline engine rather
+// than for a notification service: this one's failures are returned, because a scheduled export that
+// silently does not arrive is a report somebody is waiting on.
+builder.Services.Configure<Application.Shared.Options.PipelineEmailOptions>(
+    builder.Configuration.GetSection("PipelineEmail"));
+builder.Services.AddHttpClient(Application.Shared.Services.Data.Pipelines.PipelineEmailSender.HttpClientName,
+    (sp, client) =>
+    {
+        var opts = sp.GetRequiredService<IOptions<Application.Shared.Options.PipelineEmailOptions>>().Value;
+        if (string.IsNullOrWhiteSpace(opts.ApiBaseUri)) return;
+        client.BaseAddress = new Uri(opts.ApiBaseUri);
+        // Generous: the request body carries a base64 attachment, so it is an upload, not a ping.
+        client.Timeout = TimeSpan.FromSeconds(opts.ResolveTimeoutSeconds());
+    });
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineExportWriter,
+    Application.Shared.Services.Data.Pipelines.PipelineExportWriter>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineEmailSender,
+    Application.Shared.Services.Data.Pipelines.PipelineEmailSender>();
+
+
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineService,
+    Application.Shared.Services.Data.Pipelines.PipelineService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.PipelineJob>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.PipelineMaintenanceJob>();
+builder.Services.AddScoped<PipelineRegistrarJob>();
 
 // Scheduled notebook runs. IDatasetService only needs ApplicationDbContext/DuckDB (both already
 // registered above) so it's fully functional here; INotebookSharingService is NOT — see
@@ -293,6 +359,25 @@ if (ownsDefaultQueue)
         recurringJobId: "ingestion-registrar",
         methodCall: job => job.RunAsync(null, CancellationToken.None),
         cronExpression: "*/5 * * * *",
+        timeZone: tz
+    );
+
+    // ETL pipelines: the same reconcile-against-the-table pattern, against the pipeline table's cron
+    // column. Everything it registers runs on the "default" queue, because only this box can reach the
+    // DuckDB dataset files.
+    RecurringJob.AddOrUpdate<PipelineRegistrarJob>(
+        recurringJobId: "pipeline-registrar",
+        methodCall: job => job.RunAsync(null, CancellationToken.None),
+        cronExpression: "*/5 * * * *",
+        timeZone: tz
+    );
+
+    // Abandons runs whose runner died and prunes step rows past retention. Hourly is plenty: neither is
+    // urgent, and both scan tables that grow with run volume.
+    RecurringJob.AddOrUpdate<Application.Shared.Services.Data.Pipelines.PipelineMaintenanceJob>(
+        recurringJobId: "pipeline-maintenance",
+        methodCall: job => job.RunAsync(null, CancellationToken.None),
+        cronExpression: "17 * * * *",
         timeZone: tz
     );
 

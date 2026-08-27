@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 17
-VisualStudioVersion = 17.11.35222.181
+# Visual Studio Version 18
+VisualStudioVersion = 18.9.12112.369 stable
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Application.Shared", "Application.Shared\Application.Shared.csproj", "{1898FF22-C5EF-4A7A-8B2E-5E7098B95AEF}"
 EndProject
@@ -14,6 +14,24 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Application.DailyInventory", "Application.DailyInventory\Application.DailyInventory.csproj", "{D1321488-39AB-418A-A687-3A540CE10983}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Application.Dashboard", "Application.Dashboard\Application.Dashboard.csproj", "{D9B7469C-BE32-4F3B-9957-AB639371A4DE}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{3D03E3F4-5E9A-454C-BEEC-823D06B60624}"
+	ProjectSection(SolutionItems) = preProject
+		docs\AI_FEATURES.md = docs\AI_FEATURES.md
+		docs\DASHBOARD.md = docs\DASHBOARD.md
+		docs\DATA_FEATURES.md = docs\DATA_FEATURES.md
+		docs\FEATURES.md = docs\FEATURES.md
+		docs\NOTEBOOK_ROADMAP.md = docs\NOTEBOOK_ROADMAP.md
+		docs\PAGE_FUNCTION_ROLES.csv = docs\PAGE_FUNCTION_ROLES.csv
+		docs\PIPELINES.md = docs\PIPELINES.md
+		docs\PUBLIC-API-MIGRATION-HANDOFF.md = docs\PUBLIC-API-MIGRATION-HANDOFF.md
+		docs\PUBLIC-SQL-QUERY-API.md = docs\PUBLIC-SQL-QUERY-API.md
+		docs\STORAGE.md = docs\STORAGE.md
+		docs\WORKFLOW_ETL_FEATURES.md = docs\WORKFLOW_ETL_FEATURES.md
+		docs\WORKFLOW_FEATURES.md = docs\WORKFLOW_FEATURES.md
+	EndProjectSection
+EndProject
+Project("{00D1A9C2-B5F0-4AF3-8072-F6C62B433612}") = "Application.Database.Backend", "Application.Database.Backend\Application.Database.Backend.sqlproj", "{F67D6584-8766-43CE-9374-03C7CEFCB392}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -97,6 +115,24 @@ Global
 		{D9B7469C-BE32-4F3B-9957-AB639371A4DE}.Release|x64.Build.0 = Release|Any CPU
 		{D9B7469C-BE32-4F3B-9957-AB639371A4DE}.Release|x86.ActiveCfg = Release|Any CPU
 		{D9B7469C-BE32-4F3B-9957-AB639371A4DE}.Release|x86.Build.0 = Release|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Debug|Any CPU.Deploy.0 = Debug|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Debug|x64.Build.0 = Debug|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Debug|x64.Deploy.0 = Debug|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Debug|x86.Build.0 = Debug|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Debug|x86.Deploy.0 = Debug|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Release|Any CPU.Deploy.0 = Release|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Release|x64.ActiveCfg = Release|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Release|x64.Build.0 = Release|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Release|x64.Deploy.0 = Release|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Release|x86.ActiveCfg = Release|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Release|x86.Build.0 = Release|Any CPU
+		{F67D6584-8766-43CE-9374-03C7CEFCB392}.Release|x86.Deploy.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

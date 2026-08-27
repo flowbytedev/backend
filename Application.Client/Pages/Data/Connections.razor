@@ -1,0 +1,722 @@
+@*
+    The credentials a pipeline needs but must never store itself.
+
+    Both kinds on one page because they answer the same question — "what is this pipeline allowed to reach?"
+    — and because both were previously reachable only by hand-writing SQL. Secrets are write-only
+    throughout: the server never returns one, so a blank secret box means "keep what is stored", never
+    "clear it".
+*@
+@page "/data/connections"
+@using System.Net.Http.Json
+@using Application.Shared.Authorization
+@using Application.Shared.Models.Data
+@inject HttpClient _httpClient
+@inject IToastService _toastService
+@inject NavigationManager _navigationManager
+@inject AuthenticationStateProvider _authenticationStateProvider
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize(Policy = PolicyNames.DataAdminAccess)]
+
+<PageTitle>Connections</PageTitle>
+
+@if (!_canView && !_loading)
+{
+    <div class="sc">
+        <div class="page-wrap">
+            <div class="empty">
+                <div class="empty-title">Access denied</div>
+                <div class="empty-text">You don't have permission to manage connections.</div>
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="sc">
+        <div class="page-wrap">
+            <div class="page-header">
+                <h1 class="page-title">Connections</h1>
+                <p class="page-subtitle">
+                    Credentials that pipeline steps use by name. Kept here rather than on the step, so a token
+                    is never stored in a pipeline's document or shown in its YAML.
+                </p>
+            </div>
+
+            <div class="tabs">
+                <button class="tab @(_tab == Tab.Api ? "is-active" : "")" @onclick="() => _tab = Tab.Api">
+                    API credentials
+                    <span class="tab-count">@_apis.Count</span>
+                </button>
+                <button class="tab @(_tab == Tab.Write ? "is-active" : "")" @onclick="() => _tab = Tab.Write">
+                    Database write access
+                    <span class="tab-count">@_writes.Count(w => w.Configured)</span>
+                </button>
+            </div>
+
+            @if (_loading)
+            {
+                <div class="card"><div class="card-body">
+                    <div class="skeleton" style="height:18px;margin-bottom:8px;"></div>
+                    <div class="skeleton" style="height:18px;width:70%;"></div>
+                </div></div>
+            }
+            else if (_tab == Tab.Api)
+            {
+                <div class="action-bar">
+                    <span class="action-bar-spacer"></span>
+                    <button class="btn btn-primary" @onclick="StartCreateApi">New API credential</button>
+                </div>
+
+                @if (_apis.Count == 0)
+                {
+                    <div class="card"><div class="empty">
+                        <div class="empty-title">No API credentials yet</div>
+                        <div class="empty-text">
+                            Add one to use the API source or destination steps in a pipeline.
+                        </div>
+                    </div></div>
+                }
+                else
+                {
+                    <div class="card">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Base URL</th>
+                                    <th>Auth</th>
+                                    <th>May send data</th>
+                                    <th>Status</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in _apis)
+                                {
+                                    <tr @key="row.Id">
+                                        <td>
+                                            <div class="cell-strong">@row.Name</div>
+                                            @if (!string.IsNullOrWhiteSpace(row.Description))
+                                            {
+                                                <div class="cell-sub">@row.Description</div>
+                                            }
+                                        </td>
+                                        <td class="cell-mono">@(row.BaseUrl ?? "—")</td>
+                                        <td>
+                                            @AuthLabel(row.AuthType)
+                                            @if (!row.HasSecret && row.AuthType != ApiAuthTypes.None)
+                                            {
+                                                <span class="badge badge-warning">no secret</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (row.AllowWrite)
+                                            {
+                                                <span class="badge badge-warning">yes</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge">read only</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (row.IsEnabled)
+                                            {
+                                                <span class="badge badge-success">enabled</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge">disabled</span>
+                                            }
+                                        </td>
+                                        <td class="table-actions">
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => StartEditApi(row)">Edit</button>
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => DeleteApi(row)">Delete</button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+            else
+            {
+                <div class="card">
+                    <div class="card-body">
+                        <p class="field-help">
+                            A pipeline writing into an <strong>external</strong> dataset needs a credential
+                            that is allowed to INSERT. The read-only connection the dataset already uses is
+                            deliberately not reused for this — a write is refused rather than escalated.
+                            Host, port and database still come from the entity's existing connection; only
+                            the login differs.
+                        </p>
+                    </div>
+                </div>
+
+                @if (_writes.Count == 0)
+                {
+                    <div class="card"><div class="empty">
+                        <div class="empty-title">No database entities</div>
+                        <div class="empty-text">Register a database entity first.</div>
+                    </div></div>
+                }
+                else
+                {
+                    <div class="card">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Database</th>
+                                    <th>Write login</th>
+                                    <th>May create tables</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in _writes)
+                                {
+                                    <tr @key="row.EntityId">
+                                        <td><div class="cell-strong">@row.EntityName</div></td>
+                                        <td>
+                                            @if (row.Configured)
+                                            {
+                                                <span class="cell-mono">@row.Username</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="cell-sub">not configured — pipelines cannot write here</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (!row.Configured)
+                                            {
+                                                <span>—</span>
+                                            }
+                                            else if (row.AllowCreateTable)
+                                            {
+                                                <span class="badge badge-warning">yes</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge">no</span>
+                                            }
+                                        </td>
+                                        <td class="table-actions">
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => StartEditWrite(row)">
+                                                @(row.Configured ? "Edit" : "Add")
+                                            </button>
+                                            @if (row.Configured)
+                                            {
+                                                <button class="btn btn-ghost btn-sm" @onclick="() => DeleteWrite(row)">Remove</button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+
+    @* ---------------- API credential editor ---------------- *@
+    @if (_editApi is not null)
+    {
+        <div class="sc">
+            <div class="fb-modal-backdrop" @onclick="() => _editApi = null">
+                <div class="fb-modal" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+                    <div class="fb-modal-head">
+                        <h2 class="fb-modal-title">@(_editApiIsNew ? "New API credential" : $"Edit {_editApiOriginalName}")</h2>
+                    </div>
+                    <div class="fb-modal-body">
+                        <div class="field">
+                            <label class="field-label">Name</label>
+                            <input class="input" @bind="_editApi.Name" @bind:event="oninput" placeholder="erp-api" />
+                            <div class="field-help">How pipeline steps refer to this. Changing it breaks steps that use the old name.</div>
+                        </div>
+
+                        <div class="field">
+                            <label class="field-label">Description</label>
+                            <input class="input" @bind="_editApi.Description" @bind:event="oninput" />
+                        </div>
+
+                        <div class="field">
+                            <label class="field-label">Base URL</label>
+                            <input class="input" @bind="_editApi.BaseUrl" @bind:event="oninput"
+                                   placeholder="https://erp.internal/api/v2/" />
+                            <div class="field-help">
+                                Optional, but recommended: steps then use relative paths, and this credential
+                                cannot be pointed at any other host.
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label class="field-label">Authentication</label>
+                            <select class="select" @bind="_editApi.AuthType">
+                                <option value="@ApiAuthTypes.None">None</option>
+                                <option value="@ApiAuthTypes.Bearer">Bearer token</option>
+                                <option value="@ApiAuthTypes.Basic">Basic (username + password)</option>
+                                <option value="@ApiAuthTypes.Header">Secret in a header</option>
+                                <option value="@ApiAuthTypes.QueryParam">Secret in a query parameter</option>
+                            </select>
+                        </div>
+
+                        @if (_editApi.AuthType == ApiAuthTypes.Basic)
+                        {
+                            <div class="field">
+                                <label class="field-label">Username</label>
+                                <input class="input" @bind="_editApi.Username" @bind:event="oninput" />
+                            </div>
+                        }
+
+                        @if (_editApi.AuthType == ApiAuthTypes.Header)
+                        {
+                            <div class="field">
+                                <label class="field-label">Header name</label>
+                                <input class="input" @bind="_editApi.HeaderName" @bind:event="oninput"
+                                       placeholder="X-Api-Key" />
+                            </div>
+                        }
+
+                        @if (_editApi.AuthType == ApiAuthTypes.QueryParam)
+                        {
+                            <div class="field">
+                                <label class="field-label">Query parameter name</label>
+                                <input class="input" @bind="_editApi.QueryParamName" @bind:event="oninput"
+                                       placeholder="api_key" />
+                                <div class="field-help">
+                                    Weaker than a header — query strings are recorded in proxy and server logs.
+                                    Use it only when the API offers nothing else.
+                                </div>
+                            </div>
+                        }
+
+                        @if (_editApi.AuthType != ApiAuthTypes.None)
+                        {
+                            <div class="field">
+                                <label class="field-label">
+                                    @(_editApi.AuthType == ApiAuthTypes.Basic ? "Password" : "Secret")
+                                </label>
+                                <input class="input" type="password" autocomplete="new-password"
+                                       @bind="_secret" @bind:event="oninput" />
+                                <div class="field-help">
+                                    @if (_editApiIsNew)
+                                    {
+                                        <span>Stored encrypted. It is never shown again after saving.</span>
+                                    }
+                                    else if (_editApi.HasSecret)
+                                    {
+                                        <span>A secret is stored. Leave this empty to keep it.</span>
+                                    }
+                                    else
+                                    {
+                                        <span>No secret is stored yet.</span>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        <div class="field">
+                            <label class="field-label">Extra headers</label>
+                            <textarea class="textarea" rows="3" @bind="_editApi.ExtraHeadersJson" @bind:event="oninput"
+                                      placeholder='{"Accept": "application/json"}'></textarea>
+                            <div class="field-help">A JSON object, sent on every request. Not for secrets.</div>
+                        </div>
+
+                        <div class="field">
+                            <label class="field-label">Timeout (seconds)</label>
+                            <input class="input" type="number" min="1" max="3600"
+                                   value="@(_editApi.TimeoutSeconds?.ToString() ?? string.Empty)"
+                                   @oninput="e => _editApi.TimeoutSeconds = int.TryParse(e.Value?.ToString(), out var t) ? t : null" />
+                            <div class="field-help">Empty uses the server default.</div>
+                        </div>
+
+                        <div class="field field-check">
+                            <label>
+                                <input type="checkbox" @bind="_editApi.AllowWrite" />
+                                May send data
+                            </label>
+                            <div class="field-help">
+                                Required for a "Send to API" step. Leave off for a credential that only reads —
+                                a destination using it is refused outright, not downgraded.
+                            </div>
+                        </div>
+
+                        <div class="field field-check">
+                            <label>
+                                <input type="checkbox" @bind="_editApi.IsEnabled" />
+                                Enabled
+                            </label>
+                            <div class="field-help">Turning this off stops every step that uses it, without deleting anything.</div>
+                        </div>
+
+                        @if (_error is not null)
+                        {
+                            <div class="form-error">@_error</div>
+                        }
+                    </div>
+                    <div class="fb-modal-foot">
+                        <button class="btn btn-ghost" @onclick="() => _editApi = null">Cancel</button>
+                        <button class="btn btn-primary" disabled="@_saving" @onclick="SaveApi">
+                            @(_saving ? "Saving…" : "Save")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* ---------------- write credential editor ---------------- *@
+    @if (_editWrite is not null)
+    {
+        <div class="sc">
+            <div class="fb-modal-backdrop" @onclick="() => _editWrite = null">
+                <div class="fb-modal" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+                    <div class="fb-modal-head">
+                        <h2 class="fb-modal-title">Write access to @_editWrite.EntityName</h2>
+                    </div>
+                    <div class="fb-modal-body">
+                        <div class="field">
+                            <label class="field-label">Login</label>
+                            <input class="input" @bind="_editWrite.Username" @bind:event="oninput" />
+                        </div>
+
+                        <div class="field">
+                            <label class="field-label">Password</label>
+                            <input class="input" type="password" autocomplete="new-password"
+                                   @bind="_secret" @bind:event="oninput" />
+                            <div class="field-help">
+                                @(_editWrite.HasSecret
+                                    ? "A password is stored. Leave this empty to keep it."
+                                    : "Stored encrypted; never shown again.")
+                            </div>
+                        </div>
+
+                        <div class="field field-check">
+                            <label>
+                                <input type="checkbox" @bind="_editWrite.AllowCreateTable" />
+                                May create tables
+                            </label>
+                            <div class="field-help">
+                                Lets a pipeline issue CREATE TABLE inside that database. Off unless you need
+                                "create the table if it does not exist" to work.
+                            </div>
+                        </div>
+
+                        @if (_error is not null)
+                        {
+                            <div class="form-error">@_error</div>
+                        }
+                    </div>
+                    <div class="fb-modal-foot">
+                        <button class="btn btn-ghost" @onclick="() => _editWrite = null">Cancel</button>
+                        <button class="btn btn-primary" disabled="@_saving" @onclick="SaveWrite">
+                            @(_saving ? "Saving…" : "Save")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private enum Tab { Api, Write }
+
+    [SupplyParameterFromQuery(Name = "c")] public string? c { get; set; }
+
+    private string _companyId = string.Empty;
+    private bool _canView;
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private Tab _tab = Tab.Api;
+
+    private List<ApiCredentialModel> _apis = new();
+    private List<WriteCredentialModel> _writes = new();
+
+    private ApiCredentialModel? _editApi;
+    private bool _editApiIsNew;
+    private string? _editApiOriginalName;
+
+    private WriteCredentialModel? _editWrite;
+
+    /// <summary>
+    /// Held apart from the bound model, because the model round-trips from the server and the server never
+    /// sends a secret. Keeping them separate is what makes "empty means keep" unambiguous.
+    /// </summary>
+    private string _secret = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companyId = c ?? string.Empty;
+
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        _canView = authState.User.HasCompanyRole(_companyId, "DATA_ADMIN");
+        if (!_canView) { _loading = false; return; }
+
+        _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+        _httpClient.DefaultRequestHeaders.Add("X-Company-Id", _companyId);
+
+        var userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrEmpty(userId))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("UserId");
+            _httpClient.DefaultRequestHeaders.Add("UserId", userId);
+        }
+
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        _loading = true;
+
+        try
+        {
+            _apis = await _httpClient.GetFromJsonAsync<List<ApiCredentialModel>>("api/api-credentials")
+                    ?? new();
+        }
+        catch (Exception ex)
+        {
+            _apis = new();
+            _toastService.ShowError($"Could not load API credentials: {ex.Message}");
+        }
+
+        try
+        {
+            _writes = await _httpClient
+                          .GetFromJsonAsync<List<WriteCredentialModel>>("api/database-write-credentials")
+                      ?? new();
+        }
+        catch (Exception ex)
+        {
+            _writes = new();
+            _toastService.ShowError($"Could not load database write access: {ex.Message}");
+        }
+
+        _loading = false;
+    }
+
+    // ---------------- API credentials ----------------
+
+    private void StartCreateApi()
+    {
+        _editApi = new ApiCredentialModel { AuthType = ApiAuthTypes.None, IsEnabled = true };
+        _editApiIsNew = true;
+        _editApiOriginalName = null;
+        _secret = string.Empty;
+        _error = null;
+    }
+
+    private void StartEditApi(ApiCredentialModel row)
+    {
+        // A copy, so cancelling leaves the table untouched.
+        _editApi = new ApiCredentialModel
+        {
+            Id = row.Id,
+            Name = row.Name,
+            Description = row.Description,
+            BaseUrl = row.BaseUrl,
+            AuthType = row.AuthType,
+            Username = row.Username,
+            HeaderName = row.HeaderName,
+            QueryParamName = row.QueryParamName,
+            ExtraHeadersJson = row.ExtraHeadersJson,
+            AllowWrite = row.AllowWrite,
+            IsEnabled = row.IsEnabled,
+            TimeoutSeconds = row.TimeoutSeconds,
+            HasSecret = row.HasSecret
+        };
+        _editApiIsNew = false;
+        _editApiOriginalName = row.Name;
+        _secret = string.Empty;
+        _error = null;
+    }
+
+    private async Task SaveApi()
+    {
+        if (_editApi is null) return;
+
+        _saving = true;
+        _error = null;
+
+        var payload = new
+        {
+            _editApi.Name,
+            _editApi.Description,
+            _editApi.BaseUrl,
+            _editApi.AuthType,
+            _editApi.Username,
+            Secret = string.IsNullOrEmpty(_secret) ? null : _secret,
+            _editApi.HeaderName,
+            _editApi.QueryParamName,
+            _editApi.ExtraHeadersJson,
+            _editApi.AllowWrite,
+            _editApi.IsEnabled,
+            _editApi.TimeoutSeconds
+        };
+
+        try
+        {
+            var response = _editApiIsNew
+                ? await _httpClient.PostAsJsonAsync("api/api-credentials", payload)
+                : await _httpClient.PutAsJsonAsync($"api/api-credentials/{_editApi.Id}", payload);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = await response.Content.ReadAsStringAsync();
+                _saving = false;
+                return;
+            }
+
+            _toastService.ShowSuccess($"Saved {_editApi.Name}.");
+            _editApi = null;
+            _secret = string.Empty;
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+
+        _saving = false;
+    }
+
+    private async Task DeleteApi(ApiCredentialModel row)
+    {
+        try
+        {
+            var response = await _httpClient.DeleteAsync($"api/api-credentials/{row.Id}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                // The server refuses when pipelines still reference it, and names them.
+                _toastService.ShowError(await response.Content.ReadAsStringAsync());
+                return;
+            }
+
+            _toastService.ShowSuccess($"Deleted {row.Name}.");
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError(ex.Message);
+        }
+    }
+
+    // ---------------- database write access ----------------
+
+    private void StartEditWrite(WriteCredentialModel row)
+    {
+        _editWrite = new WriteCredentialModel
+        {
+            EntityId = row.EntityId,
+            EntityName = row.EntityName,
+            Configured = row.Configured,
+            Username = row.Username,
+            AllowCreateTable = row.AllowCreateTable,
+            HasSecret = row.HasSecret
+        };
+        _secret = string.Empty;
+        _error = null;
+    }
+
+    private async Task SaveWrite()
+    {
+        if (_editWrite is null) return;
+
+        _saving = true;
+        _error = null;
+
+        var payload = new
+        {
+            _editWrite.Username,
+            Secret = string.IsNullOrEmpty(_secret) ? null : _secret,
+            _editWrite.AllowCreateTable
+        };
+
+        try
+        {
+            var response = await _httpClient.PutAsJsonAsync(
+                $"api/database-write-credentials/{_editWrite.EntityId}", payload);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = await response.Content.ReadAsStringAsync();
+                _saving = false;
+                return;
+            }
+
+            _toastService.ShowSuccess($"Saved write access to {_editWrite.EntityName}.");
+            _editWrite = null;
+            _secret = string.Empty;
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+
+        _saving = false;
+    }
+
+    private async Task DeleteWrite(WriteCredentialModel row)
+    {
+        try
+        {
+            var response = await _httpClient.DeleteAsync($"api/database-write-credentials/{row.EntityId}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _toastService.ShowError(await response.Content.ReadAsStringAsync());
+                return;
+            }
+
+            _toastService.ShowSuccess($"Removed write access to {row.EntityName}.");
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError(ex.Message);
+        }
+    }
+
+    private static string AuthLabel(string? authType) => authType switch
+    {
+        ApiAuthTypes.Bearer => "Bearer",
+        ApiAuthTypes.Basic => "Basic",
+        ApiAuthTypes.Header => "Header",
+        ApiAuthTypes.QueryParam => "Query",
+        _ => "None"
+    };
+
+    private sealed class ApiCredentialModel
+    {
+        public string? Id { get; set; }
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+        public string? BaseUrl { get; set; }
+        public string? AuthType { get; set; }
+        public string? Username { get; set; }
+        public string? HeaderName { get; set; }
+        public string? QueryParamName { get; set; }
+        public string? ExtraHeadersJson { get; set; }
+        public bool AllowWrite { get; set; }
+        public bool IsEnabled { get; set; }
+        public int? TimeoutSeconds { get; set; }
+        public bool HasSecret { get; set; }
+    }
+
+    private sealed class WriteCredentialModel
+    {
+        public string? EntityId { get; set; }
+        public string? EntityName { get; set; }
+        public bool Configured { get; set; }
+        public string? Username { get; set; }
+        public bool AllowCreateTable { get; set; }
+        public bool HasSecret { get; set; }
+    }
+}

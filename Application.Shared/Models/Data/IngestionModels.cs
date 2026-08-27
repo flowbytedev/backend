@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 
 namespace Application.Shared.Models.Data;
 
@@ -73,4 +73,11 @@ public class ImportResult
     public int RowsUpdated { get; set; }
     public int RowsSkipped { get; set; }
     public string? Error { get; set; }
+
+    /// <summary>
+    /// Machine-readable cause, for callers that need to tell a transient failure from a real one. Added for
+    /// ETL pipelines, which must distinguish "the dataset is momentarily in use" (retry) from "the columns
+    /// do not match" (fix the pipeline). Left null by the file-import paths, which only surface Error.
+    /// </summary>
+    public string? ErrorType { get; set; }
 }

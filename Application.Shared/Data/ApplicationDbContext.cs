@@ -1,6 +1,7 @@
-using Application.Shared.Models;
+﻿using Application.Shared.Models;
 using Application.Shared.Models.Dashboards;
 using Application.Shared.Models.Data;
+using Application.Shared.Models.Data.Pipelines;
 using Application.Shared.Models.Notebooks;
 using Application.Shared.Models.User;
 using Application.Shared.Models.WhatsNew;
@@ -104,6 +105,19 @@ namespace Application.Shared.Data
         // Scheduled/automated ingestion sources and their run history.
         public DbSet<IngestionSource> IngestionSource { get; set; }
         public DbSet<IngestionRun> IngestionRun { get; set; }
+
+        // Visual/YAML ETL pipelines: the graph document, plus per-run and per-step history. Runs and steps
+        // deliberately carry no FK to their parent — see the comments on PipelineRun and PipelineRunStep.
+        public DbSet<Pipeline> Pipeline { get; set; }
+        public DbSet<PipelineRun> PipelineRun { get; set; }
+        public DbSet<PipelineRunStep> PipelineRunStep { get; set; }
+
+        // What a pipeline remembers between runs — one incremental watermark per source step.
+        public DbSet<PipelineState> PipelineState { get; set; }
+
+        // Standalone HTTP credential for source.api / destination.api. Not on an entity: an API is not a
+        // monitored asset, so there is nothing to hang it off.
+        public DbSet<ApiCredential> ApiCredential { get; set; }
 
         // Links a dashboard page to an ingested dataset table (for "view details" deep-links).
         public DbSet<DashboardDataLink> DashboardDataLink { get; set; }

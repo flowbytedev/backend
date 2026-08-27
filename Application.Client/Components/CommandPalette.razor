@@ -1,4 +1,4 @@
-@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+﻿@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @using Application.Shared.Models.Notebooks
 @implements IAsyncDisposable
 @inject NavigationManager _navigation
@@ -669,6 +669,8 @@
         new("View Data", "data/view", "Inspect stored data and tables", "Data", "blue", new[] { "VIEW_DATA" }),
         new("Tables", "data/tables", "Manage database tables", "Data", "blue", new[] { "VIEW_DATA" }),
         new("Ingestion Sources", "data/ingestion", "Configure data ingestion pipelines", "Data", "blue", new[] { "DATA_ADMIN" }),
+        new("Pipelines", "data/pipelines", "Build ETL pipelines: read, reshape, load into a dataset", "Data", "blue", new[] { "DATA_ADMIN" }),
+        new("Connections", "data/connections", "API credentials and database write access for pipelines", "Data", "blue", new[] { "DATA_ADMIN" }),
         new("Data Docs", "data/docs", "Document dataset columns (semantic layer)", "Data", "blue", new[] { "DATA_ADMIN" }),
         new("API Keys", "data/api-keys", "Create and manage API keys", "Data", "blue", null),
 

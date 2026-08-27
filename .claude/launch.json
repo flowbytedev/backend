@@ -1,0 +1,19 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "dotnet",
+      "runtimeArgs": ["run", "--project", "Application", "--no-launch-profile"],
+      "port": 5296,
+      "url": "http://localhost:5296"
+    },
+    {
+      "name": "email",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "Application.Email"],
+      "port": 3000,
+      "url": "http://localhost:3000"
+    }
+  ]
+}

@@ -1,0 +1,481 @@
+@*
+    The graph surface. HTML div nodes absolutely positioned inside ONE CSS-transformed pan/zoom group, over a
+    single SVG edge underlay.
+
+    THE LOAD-BEARING RULE: there is no Blazor pointer-move handler anywhere in this component, and pan/zoom
+    never re-renders the node tree. pipeline-graph.js mutates .pl-viewport's transform inside
+    requestAnimationFrame and reports back only when a gesture ends, so a two-second pan costs ~120 style
+    writes and ONE render. If you are about to add @onpointermove here, don't — put it in the JS module.
+
+    ReadOnly + RunState turns this into the run view. Same renderer, always: fork it and the two views drift,
+    and "this is the same graph you drew" stops being true the first time someone flips between them.
+*@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@using Application.Client.Pipelines
+@using Application.Shared.Models.Data.Pipelines
+@using Application.Shared.Services.Data.Pipelines
+
+<div class="pl-canvas" id="@_hostId" tabindex="0"
+     role="application" aria-roledescription="data pipeline graph"
+     aria-activedescendant="@(FocusedNodeId is null ? null : $"plnode-{FocusedNodeId}")">
+
+    <div class="pl-viewport">
+        <div class="pl-grid" style="@GridStyle()"></div>
+
+        <svg class="pl-edges" style="@EdgeSvgStyle()" viewBox="@EdgeSvgViewBox()"
+             preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+                @* Three static markers. Support for fill="context-stroke" is uneven, so don't rely on it. *@
+                <marker id="pl-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+                    <path d="M0 1 L7 4 L0 7 z" fill="var(--pl-edge)" />
+                </marker>
+                <marker id="pl-arrow-ok" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+                    <path d="M0 1 L7 4 L0 7 z" fill="var(--success)" />
+                </marker>
+                <marker id="pl-arrow-bad" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+                    <path d="M0 1 L7 4 L0 7 z" fill="var(--danger)" />
+                </marker>
+            </defs>
+
+            @foreach (var edge in Layout.Edges)
+            {
+                var flavour = EdgeFlavour(edge);
+                <g @key="edge.Id">
+                    @* An unfilled path receives no interior clicks, hence the fat transparent twin. *@
+                    <path class="pl-edge-hit" d="@edge.D"
+                          @onclick="() => OnEdgeClick.InvokeAsync(edge.Id)" />
+                    <path class="pl-edge @flavour.Css @(edge.Shape == EdgeShape.Back ? "pl-edge--back" : "")"
+                          d="@edge.D" marker-end="@flavour.Marker" />
+                </g>
+            }
+        </svg>
+
+        @foreach (var box in Layout.Nodes)
+        {
+            var node = NodeOf(box.Id);
+            if (node is null) continue;
+
+            <PipelineNode @key="box.Id"
+                          Box="box"
+                          Node="node"
+                          RunState="@(RunState?.GetValueOrDefault(box.Id))"
+                          Selected="@Selected.Contains(box.Id)"
+                          Dimmed="@IsDimmed(box.Id)"
+                          Matched="@(Matches?.Contains(box.Id) ?? false)"
+                          ConnectedInPorts="@ConnectedPorts(box.Id)"
+                          SelfLoops="@Layout.SelfLoopNodeIds.Contains(box.Id)"
+                          ReadOnly="ReadOnly"
+                          Revision="@Layout.Revision"
+                          OnSelect="HandleSelect"
+                          OnOpen="OnOpenNode"
+                          OnAppend="OnAppendNode"
+                          OnPortClick="OnPortClick" />
+        }
+
+        @* Insert-on-edge: the primary way to add a step. Click the + at an edge's midpoint and the new step
+           is spliced in. Needs no drag code at all, which is why it beats palette-dragging for a pipeline —
+           in a mostly-linear graph there is only one sensible place for a new step anyway.
+           Rendered as HTML inside the viewport so it pans with the graph and needs no measurement. *@
+        @if (!ReadOnly)
+        {
+            @foreach (var edge in Layout.Edges.Where(e => e.Shape == EdgeShape.Forward))
+            {
+                var edgeId = edge.Id;
+                <button class="pl-edge-insert" @key="@("ins-" + edge.Id)"
+                        style="left:@N(edge.MidX - 9)px;top:@N(edge.MidY - 9)px;"
+                        title="Insert a step here"
+                        @onclick="() => OnInsertOnEdge.InvokeAsync(edgeId)"
+                        @onclick:stopPropagation="true">+</button>
+            }
+        }
+
+        @ChildContent
+    </div>
+
+    @if (ShowSearch)
+    {
+        <div class="pl-search">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" />
+            </svg>
+            <input id="@($"{_hostId}-search")" placeholder="Find a step…" value="@SearchTerm"
+                   @oninput="OnSearchInput" />
+            @if (!string.IsNullOrWhiteSpace(SearchTerm))
+            {
+                <span class="pl-search-count">@(Matches?.Count ?? 0)</span>
+                <button class="pl-tool-btn" style="width:20px;height:20px;"
+                        @onclick="() => SearchTermChanged.InvokeAsync(null)">✕</button>
+            }
+        </div>
+    }
+
+    @* ---- chrome, outside the viewport so it doesn't pan ---- *@
+    <div class="pl-toolbar">
+        <button class="pl-tool-btn sc-tip" data-tip="Zoom out (−)" @onclick="() => ZoomBy(1 / 1.2)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14" /></svg>
+        </button>
+        <span class="pl-zoom-label">@($"{_zoom * 100:0}%")</span>
+        <button class="pl-tool-btn sc-tip" data-tip="Zoom in (+)" @onclick="() => ZoomBy(1.2)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
+        <div class="pl-tool-sep"></div>
+        <button class="pl-tool-btn sc-tip" data-tip="Fit to view (Shift+1)" @onclick="FitAsync">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+        </button>
+        @if (!ReadOnly)
+        {
+            <button class="pl-tool-btn sc-tip" data-tip="Re-layout (clear positions moved by hand)"
+                    disabled="@(!HasPins)" @onclick="OnRelayout">
+                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 3-6.7" /><path d="M3 4v5h5" /></svg>
+            </button>
+        }
+        <div class="pl-tool-sep"></div>
+        <button class="pl-tool-btn sc-tip @(ListMode ? "is-active" : "")" data-tip="Outline view"
+                @onclick="() => ListModeChanged.InvokeAsync(!ListMode)">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+        </button>
+    </div>
+
+    @if (ShowMinimap && Layout.Nodes.Count > 1)
+    {
+        <div class="pl-minimap" aria-hidden="true">
+            <svg viewBox="@MinimapViewBox()" preserveAspectRatio="xMidYMid meet">
+                @foreach (var box in Layout.Nodes)
+                {
+                    var state = NodeIcons.StateOf(RunState?.GetValueOrDefault(box.Id)?.Status);
+                    <rect class="pl-minimap-node @state.Css" @key="@($"m-{box.Id}")"
+                          x="@N(box.X)" y="@N(box.Y)" width="@N(box.Width)" height="@N(box.Height)" rx="3" />
+                }
+                @* JS moves this rect from inside its rAF loop, so the minimap tracks a pan live without a
+                   single Blazor render — which is exactly why viewport changes are never reported per frame. *@
+                <rect class="pl-minimap-view" id="@($"{_hostId}-view")" x="0" y="0" width="0" height="0" />
+            </svg>
+        </div>
+    }
+</div>
+
+@code {
+    // Unique per instance, so an editor and a run view on screen together don't collide in the JS module's
+    // instance Map.
+    private readonly string _hostId = $"pl-canvas-{Guid.NewGuid():N}";
+
+    private DotNetObjectReference<PipelineCanvas>? _ref;
+    private bool _initialized;
+    private double _zoom = 1;
+
+    [Parameter, EditorRequired] public GraphLayout Layout { get; set; } = GraphLayout.Empty;
+
+    /// <summary>The graph document, for the config the canvas renders (labels, subtitles, ports).</summary>
+    [Parameter, EditorRequired] public PipelineGraph Graph { get; set; } = new();
+
+    /// <summary>Supply to turn this into the run view.</summary>
+    [Parameter] public Dictionary<string, NodeRunState>? RunState { get; set; }
+
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public bool ShowMinimap { get; set; } = true;
+    [Parameter] public HashSet<string> Selected { get; set; } = new();
+    [Parameter] public HashSet<string>? Matches { get; set; }
+    [Parameter] public string? FocusedNodeId { get; set; }
+    [Parameter] public bool HasPins { get; set; }
+
+    [Parameter] public bool ListMode { get; set; }
+    [Parameter] public EventCallback<bool> ListModeChanged { get; set; }
+
+    [Parameter] public EventCallback<(string NodeId, bool Additive)> OnSelectNode { get; set; }
+    [Parameter] public EventCallback<string> OnOpenNode { get; set; }
+    [Parameter] public EventCallback<string> OnAppendNode { get; set; }
+    [Parameter] public EventCallback<string> OnEdgeClick { get; set; }
+
+    /// <summary>Raised with the edge id when its + is clicked, so the page can splice a step in.</summary>
+    [Parameter] public EventCallback<string> OnInsertOnEdge { get; set; }
+
+    /// <summary>Final positions after a drag, reported once per gesture.</summary>
+    [Parameter] public EventCallback<List<NodeMove>> OnNodesDragged { get; set; }
+
+    /// <summary>A port-to-port link was drawn. Direction is resolved by the page.</summary>
+    [Parameter] public EventCallback<LinkRequest> OnLinkRequested { get; set; }
+
+    /// <summary>A link was dropped on empty canvas.</summary>
+    [Parameter] public EventCallback<(double X, double Y)> OnLinkDropped { get; set; }
+
+    [Parameter] public bool ShowSearch { get; set; }
+    [Parameter] public string? SearchTerm { get; set; }
+    [Parameter] public EventCallback<string?> SearchTermChanged { get; set; }
+    [Parameter] public EventCallback<(string NodeId, string Port, bool IsOutput)> OnPortClick { get; set; }
+    [Parameter] public EventCallback OnRelayout { get; set; }
+    [Parameter] public EventCallback OnClearSelection { get; set; }
+    [Parameter] public EventCallback<(double X, double Y, bool Shift, bool Ctrl)> OnCanvasClicked { get; set; }
+    [Parameter] public EventCallback<(double X1, double Y1, double X2, double Y2)> OnBoxSelected { get; set; }
+    [Parameter] public EventCallback<string> OnCommand { get; set; }
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Persisted viewport, as "x|y|k".</summary>
+    [Parameter] public string? InitialViewport { get; set; }
+
+    private Dictionary<string, PipelineNodeDef>? _nodeIndex;
+    private Dictionary<string, HashSet<string>>? _connected;
+
+    protected override void OnParametersSet()
+    {
+        _nodeIndex = Graph.Nodes.Where(n => !string.IsNullOrWhiteSpace(n.Id))
+            .GroupBy(n => n.Id, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+
+        // Which input ports already have an edge, per node — so a join can show its left connected and its
+        // right still empty, which is the whole point of separate ports.
+        _connected = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        foreach (var edge in Layout.Edges)
+        {
+            if (!_connected.TryGetValue(edge.To, out var ports))
+                _connected[edge.To] = ports = new HashSet<string>(StringComparer.Ordinal);
+            ports.Add(edge.ToPort ?? PipelinePorts.In);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _ref = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("pipelineGraph.init", _hostId, _ref,
+            new { minZoom = 0.25, maxZoom = 2.0, lodFar = 0.5, lodMid = 0.75, readOnly = ReadOnly });
+        _initialized = true;
+
+        if (TryParseViewport(InitialViewport, out var x, out var y, out var k))
+        {
+            _zoom = k;
+            await JS.InvokeVoidAsync("pipelineGraph.setTransform", _hostId, x, y, k);
+        }
+        else
+        {
+            await FitAsync();
+        }
+    }
+
+    // ---- JS callbacks. Gesture-end only; nothing here fires per frame. ----
+
+    [JSInvokable]
+    public Task OnViewportChanged(double x, double y, double k)
+    {
+        var changed = Math.Abs(k - _zoom) > 0.001;
+        _zoom = k;
+        // Only the zoom label depends on this, so skip the render when zoom didn't move.
+        if (changed) StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public async Task OnCanvasClick(double x, double y, bool shift, bool ctrl)
+    {
+        if (!shift && !ctrl) await OnClearSelection.InvokeAsync();
+        await OnCanvasClicked.InvokeAsync((x, y, shift, ctrl));
+    }
+
+    /// <summary>Graph-space rectangle; C# hit-tests its own known boxes, so there are no DOM reads.</summary>
+    [JSInvokable]
+    public Task OnBoxSelect(double x1, double y1, double x2, double y2)
+        => OnBoxSelected.InvokeAsync((x1, y1, x2, y2));
+
+    [JSInvokable]
+    public Task OnCanvasCommand(string kind) => OnCommand.InvokeAsync(kind);
+
+    /// <summary>A link dragged onto empty canvas — the page can offer to create a step there.</summary>
+    [JSInvokable]
+    public Task OnLinkDrop(double x, double y) => OnLinkDropped.InvokeAsync((x, y));
+
+    /// <summary>
+    /// A link drag that landed on a port. Both ends are reported verbatim, including their direction, so the
+    /// page can accept the connection whichever way round it was drawn.
+    /// </summary>
+    [JSInvokable]
+    public Task OnLinkCompleted(string fromNode, string fromPort, string fromDir,
+                                string toNode, string toPort, string toDir)
+        => OnLinkRequested.InvokeAsync(new LinkRequest(fromNode, fromPort, fromDir, toNode, toPort, toDir));
+
+    public sealed record LinkRequest(
+        string FromNode, string FromPort, string FromDir,
+        string ToNode, string ToPort, string ToDir);
+
+    /// <summary>
+    /// End of a node drag. JS moved the elements itself during the gesture; this is the single call that
+    /// turns that into pinned positions. An empty list means the pointer never actually moved — a click.
+    /// </summary>
+    [JSInvokable]
+    public Task OnNodesMoved(List<NodeMove> moves) =>
+        moves.Count == 0 ? Task.CompletedTask : OnNodesDragged.InvokeAsync(moves);
+
+    public sealed class NodeMove
+    {
+        public string Id { get; set; } = string.Empty;
+        public double X { get; set; }
+        public double Y { get; set; }
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs e) =>
+        await SearchTermChanged.InvokeAsync(e.Value?.ToString());
+
+    /// <summary>Focuses the find box, for the "/" shortcut.</summary>
+    public async Task FocusSearchAsync()
+    {
+        if (_initialized) await JS.InvokeVoidAsync("pipelineGraph.focus", $"{_hostId}-search");
+    }
+
+    /// <summary>Returns focus to the canvas, so keyboard commands keep working after a toolbar click.</summary>
+    public async Task FocusAsync()
+    {
+        if (_initialized) await JS.InvokeVoidAsync("pipelineGraph.focus", _hostId);
+    }
+
+    // ---- imperative viewport control ----
+
+    public async Task FitAsync()
+    {
+        if (!_initialized || Layout.Nodes.Count == 0) return;
+        await JS.InvokeVoidAsync("pipelineGraph.fit", _hostId,
+            Layout.MinX, Layout.MinY, Layout.MaxX, Layout.MaxY, 56);
+    }
+
+    public async Task ZoomBy(double factor)
+    {
+        if (_initialized) await JS.InvokeVoidAsync("pipelineGraph.zoomBy", _hostId, factor);
+    }
+
+    /// <summary>
+    /// Starts the rubber-band link preview from a port anchor. Exposed as a method so the page never needs
+    /// this instance's host id — JS owns the ghost path outright, so dragging it costs no Blazor renders.
+    /// </summary>
+    public async Task BeginLinkAsync(double x, double y)
+    {
+        if (_initialized) await JS.InvokeVoidAsync("pipelineGraph.beginLink", _hostId, x, y);
+    }
+
+    public async Task EndLinkAsync()
+    {
+        if (_initialized) await JS.InvokeVoidAsync("pipelineGraph.endLink", _hostId);
+    }
+
+    /// <summary>Scrolls a step into view — also stops its focus ring being clipped by overflow:hidden.</summary>
+    public async Task CenterOnAsync(string nodeId)
+    {
+        var box = Layout.Box(nodeId);
+        if (box is null || !_initialized) return;
+        await JS.InvokeVoidAsync("pipelineGraph.centerOn", _hostId,
+            box.X + box.Width / 2, box.Y + box.Height / 2, null);
+    }
+
+    public async Task<string?> GetViewportAsync()
+    {
+        if (!_initialized) return null;
+        var t = await JS.InvokeAsync<ViewportDto?>("pipelineGraph.getTransform", _hostId);
+        return t is null
+            ? null
+            : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{t.x}|{t.y}|{t.k}");
+    }
+
+    public sealed class ViewportDto
+    {
+        public double x { get; set; }
+        public double y { get; set; }
+        public double k { get; set; }
+    }
+
+    // ---- rendering helpers ----
+
+    private PipelineNodeDef? NodeOf(string id) => _nodeIndex?.GetValueOrDefault(id);
+
+    private IReadOnlyCollection<string>? ConnectedPorts(string id) => _connected?.GetValueOrDefault(id);
+
+    private bool IsDimmed(string id)
+    {
+        if (Matches is null || Matches.Count == 0) return false;
+        return !Matches.Contains(id);
+    }
+
+    /// <summary>
+    /// Edge colour from run state, including "this edge was not taken". A pipeline has no branch ports, so
+    /// unlike a workflow the only reason an edge is not taken is that its target was skipped.
+    /// </summary>
+    private (string Css, string Marker) EdgeFlavour(EdgePath edge)
+    {
+        if (RunState is null) return (string.Empty, "url(#pl-arrow)");
+
+        var from = RunState.GetValueOrDefault(edge.From);
+        if (from is null) return (string.Empty, "url(#pl-arrow)");
+
+        var to = RunState.GetValueOrDefault(edge.To);
+        if (to?.Status == PipelineStepStatus.Running) return ("pl-edge--active", "url(#pl-arrow)");
+        if (to?.Status == PipelineStepStatus.Skipped) return ("pl-edge--skipped", "url(#pl-arrow)");
+        if (from.Status == PipelineStepStatus.Failed) return ("pl-edge--bad", "url(#pl-arrow-bad)");
+        if (from.Status == PipelineStepStatus.Success) return ("pl-edge--ok", "url(#pl-arrow-ok)");
+
+        return (string.Empty, "url(#pl-arrow)");
+    }
+
+    private async Task HandleSelect((string NodeId, bool Additive) e) => await OnSelectNode.InvokeAsync(e);
+
+    // Pad generously: edges bow outside the node bounds, and back-edge channels sit below the content.
+    private const double Pad = 400;
+
+    private string GridStyle() =>
+        $"left:{N(Layout.MinX - Pad)}px;top:{N(Layout.MinY - Pad)}px;" +
+        $"width:{N(Layout.Width + Pad * 2)}px;height:{N(Layout.Height + Pad * 2)}px;";
+
+    // Edge paths carry ABSOLUTE graph coordinates — the same ones the node divs use for left/top — so the
+    // SVG's user space has to be graph space. These two methods are a pair and must stay in lockstep: the
+    // style places the element's top-left corner at graph (MinX-Pad, MinY-Pad), and the viewBox declares
+    // that exact rect as the user-space window. Change one without the other and every edge is drawn
+    // displaced by the offset, which is what shipped first (the element moved, no viewBox, edges hanging
+    // ~400px up-left of their nodes). Layers are centred on a fixed midline, so MinY is routinely negative
+    // and the offset is not a rounding error.
+    //
+    // The px size and the viewBox extent are the same expression, so the scale is exactly 1:1;
+    // preserveAspectRatio="none" states that rather than leaving "meet" to letterbox a degenerate graph.
+    private string EdgeSvgStyle() =>
+        $"left:{N(Layout.MinX - Pad)}px;top:{N(Layout.MinY - Pad)}px;" +
+        $"width:{N(SvgExtent(Layout.Width))}px;height:{N(SvgExtent(Layout.Height))}px;" +
+        $"overflow:visible;";
+
+    private string EdgeSvgViewBox() =>
+        $"{N(Layout.MinX - Pad)} {N(Layout.MinY - Pad)} " +
+        $"{N(SvgExtent(Layout.Width))} {N(SvgExtent(Layout.Height))}";
+
+    // A zero-extent viewBox disables rendering of the whole SVG, so a single-node graph would lose its
+    // (nonexistent) edges plus the markers. Padding makes this unreachable in practice; the floor is here
+    // so it stays unreachable if Pad ever becomes 0.
+    private static double SvgExtent(double span) => Math.Max(1, span + Pad * 2);
+
+    private string MinimapViewBox() =>
+        $"{N(Layout.MinX - 8)} {N(Layout.MinY - 8)} " +
+        $"{N(Math.Max(1, Layout.Width + 16))} {N(Math.Max(1, Layout.Height + 16))}";
+
+    private static string N(double value) =>
+        value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static bool TryParseViewport(string? raw, out double x, out double y, out double k)
+    {
+        x = y = 0; k = 1;
+        if (string.IsNullOrWhiteSpace(raw)) return false;
+
+        var parts = raw.Split('|');
+        if (parts.Length != 3) return false;
+
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        return double.TryParse(parts[0], System.Globalization.NumberStyles.Float, ci, out x)
+            && double.TryParse(parts[1], System.Globalization.NumberStyles.Float, ci, out y)
+            && double.TryParse(parts[2], System.Globalization.NumberStyles.Float, ci, out k);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            if (_initialized) await JS.InvokeVoidAsync("pipelineGraph.dispose", _hostId);
+        }
+        catch (JSDisconnectedException) { /* circuit already gone during teardown */ }
+        catch (InvalidOperationException) { /* prerender / disposed renderer */ }
+
+        _ref?.Dispose();
+    }
+}

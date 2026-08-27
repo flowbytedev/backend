@@ -1,4 +1,4 @@
-using Application.Authorization;
+﻿using Application.Authorization;
 using Application.Client.Pages;
 using Application.DailyInventory;
 using Hangfire;
@@ -207,6 +207,15 @@ builder.Services.AddIdentityCore<ApplicationUser>(options => options.SignIn.Requ
 // Add services to the container.
 builder.Services.AddMemoryCache();
 
+// ETL pipeline limits, and the blob settings its file source finally reads.
+var pipelineOptions = new Application.Shared.Models.Data.Pipelines.PipelineOptions();
+builder.Configuration.Bind("Pipelines", pipelineOptions);
+builder.Services.AddSingleton(pipelineOptions);
+
+var azureBlobOption = new Application.Shared.Models.Data.Pipelines.AzureBlobOption();
+builder.Configuration.Bind("AzureBlob", azureBlobOption);
+builder.Services.AddSingleton(azureBlobOption);
+
 // Bind DuckdbOptions
 var duckdbOption = new DuckdbOption();
 builder.Configuration.Bind("Duckdb", duckdbOption);
@@ -224,6 +233,62 @@ builder.Services.AddScoped<IUserService, UserService>();
 builder.Services.AddScoped<IApplicationAccessService, ApplicationAccessService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.IDatasetService, DatasetService>();
 builder.Services.AddScoped<IDuckdbService, DuckdbService>();
+
+// ---- ETL pipelines -------------------------------------------------------------------------------
+// IPipelineStore is DuckdbService's second interface, not a second service: it needs that class's
+// private path resolution and PromoteRelationAsync. Resolved from the same scoped instance so a run
+// shares one dataset-path cache.
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineStore>(
+    sp => (DuckdbService)sp.GetRequiredService<IDuckdbService>());
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineFileResolver,
+    Application.Shared.Services.Data.Pipelines.PipelineFileResolver>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineSourceLoader,
+    Application.Shared.Services.Data.Pipelines.PipelineSourceLoader>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineEngine,
+    Application.Shared.Services.Data.Pipelines.PipelineEngine>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IExternalTableWriter,
+    Application.Shared.Services.Data.Pipelines.ExternalTableWriter>();
+
+// The API source and destination. One named HttpClient for both, with automatic redirects DISABLED on
+// purpose: .NET drops the Authorization header when it follows a redirect to another origin, but it keeps
+// custom headers, so an X-Api-Key credential would be handed to whatever host a remote server named in a
+// Location response. PipelineApiClient follows same-origin redirects itself and refuses the rest.
+builder.Services.AddHttpClient(Application.Shared.Services.Data.Pipelines.PipelineApiClient.HttpClientName)
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+    {
+        AllowAutoRedirect = false
+    });
+
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineApiClient, Application.Shared.Services.Data.Pipelines.PipelineApiClient>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineApiReader, Application.Shared.Services.Data.Pipelines.PipelineApiReader>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineApiWriter, Application.Shared.Services.Data.Pipelines.PipelineApiWriter>();
+
+// ---- Pipeline export email (destination.email) ----------------------------------------------------
+// Same Next.js/Resend service as every other email here, but registered for the pipeline engine rather
+// than for a notification service: this one's failures are returned, because a scheduled export that
+// silently does not arrive is a report somebody is waiting on.
+builder.Services.Configure<Application.Shared.Options.PipelineEmailOptions>(
+    builder.Configuration.GetSection("PipelineEmail"));
+builder.Services.AddHttpClient(Application.Shared.Services.Data.Pipelines.PipelineEmailSender.HttpClientName,
+    (sp, client) =>
+    {
+        var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Application.Shared.Options.PipelineEmailOptions>>().Value;
+        if (string.IsNullOrWhiteSpace(opts.ApiBaseUri)) return;
+        client.BaseAddress = new Uri(opts.ApiBaseUri);
+        // Generous: the request body carries a base64 attachment, so it is an upload, not a ping.
+        client.Timeout = TimeSpan.FromSeconds(opts.ResolveTimeoutSeconds());
+    });
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineExportWriter,
+    Application.Shared.Services.Data.Pipelines.PipelineExportWriter>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineEmailSender,
+    Application.Shared.Services.Data.Pipelines.PipelineEmailSender>();
+
+
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineService,
+    Application.Shared.Services.Data.Pipelines.PipelineService>();
+// The web app only ever ENQUEUES this; the scheduler executes it. Registered here so Hangfire can
+// serialize the call, and because "Run now" from the editor goes through the same wrapper as a cron fire.
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.PipelineJob>();
 builder.Services.AddScoped<ICommentService, CommentService>();
 builder.Services.AddScoped<IUserPreferencesService, UserPreferencesService>();
 builder.Services.AddScoped<IUserSearchService, UserSearchService>();

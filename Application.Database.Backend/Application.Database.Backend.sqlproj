@@ -3,9 +3,10 @@
   <Sdk Name="Microsoft.Build.Sql" Version="2.1.0" />
   <PropertyGroup>
     <Name>Application.Database.Backend</Name>
-    <ProjectGuid>{F67D6584-8766-43CE-9374-03C7CEFCB392}</ProjectGuid>
+    <ProjectGuid>{f67d6584-8766-43ce-9374-03c7cefcb392}</ProjectGuid>
     <DSP>Microsoft.Data.Tools.Schema.Sql.Sql130DatabaseSchemaProvider</DSP>
     <ModelCollation>1033, CI</ModelCollation>
+    <TargetDatabaseSet>True</TargetDatabaseSet>
   </PropertyGroup>
   <Target Name="BeforeBuild">
     <Delete Files="$(BaseIntermediateOutputPath)\project.assets.json" />

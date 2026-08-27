@@ -1,4 +1,4 @@
-using Application.Shared.Models;
+﻿using Application.Shared.Models;
 using Microsoft.EntityFrameworkCore;
 using System.Text;
 
@@ -101,6 +101,10 @@ public class StatusDbContext(DbContextOptions<StatusDbContext> options) : DbCont
 
     // DATABASE ADMINISTRATION (elevated credential, separate from the read-only connection above)
     public DbSet<DatabaseAdminCredential> DatabaseAdminCredentials { get; set; }
+
+    // The write-side credential for an ETL pipeline destination. Separate from both the read-only
+    // connection and the DBA credential — see DatabaseWriteCredential for why.
+    public DbSet<DatabaseWriteCredential> DatabaseWriteCredentials { get; set; }
 
     // TABLE FRESHNESS CHECKS
     public DbSet<TableCheck> TableChecks { get; set; }

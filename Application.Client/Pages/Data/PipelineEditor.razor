@@ -1,0 +1,1175 @@
+@page "/data/pipelines/{Id}"
+@using System.Net.Http.Json
+@using Application.Client.Pipelines
+@using Application.Shared.Authorization
+@using Application.Shared.Models.Data.Pipelines
+@using Application.Shared.Services.Data.Pipelines
+@inject HttpClient _httpClient
+@inject IToastService _toastService
+@inject NavigationManager _navigationManager
+@inject AuthenticationStateProvider _authenticationStateProvider
+@inject IJSRuntime _js
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@attribute [Authorize(Policy = PolicyNames.DataAdminAccess)]
+@implements IAsyncDisposable
+
+<PageTitle>@(_pipeline?.Name ?? "Pipeline")</PageTitle>
+
+@if (!_canEdit && !_loading)
+{
+    <div class="sc"><div class="page-wrap"><div class="empty">
+        <div class="empty-title">Access denied</div>
+        <div class="empty-text">You don't have permission to edit data pipelines.</div>
+    </div></div></div>
+}
+else if (_loading || _pipeline is null)
+{
+    <div class="sc"><div class="page-wrap">
+        <div class="skeleton" style="height:22px;width:240px;margin-bottom:12px;"></div>
+        <div class="skeleton" style="height:320px;"></div>
+    </div></div>
+}
+else
+{
+    <div class="pl-shell sc">
+
+        @* ---------- topbar ---------- *@
+        <div class="pl-topbar">
+            <div class="pl-crumbs">
+                <a href="@($"data/pipelines?c={_companyId}")">Pipelines</a>
+                <span class="pl-crumb-sep">/</span>
+                <span class="pl-crumb-current">@_pipeline.Name</span>
+            </div>
+
+            @if (_history.IsDirty)
+            {
+                <span class="pl-pill is-dirty">unsaved</span>
+            }
+            @if (_errorCount > 0)
+            {
+                <span class="pl-pill is-invalid">@_errorCount problem@(_errorCount == 1 ? "" : "s")</span>
+            }
+            else if (_graph.Nodes.Count > 0)
+            {
+                <span class="pl-pill is-valid">ready</span>
+            }
+
+            <span class="pl-topbar-spacer"></span>
+
+            <button class="btn btn-ghost btn-sm sc-tip" data-tip="@UndoTip" disabled="@(!_history.CanUndo)"
+                    @onclick="Undo">↶</button>
+            <button class="btn btn-ghost btn-sm sc-tip" data-tip="@RedoTip" disabled="@(!_history.CanRedo)"
+                    @onclick="Redo">↷</button>
+
+            <div class="pl-tool-sep"></div>
+
+            <button class="btn btn-ghost btn-sm @(_view == View.Canvas ? "btn-secondary" : "")"
+                    @onclick="() => SetView(View.Canvas)">Canvas</button>
+            <button class="btn btn-ghost btn-sm @(_view == View.Yaml ? "btn-secondary" : "")"
+                    @onclick="() => SetView(View.Yaml)">YAML</button>
+
+            <div class="pl-tool-sep"></div>
+
+            <button class="btn btn-secondary btn-sm" disabled="@(_previewing || _selected.Count != 1)"
+                    @onclick="() => PreviewAsync(_selected.FirstOrDefault())">
+                @(_previewing ? "Previewing…" : "Preview step")
+            </button>
+            <a class="btn btn-ghost btn-sm" href="@($"data/pipelines/{Id}/runs?c={_companyId}")">History</a>
+            <button class="btn btn-secondary btn-sm" disabled="@(_errorCount > 0 || _running)"
+                    @onclick="RunAsync">@(_running ? "Starting…" : "Run")</button>
+            <button class="btn btn-primary btn-sm" disabled="@_saving" @onclick="SaveAsync">
+                @(_saving ? "Saving…" : "Save")
+            </button>
+        </div>
+
+        @* ---------- body ---------- *@
+        <div class="pl-body @(_view == View.Yaml ? "no-palette" : "")" id="pl-body">
+
+            @if (_view == View.Canvas)
+            {
+                <PipelinePalette OnAdd="AddStep" />
+                <div class="pl-resizer" id="pl-resize-left"></div>
+            }
+            else
+            {
+                <div></div>
+                <div></div>
+            }
+
+            @if (_view == View.Canvas)
+            {
+                @if (_listMode)
+                {
+                    <div class="pl-panel">
+                        <PipelineOutline Graph="_graph" Selected="_selected" OnSelect="SelectNode" />
+                    </div>
+                }
+                else
+                {
+                    <PipelineCanvas @ref="_canvas"
+                                    Layout="_layout"
+                                    Graph="_graph"
+                                    Selected="_selected"
+                                    Matches="_matches"
+                                    FocusedNodeId="@_focused"
+                                    HasPins="@(_graph.Layout?.Pins.Count > 0)"
+                                    ShowSearch="_showSearch"
+                                    SearchTerm="@_searchTerm"
+                                    SearchTermChanged="OnSearchChanged"
+                                    ListMode="_listMode"
+                                    ListModeChanged="v => _listMode = v"
+                                    OnSelectNode="SelectNode"
+                                    OnOpenNode="OpenNode"
+                                    OnAppendNode="AppendAfter"
+                                    OnInsertOnEdge="InsertOnEdge"
+                                    OnEdgeClick="OnEdgeClicked"
+                                    OnNodesDragged="OnNodesDragged"
+                                    OnLinkRequested="OnLinkRequested"
+                                    OnLinkDropped="OnLinkDropped"
+                                    OnPortClick="OnPortClicked"
+                                    OnRelayout="Relayout"
+                                    OnClearSelection="ClearSelection"
+                                    OnBoxSelected="OnBoxSelected"
+                                    OnCommand="OnCanvasCommand" />
+                }
+            }
+            else
+            {
+                @* The YAML tab. Two-way: edit and Apply redraws the canvas; the canvas regenerates this. *@
+                <div class="pl-panel">
+                    <div class="pl-panel-head">
+                        <span class="pl-panel-title">YAML</span>
+                        <span class="pl-topbar-spacer"></span>
+                        <button class="btn btn-secondary btn-sm" @onclick="ApplyYaml">Apply</button>
+                        <button class="btn btn-ghost btn-sm" @onclick="RegenerateYaml">Revert</button>
+                    </div>
+                    <div class="pl-panel-body" style="flex:1;min-height:0;display:flex;flex-direction:column;">
+                        @if (_yamlError is { Length: > 0 })
+                        {
+                            <div class="field-error" style="margin-bottom:6px;">@_yamlError</div>
+                        }
+                        <textarea class="textarea textarea-mono" style="flex:1;min-height:0;resize:none;"
+                                  spellcheck="false"
+                                  value="@_yaml"
+                                  @oninput="e => _yaml = e.Value?.ToString() ?? string.Empty"></textarea>
+                    </div>
+                </div>
+            }
+
+            <div class="pl-resizer" id="pl-resize-right"></div>
+
+            <PipelineInspector Node="_selectedNode"
+                               Graph="_graph"
+                               UpstreamColumns="_upstreamColumns"
+                               Datasets="_datasets"
+                               Connections="_connections"
+                               ApiCredentials="_apiCredentials"
+                               Tables="_tables"
+                               Name="@_pipeline.Name"
+                               Description="@_pipeline.Description"
+                               IsEnabled="_pipeline.IsEnabled"
+                               ApiEnabled="_pipeline.ApiEnabled"
+                               Cron="@_pipeline.CronExpression"
+                               RequiresManualRun="_requiresManualRun"
+                               Settings="_graph.Settings"
+                               OnNameChanged="v => { _pipeline.Name = v; MarkDirty(); }"
+                               OnDescriptionChanged="v => { _pipeline.Description = v; MarkDirty(); }"
+                               OnEnabledChanged="v => { _pipeline.IsEnabled = v; MarkDirty(); }"
+                               OnApiEnabledChanged="v => { _pipeline.ApiEnabled = v; MarkDirty(); }"
+                               OnCronChanged="v => { _pipeline.CronExpression = v; MarkDirty(); }"
+                               OnSettingsChanged="() => { MarkDirty(); Recompute(false); }"
+                               OnNodeEdited="OnNodeEdited" />
+        </div>
+
+        @* ---------- validation bar ---------- *@
+        @if (_issues.Count > 0)
+        {
+            <div class="pl-issues">
+                @foreach (var issue in _issues.Take(20))
+                {
+                    var nodeId = issue.NodeId;
+                    <button class="pl-issue @(issue.Severity == PipelineIssueSeverity.Error ? "is-error" : "is-warn")"
+                            @onclick="() => FocusIssue(nodeId)">
+                        <span>@(issue.Severity == PipelineIssueSeverity.Error ? "✕" : "!")</span>
+                        @if (nodeId is { Length: > 0 })
+                        {
+                            <span class="pl-issue-node">@nodeId</span>
+                        }
+                        <span>@issue.Message</span>
+                    </button>
+                }
+            </div>
+        }
+
+        @* ---------- test panel: a bottom sheet, so the graph stays visible while it runs ---------- *@
+        @if (_preview is not null)
+        {
+            <div class="pl-testpanel">
+                <div class="pl-testpanel-head">
+                    <strong style="font-size:13px;">
+                        @(_preview.Success ? $"Preview · {_preview.NodeId}" : "Preview failed")
+                    </strong>
+                    @if (_preview.Success)
+                    {
+                        <span class="chip">@_preview.Rows.Count rows</span>
+                        <span class="chip">@_preview.Columns.Count columns</span>
+                    }
+                    <span class="pl-topbar-spacer"></span>
+                    <button class="btn btn-ghost btn-sm" @onclick="() => _preview = null">Close</button>
+                </div>
+                <div class="pl-testpanel-body">
+                    @if (!_preview.Success)
+                    {
+                        <div class="field-error">@_preview.Error</div>
+                        @if (_preview.Steps.Count > 0)
+                        {
+                            <div style="margin-top:8px;">
+                                @foreach (var step in _preview.Steps)
+                                {
+                                    <div style="font-size:12px;color:var(--text-muted);">
+                                        @step.Label — @step.Status
+                                        @if (step.Error is { Length: > 0 })
+                                        {
+                                            <span style="color:var(--danger);"> @step.Error</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                    else if (_preview.Rows.Count == 0)
+                    {
+                        <div class="pl-inspector-empty">That step produced no rows.</div>
+                    }
+                    else
+                    {
+                        <table class="pl-preview-table">
+                            <thead>
+                                <tr>
+                                    @foreach (var column in _preview.Columns)
+                                    {
+                                        <th title="@column.Type">@column.Name</th>
+                                    }
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in _preview.Rows)
+                                {
+                                    <tr>
+                                        @foreach (var column in _preview.Columns)
+                                        {
+                                            var value = row.GetValueOrDefault(column.Name);
+                                            <td>
+                                                @if (value is null)
+                                                {
+                                                    <span class="pl-preview-null">null</span>
+                                                }
+                                                else
+                                                {
+                                                    @value.ToString()
+                                                }
+                                            </td>
+                                        }
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [SupplyParameterFromQuery(Name = "c")] public string? c { get; set; }
+
+    private enum View { Canvas, Yaml }
+
+    private string _companyId = string.Empty;
+    private bool _canEdit;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _running;
+    private bool _previewing;
+
+    private PipelineDetailDto? _pipeline;
+    private PipelineGraph _graph = new();
+    private GraphLayout _layout = GraphLayout.Empty;
+    private readonly GraphHistory _history = new();
+    private int _revision;
+
+    private View _view = View.Canvas;
+    private bool _listMode;
+    private bool _showSearch;
+    private string? _searchTerm;
+    private HashSet<string>? _matches;
+    private string? _focused;
+
+    private readonly HashSet<string> _selected = new(StringComparer.Ordinal);
+    private PipelineNodeDef? _selectedNode;
+    private string? _editBaseline;
+
+    private List<PipelineIssueDto> _issues = new();
+    private int _errorCount;
+    private bool _requiresManualRun;
+
+    private List<PipelineColumn> _upstreamColumns = new();
+    private List<PipelineFieldOption> _datasets = new();
+    private List<PipelineFieldOption> _connections = new();
+    private List<PipelineFieldOption> _apiCredentials = new();
+    private List<string> _tables = new();
+    private Dictionary<string, string> _datasetIdByName = new(StringComparer.OrdinalIgnoreCase);
+    // Guards the table fetch, which Recompute would otherwise fire on every keystroke.
+    private string? _tablesLoadedFor;
+
+    private string _yaml = string.Empty;
+    private string? _yamlError;
+
+    private PipelinePreviewResult? _preview;
+    private PipelineCanvas? _canvas;
+    private bool _panelsInitialized;
+
+    // Click-then-click connect: the first port clicked is remembered here.
+    private (string NodeId, string Port, bool IsOutput)? _pendingPort;
+
+    /// <summary>
+    /// Just enough of api/api-credentials for the picker. Mirrors ApiCredentialDto on the server and
+    /// deliberately has no secret field — there is nothing to bind even if the server ever sent one.
+    /// </summary>
+    private sealed class ApiCredentialOption
+    {
+        public string? Name { get; set; }
+        public bool AllowWrite { get; set; }
+        public bool IsEnabled { get; set; }
+    }
+
+    /// <summary>What POST api/pipelines/{id}/runs returns. Only the run id is needed here.</summary>
+    private sealed class QueuedRunResponse
+    {
+        public string? RunId { get; set; }
+        public string? JobId { get; set; }
+    }
+
+    private string UndoTip => _history.NextUndoLabel is { } l ? $"Undo {l} (Ctrl+Z)" : "Undo (Ctrl+Z)";
+    private string RedoTip => _history.NextRedoLabel is { } l ? $"Redo {l} (Ctrl+Y)" : "Redo (Ctrl+Y)";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _companyId = c ?? string.Empty;
+
+        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+        _canEdit = authState.User.HasCompanyRole(_companyId, "DATA_ADMIN");
+        if (!_canEdit) { _loading = false; return; }
+
+        _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+        _httpClient.DefaultRequestHeaders.Add("X-Company-Id", _companyId);
+
+        var userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (!string.IsNullOrEmpty(userId))
+        {
+            _httpClient.DefaultRequestHeaders.Remove("UserId");
+            _httpClient.DefaultRequestHeaders.Add("UserId", userId);
+        }
+
+        await LoadAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // The editor takes the whole body and its palette stands in for the app nav. Done with a body
+            // class because the nav lives in MainLayout, a different render tree — see body.pl-focus in
+            // pipeline.css. Cleared in DisposeAsync; that pairing is what keeps it off every other page.
+            try { await _js.InvokeVoidAsync("pipelineChrome.focus", true); }
+            catch (JSDisconnectedException) { }
+        }
+
+        // Deliberately NOT gated on firstRender: the pipeline is fetched in OnInitializedAsync, so on a slow
+        // load the markup these handles attach to does not exist yet on the first render — and firstRender is
+        // never true again. Keyed off "have the panels been wired" instead, so it happens on whichever render
+        // first has them.
+        if (_pipeline is null || _panelsInitialized) return;
+        _panelsInitialized = true;
+
+        // Panel widths are dragged entirely in JS, writing a CSS custom property — so a resize costs zero
+        // Blazor renders, the same reason the canvas transform lives in JS.
+        await _js.InvokeVoidAsync("pipelineResize.init", "pl-resize-left", "pl-body", "x",
+            "--pl-palette-w", 170, 420, "pl-palette-w");
+        await _js.InvokeVoidAsync("pipelineResize.init", "pl-resize-right", "pl-body", "x-reverse",
+            "--pl-inspector-w", 260, 560, "pl-inspector-w");
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try
+        {
+            _pipeline = await _httpClient.GetFromJsonAsync<PipelineDetailDto>($"api/pipelines/{Id}");
+            if (_pipeline is null)
+            {
+                _toastService.ShowError("That pipeline no longer exists.");
+                return;
+            }
+
+            _graph = PipelineGraph.TryParse(_pipeline.GraphJson) ?? PipelineGraph.NewDefault();
+
+            // Merge in the columns each step produced on its last run, so a mapping grid is usable before
+            // the author previews anything.
+            await LoadSchemasAsync();
+            await LoadPickerOptionsAsync();
+
+            _history.Reset();
+            Recompute(structural: true);
+            RegenerateYaml();
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not load the pipeline: {ex.Message}");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task LoadSchemasAsync()
+    {
+        try
+        {
+            var schemas = await _httpClient
+                .GetFromJsonAsync<Dictionary<string, List<PipelineColumn>>>($"api/pipelines/{Id}/schemas");
+
+            if (schemas is { Count: > 0 })
+            {
+                _graph.Schemas ??= new();
+                foreach (var (nodeId, columns) in schemas) _graph.Schemas[nodeId] = columns;
+            }
+        }
+        catch
+        {
+            // A missing schema cache only costs the author some dropdowns; never block the editor for it.
+        }
+    }
+
+    private async Task LoadPickerOptionsAsync()
+    {
+        try
+        {
+            var datasets = await _httpClient
+                .GetFromJsonAsync<List<Application.Shared.Models.Dataset>>("api/datasets");
+
+            // The picker's VALUE is the dataset NAME, not its id: the same graph is read as YAML, and
+            // `dataset: sales-mart` is worth having over a GUID. The id is kept alongside because the
+            // table endpoint is keyed by id.
+            _datasets = datasets?
+                .Where(d => d.Id is not null && !string.IsNullOrWhiteSpace(d.Name))
+                .Select(d => new PipelineFieldOption(d.Name!, d.Name!))
+                .OrderBy(o => o.Label)
+                .ToList() ?? new();
+
+            _datasetIdByName = datasets?
+                .Where(d => d.Id is not null && !string.IsNullOrWhiteSpace(d.Name))
+                .GroupBy(d => d.Name!, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First().Id!, StringComparer.OrdinalIgnoreCase) ?? new();
+        }
+        catch { _datasets = new(); }
+
+        try
+        {
+            var connections = await _httpClient
+                .GetFromJsonAsync<List<Application.Shared.Models.DatabaseEntityOptionDto>>(
+                    "api/datasets/source-databases");
+
+            _connections = connections?
+                .Select(o => new PipelineFieldOption(o.Name, $"{o.Name} ({o.DatabaseType})"))
+                .OrderBy(o => o.Label)
+                .ToList() ?? new();
+        }
+        catch { _connections = new(); }
+
+        try
+        {
+            // Referenced by name, so that is the option value. The label carries whether the credential may
+            // send data: picking a read-only one for a destination is the mistake worth pre-empting here,
+            // because the run refuses it rather than downgrading.
+            var credentials = await _httpClient
+                .GetFromJsonAsync<List<ApiCredentialOption>>("api/api-credentials");
+
+            _apiCredentials = credentials?
+                .Where(c => c.IsEnabled)
+                .Select(c => new PipelineFieldOption(
+                    c.Name ?? string.Empty,
+                    c.Name + (c.AllowWrite ? " (read/write)" : " (read only)")))
+                .OrderBy(o => o.Label)
+                .ToList() ?? new();
+        }
+        catch { _apiCredentials = new(); }
+    }
+
+    // ---------------- the one recompute path ----------------
+
+    /// <summary>
+    /// Everything hangs off this. Layout only re-runs on a structural change — and because node sizes are
+    /// fixed by kind, renaming a step never re-lays-out.
+    /// </summary>
+    private void Recompute(bool structural)
+    {
+        _revision++;
+
+        if (structural) _layout = PipelineLayout.Compute(_graph, _layout, _revision);
+        else _layout = _layout with { Revision = _revision };
+
+        var scheduled = !string.IsNullOrWhiteSpace(_pipeline?.CronExpression) || _pipeline?.ApiEnabled == true;
+        var compiled = PipelineCompiler.Compile(_graph, scheduled: scheduled);
+
+        _issues = compiled.Issues
+            .Select(i => new PipelineIssueDto
+            {
+                NodeId = i.NodeId, Code = i.Code, Message = i.Message, Severity = i.Severity
+            })
+            .ToList();
+
+        _errorCount = _issues.Count(i => i.Severity == PipelineIssueSeverity.Error);
+        _requiresManualRun = compiled.Graph?.RequiresManualRun ?? false;
+
+        _selectedNode = _selected.Count == 1
+            ? _graph.Nodes.FirstOrDefault(n => n.Id == _selected.First())
+            : null;
+
+        _editBaseline = _selectedNode is null ? null : SetNodeConfigCommand.Snapshot(_selectedNode);
+        _upstreamColumns = UpstreamColumnsFor(_selectedNode?.Id);
+
+        if (_selectedNode is not null) _ = LoadTablesFor(_selectedNode);
+    }
+
+    /// <summary>
+    /// The columns feeding a step, from the cache. For a join that is the LEFT input — the side whose rows
+    /// all survive, and therefore the side whose columns the author is mapping.
+    /// </summary>
+    private List<PipelineColumn> UpstreamColumnsFor(string? nodeId)
+    {
+        if (nodeId is null) return new();
+
+        var spec = PipelineNodeCatalog.Get(_graph.Node(nodeId)?.Type);
+        if (spec?.IsSource == true) return _graph.SchemaFor(nodeId);
+
+        var inbound = _graph.Edges
+            .Where(e => e.To == nodeId)
+            .OrderBy(e => e.ToPort == PipelinePorts.Left ? 0 : e.ToPort == PipelinePorts.In ? 1 : 2)
+            .FirstOrDefault();
+
+        return inbound is null ? new() : _graph.SchemaFor(inbound.From);
+    }
+
+    private async Task LoadTablesFor(PipelineNodeDef node)
+    {
+        var datasetField = node.Config?["dataset"]?.ToString();
+        if (string.IsNullOrWhiteSpace(datasetField)) { _tables = new(); return; }
+
+        // The graph stores a dataset NAME (so the YAML reads well) but this endpoint is keyed by id, so it
+        // is resolved here. A value that is already an id passes straight through, which keeps a
+        // hand-written YAML file working either way.
+        var datasetId = _datasetIdByName.GetValueOrDefault(datasetField!, datasetField!);
+        if (datasetId == _tablesLoadedFor) return;
+
+        try
+        {
+            var tables = await _httpClient
+                .GetFromJsonAsync<List<string>>($"api/datasets/{Uri.EscapeDataString(datasetId)}/tables");
+            _tables = tables ?? new();
+            _tablesLoadedFor = datasetId;
+            StateHasChanged();
+        }
+        catch
+        {
+            // Unresolvable: the table field falls back to free text, which the inspector already handles.
+            _tables = new();
+            _tablesLoadedFor = datasetId;
+        }
+    }
+
+    private void MarkDirty() => Recompute(false);
+
+    // ---------------- editing ----------------
+
+    private void Apply(IGraphCommand command, bool structural = true, string? coalesceKey = null)
+    {
+        _history.Execute(_graph, command, coalesceKey);
+        Recompute(structural);
+        if (_view == View.Yaml) RegenerateYaml();
+    }
+
+    private void AddStep(string type)
+    {
+        var node = NodeFactory.Create(type, _graph.Nodes.Select(n => n.Id));
+        var edges = new List<PipelineEdgeDef>();
+
+        // Connect to the selection when that makes sense, so clicking the palette usually just works.
+        if (_selected.Count == 1 && _graph.Node(_selected.First()) is { } from)
+        {
+            var fromSpec = PipelineNodeCatalog.Get(from.Type);
+            var toPorts = PipelineNodeCatalog.InPortsFor(node);
+
+            if (fromSpec is { IsTerminal: false } && toPorts.Count > 0)
+            {
+                edges.Add(new PipelineEdgeDef
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    From = from.Id,
+                    FromPort = fromSpec.OutPorts.FirstOrDefault() ?? PipelinePorts.Out,
+                    To = node.Id,
+                    ToPort = toPorts[0]
+                });
+            }
+        }
+
+        Apply(new AddNodeCommand(node, edges));
+        SelectOnly(node.Id);
+    }
+
+    private void AppendAfter(string nodeId)
+    {
+        SelectOnly(nodeId);
+        // Adding after a step is the same gesture as adding with it selected, so reuse that path once the
+        // author picks a type from the palette.
+        _toastService.ShowInfo("Pick a step from the palette to add it after this one.");
+    }
+
+    private void InsertOnEdge(string edgeId)
+    {
+        _pendingEdgeId = edgeId;
+        _toastService.ShowInfo("Pick a step from the palette to insert it here.");
+    }
+
+    private string? _pendingEdgeId;
+
+    private void OnEdgeClicked(string edgeId)
+    {
+        Apply(new DeleteEdgeCommand(_graph, edgeId));
+        _toastService.ShowInfo("Disconnected.");
+    }
+
+    private void OnNodesDragged(List<PipelineCanvas.NodeMove> moves)
+    {
+        var pins = _graph.Layout?.Pins is { } existing
+            ? new Dictionary<string, PipelinePin>(existing, StringComparer.Ordinal)
+            : new Dictionary<string, PipelinePin>(StringComparer.Ordinal);
+
+        foreach (var move in moves) pins[move.Id] = new PipelinePin { X = move.X, Y = move.Y };
+
+        Apply(new SetPinsCommand(_graph, pins, moves.Count == 1 ? "Move step" : $"Move {moves.Count} steps"));
+    }
+
+    private void Relayout() => Apply(new SetPinsCommand(_graph, new(), "Re-layout"));
+
+    private void OnLinkRequested(PipelineCanvas.LinkRequest link)
+    {
+        // Direction-agnostic: the author may have dragged either way round, so normalise so the output end
+        // is always the source.
+        var (fromNode, fromPort, toNode, toPort) = link.FromDir == "out"
+            ? (link.FromNode, link.FromPort, link.ToNode, link.ToPort)
+            : (link.ToNode, link.ToPort, link.FromNode, link.FromPort);
+
+        Connect(fromNode, fromPort, toNode, toPort);
+    }
+
+    private void Connect(string fromNode, string fromPort, string toNode, string toPort)
+    {
+        if (fromNode == toNode)
+        {
+            _toastService.ShowError("A step can't feed itself.");
+            return;
+        }
+
+        if (WouldCycle(fromNode, toNode))
+        {
+            _toastService.ShowError(
+                $"That would make a loop — '{TitleOf(toNode)}' already leads to '{TitleOf(fromNode)}'.");
+            return;
+        }
+
+        var spec = PipelineNodeCatalog.Get(_graph.Node(toNode)?.Type);
+        var single = spec?.AllowsMultipleInputs != true;
+
+        Apply(new ConnectCommand(_graph, new PipelineEdgeDef
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            From = fromNode, FromPort = fromPort, To = toNode, ToPort = toPort
+        }, replaceExisting: single));
+    }
+
+    /// <summary>Rejected up front, with a readable reason, rather than saved and reported by the compiler.</summary>
+    private bool WouldCycle(string from, string to)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<string>();
+        queue.Enqueue(to);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (current == from) return true;
+            foreach (var edge in _graph.Edges.Where(e => e.From == current))
+                if (seen.Add(edge.To)) queue.Enqueue(edge.To);
+        }
+
+        return false;
+    }
+
+    private void OnLinkDropped((double X, double Y) at) =>
+        _toastService.ShowInfo("Drop a connection on another step's port to link them.");
+
+    /// <summary>The click-then-click connect path, which is also the keyboard and assistive path.</summary>
+    private void OnPortClicked((string NodeId, string Port, bool IsOutput) port)
+    {
+        if (_pendingPort is null)
+        {
+            _pendingPort = port;
+            _toastService.ShowInfo(port.IsOutput
+                ? "Now click the input you want to feed."
+                : "Now click the output you want to read from.");
+            return;
+        }
+
+        var first = _pendingPort.Value;
+        _pendingPort = null;
+
+        if (first.IsOutput == port.IsOutput)
+        {
+            _toastService.ShowError("Connect an output to an input.");
+            return;
+        }
+
+        var (from, to) = first.IsOutput ? (first, port) : (port, first);
+        Connect(from.NodeId, from.Port, to.NodeId, to.Port);
+    }
+
+    private async Task OnNodeEdited(string coalesceKey)
+    {
+        if (_selectedNode is null) return;
+
+        var after = SetNodeConfigCommand.Snapshot(_selectedNode);
+        var before = _editBaseline ?? after;
+        if (before == after) return;
+
+        _history.Execute(_graph,
+            new SetNodeConfigCommand(_selectedNode.Id, before, after, "Edit step"), coalesceKey);
+
+        _editBaseline = after;
+
+        // Structural: a port count can change (a union gaining inputs), and a dataset change alters the
+        // table list.
+        Recompute(structural: true);
+        if (_view == View.Yaml) RegenerateYaml();
+        await Task.CompletedTask;
+    }
+
+    // ---------------- selection ----------------
+
+    private void SelectNode((string NodeId, bool Additive) e)
+    {
+        if (e.Additive)
+        {
+            if (!_selected.Add(e.NodeId)) _selected.Remove(e.NodeId);
+        }
+        else
+        {
+            _selected.Clear();
+            _selected.Add(e.NodeId);
+        }
+
+        _focused = e.NodeId;
+
+        // A pending insert-on-edge resolves as soon as a type is chosen; selecting a node cancels it.
+        Recompute(false);
+    }
+
+    private void SelectOnly(string nodeId)
+    {
+        _selected.Clear();
+        _selected.Add(nodeId);
+        _focused = nodeId;
+        Recompute(false);
+    }
+
+    private void ClearSelection()
+    {
+        _selected.Clear();
+        _pendingPort = null;
+        Recompute(false);
+    }
+
+    private void OpenNode(string nodeId) => SelectOnly(nodeId);
+
+    private void OnBoxSelected((double X1, double Y1, double X2, double Y2) rect)
+    {
+        _selected.Clear();
+        foreach (var box in _layout.Intersecting(rect.X1, rect.Y1, rect.X2, rect.Y2))
+            _selected.Add(box.Id);
+
+        Recompute(false);
+    }
+
+    private void FocusIssue(string? nodeId)
+    {
+        if (nodeId is null) return;
+        SelectOnly(nodeId);
+        _ = _canvas?.CenterOnAsync(nodeId);
+    }
+
+    private void OnSearchChanged(string? term)
+    {
+        _searchTerm = term;
+
+        if (string.IsNullOrWhiteSpace(term))
+        {
+            _matches = null;
+            _showSearch = false;
+        }
+        else
+        {
+            _matches = _graph.Nodes
+                .Where(n => (n.Label ?? string.Empty).Contains(term, StringComparison.OrdinalIgnoreCase)
+                            || n.Id.Contains(term, StringComparison.OrdinalIgnoreCase)
+                            || n.Type.Contains(term, StringComparison.OrdinalIgnoreCase))
+                .Select(n => n.Id)
+                .ToHashSet(StringComparer.Ordinal);
+        }
+
+        Recompute(false);
+    }
+
+    // ---------------- keyboard ----------------
+
+    private async Task OnCanvasCommand(string kind)
+    {
+        switch (kind)
+        {
+            case "save": await SaveAsync(); break;
+            case "undo": Undo(); break;
+            case "redo": Redo(); break;
+            case "run": await RunAsync(); break;
+            case "delete": DeleteSelection(); break;
+            case "selectAll":
+                _selected.Clear();
+                foreach (var node in _graph.Nodes) _selected.Add(node.Id);
+                Recompute(false);
+                break;
+            case "search":
+                _showSearch = true;
+                Recompute(false);
+                if (_canvas is not null) await _canvas.FocusSearchAsync();
+                break;
+            case "fit":
+                if (_canvas is not null) await _canvas.FitAsync();
+                break;
+            case "escape":
+                _pendingPort = null;
+                _pendingEdgeId = null;
+                if (_showSearch) { _showSearch = false; _searchTerm = null; _matches = null; }
+                Recompute(false);
+                break;
+            case "left" or "right" or "up" or "down":
+                MoveFocus(kind);
+                break;
+            case "open":
+                if (_focused is not null) SelectOnly(_focused);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Keyboard graph navigation, entirely in C#: the layout knows every coordinate, so following an edge or
+    /// stepping within a column needs no DOM access at all.
+    /// </summary>
+    private void MoveFocus(string direction)
+    {
+        if (_focused is null)
+        {
+            _focused = _layout.Nodes.FirstOrDefault()?.Id;
+            if (_focused is not null) SelectOnly(_focused);
+            return;
+        }
+
+        var box = _layout.Box(_focused);
+        if (box is null) return;
+
+        string? next = direction switch
+        {
+            "right" => _layout.Edges.FirstOrDefault(e => e.From == _focused)?.To,
+            "left" => _layout.Edges.FirstOrDefault(e => e.To == _focused)?.From,
+            _ => Sibling(box, direction == "down" ? 1 : -1)
+        };
+
+        if (next is null) return;
+
+        SelectOnly(next);
+        _ = _canvas?.CenterOnAsync(next);
+    }
+
+    private string? Sibling(NodeBox box, int delta)
+    {
+        var column = _layout.Nodes.Where(n => n.Layer == box.Layer).OrderBy(n => n.Order).ToList();
+        var index = column.FindIndex(n => n.Id == box.Id) + delta;
+        return index >= 0 && index < column.Count ? column[index].Id : null;
+    }
+
+    private void DeleteSelection()
+    {
+        if (_selected.Count == 0) return;
+        Apply(new DeleteNodesCommand(_graph, _selected.ToList(), heal: true));
+        _selected.Clear();
+        _focused = null;
+        Recompute(true);
+    }
+
+    private void Undo()
+    {
+        if (_history.Undo(_graph) is null) return;
+        Recompute(true);
+        if (_view == View.Yaml) RegenerateYaml();
+    }
+
+    private void Redo()
+    {
+        if (_history.Redo(_graph) is null) return;
+        Recompute(true);
+        if (_view == View.Yaml) RegenerateYaml();
+    }
+
+    // ---------------- YAML ----------------
+
+    private void SetView(View view)
+    {
+        _view = view;
+        if (view == View.Yaml) RegenerateYaml();
+        Recompute(false);
+    }
+
+    private void RegenerateYaml()
+    {
+        _yamlError = null;
+        try
+        {
+            _yaml = PipelineYaml.ToYaml(_graph);
+        }
+        catch (Exception ex)
+        {
+            _yamlError = ex.Message;
+        }
+    }
+
+    private void ApplyYaml()
+    {
+        // The currently-open graph is passed in so pinned positions and the schema cache survive the edit —
+        // YAML describes neither, by design.
+        var parsed = PipelineYaml.FromYaml(_yaml, _graph);
+        if (!parsed.Success)
+        {
+            _yamlError = parsed.Error;
+            return;
+        }
+
+        _yamlError = null;
+        var before = _graph;
+        _graph = parsed.Graph!;
+
+        // One undoable step, so Ctrl+Z after a YAML edit behaves like any other change.
+        _history.Execute(_graph, new ReplaceGraphCommand(before, _graph), null);
+
+        _selected.Clear();
+        Recompute(true);
+        _toastService.ShowSuccess("Applied.");
+    }
+
+    /// <summary>Wholesale graph replacement, for the YAML tab's Apply.</summary>
+    private sealed class ReplaceGraphCommand(PipelineGraph before, PipelineGraph after) : IGraphCommand
+    {
+        public string Label => "Edit YAML";
+
+        public void Apply(PipelineGraph graph) => Copy(after, graph);
+        public void Revert(PipelineGraph graph) => Copy(before, graph);
+
+        // The page holds one graph instance, so both directions copy INTO it rather than swapping the
+        // reference — otherwise the page and the history would diverge after one undo.
+        private static void Copy(PipelineGraph from, PipelineGraph into)
+        {
+            into.Nodes.Clear();
+            into.Nodes.AddRange(from.Nodes);
+            into.Edges.Clear();
+            into.Edges.AddRange(from.Edges);
+            into.Settings = from.Settings;
+            into.Layout = from.Layout;
+            into.Schemas = from.Schemas;
+            into.SchemaVersion = from.SchemaVersion;
+        }
+    }
+
+    // ---------------- server ----------------
+
+    private async Task SaveAsync()
+    {
+        if (_pipeline is null) return;
+        _saving = true;
+
+        try
+        {
+            _pipeline.GraphJson = _graph.Serialize();
+
+            var response = await _httpClient.PutAsJsonAsync($"api/pipelines/{Id}", new PipelineSaveRequest
+            {
+                Name = _pipeline.Name,
+                Description = _pipeline.Description,
+                GraphJson = _pipeline.GraphJson,
+                IsEnabled = _pipeline.IsEnabled,
+                ApiEnabled = _pipeline.ApiEnabled,
+                CronExpression = _pipeline.CronExpression,
+                TimeZone = _pipeline.TimeZone
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _toastService.ShowError(await response.Content.ReadAsStringAsync());
+                return;
+            }
+
+            var saved = await response.Content.ReadFromJsonAsync<PipelineDetailDto>();
+            if (saved is not null) _pipeline = saved;
+
+            _history.MarkSaved();
+            Recompute(false);
+
+            if (_errorCount > 0)
+                _toastService.ShowWarning($"Saved with {_errorCount} problem(s) — it can't run yet.");
+            else
+                _toastService.ShowSuccess("Saved.");
+
+            // The viewport is per-pipeline and cosmetic, so it lives in localStorage rather than the graph.
+            if (_canvas is not null)
+            {
+                var viewport = await _canvas.GetViewportAsync();
+                if (viewport is not null)
+                    await _js.InvokeVoidAsync("pipelineStorage.set", $"pl-viewport-{Id}", viewport);
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not save: {ex.Message}");
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task RunAsync()
+    {
+        if (_history.IsDirty)
+        {
+            _toastService.ShowWarning("Save first — a run uses the saved pipeline.");
+            return;
+        }
+
+        _running = true;
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync($"api/pipelines/{Id}/runs",
+                new PipelineRunRequest());
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _toastService.ShowError(await response.Content.ReadAsStringAsync());
+                return;
+            }
+
+            // Straight to the run that was just queued, not the history list. The run view polls and
+            // colours the canvas as each step finishes, so landing on the specific run is the difference
+            // between watching it happen and being handed a list to go and find it in.
+            var queued = await response.Content.ReadFromJsonAsync<QueuedRunResponse>();
+
+            _toastService.ShowSuccess("Queued.");
+
+            _navigationManager.NavigateTo(string.IsNullOrWhiteSpace(queued?.RunId)
+                ? $"data/pipelines/{Id}/runs?c={_companyId}"
+                : $"data/pipelines/{Id}/runs/{queued!.RunId}?c={_companyId}");
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not start a run: {ex.Message}");
+        }
+        finally
+        {
+            _running = false;
+        }
+    }
+
+    /// <summary>
+    /// Runs the real engine over the graph on screen, sampling sources and skipping destinations. This is
+    /// what makes the mapping grid usable — and it refreshes every step's cached columns while it is at it.
+    /// </summary>
+    private async Task PreviewAsync(string? nodeId)
+    {
+        if (nodeId is null) return;
+        _previewing = true;
+
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync("api/pipelines/preview", new
+            {
+                graphJson = _graph.Serialize(),
+                nodeId,
+                rows = 50
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _toastService.ShowError(await response.Content.ReadAsStringAsync());
+                return;
+            }
+
+            _preview = await response.Content.ReadFromJsonAsync<PipelinePreviewResult>();
+
+            if (_preview?.Schemas is { Count: > 0 })
+            {
+                _graph.Schemas ??= new();
+                foreach (var (id, columns) in _preview.Schemas) _graph.Schemas[id] = columns;
+                Recompute(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Preview failed: {ex.Message}");
+        }
+        finally
+        {
+            _previewing = false;
+        }
+    }
+
+    private string TitleOf(string nodeId)
+    {
+        var node = _graph.Node(nodeId);
+        if (node is null) return nodeId;
+        return string.IsNullOrWhiteSpace(node.Label)
+            ? PipelineNodeCatalog.Get(node.Type)?.Label ?? node.Id
+            : node.Label!;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            // Restore the app nav FIRST. If a later call throws, the worst outcome is a leaked resize
+            // handle; getting this order wrong would leave the whole application without navigation.
+            await _js.InvokeVoidAsync("pipelineChrome.focus", false);
+
+            await _js.InvokeVoidAsync("pipelineResize.dispose", "pl-resize-left");
+            await _js.InvokeVoidAsync("pipelineResize.dispose", "pl-resize-right");
+        }
+        catch (JSDisconnectedException) { }
+        catch (InvalidOperationException) { }
+    }
+}
