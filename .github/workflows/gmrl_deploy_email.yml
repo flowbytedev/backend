@@ -57,5 +57,6 @@ jobs:
     - name: Copy Files
       shell: cmd
       run: |
-        
+        net stop backend_email
         xcopy /s /y  .\Application.Email\.next\* ${{ secrets.EMAIL_IIS_PATH }}\
+        net start backend_email
