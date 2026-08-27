@@ -1,4 +1,4 @@
-@page "/data/pipelines/{Id}/runs"
+﻿@page "/data/pipelines/{Id}/runs"
 @page "/data/pipelines/{Id}/runs/{RunId}"
 @using System.Net.Http.Json
 @using Application.Client.Pipelines
@@ -86,7 +86,13 @@ else if (RunId is null)
                                                 </div>
                                             }
                                         </td>
-                                        <td>@item.TriggerType</td>
+                                        <td>
+                                            @item.TriggerType
+                                            @if (item.IsPartial)
+                                            {
+                                                <span class="pl-pill is-scoped" style="margin-left:4px;">partial</span>
+                                            }
+                                        </td>
                                         <td style="font-family:var(--font-mono);font-size:12px;">
                                             @item.StepsCompleted/@item.StepsTotal
                                             @if (item.StepsFailed > 0)
@@ -121,6 +127,17 @@ else if (_run is not null)
             </div>
 
             <span class="badge @RunBadge(_run.Status)">@_run.Status</span>
+
+            @* Without this a partial run is indistinguishable from a full one that lost most of its steps:
+               both show a step count far below the pipeline size. *@
+            @if (_run.IsPartial)
+            {
+                <span class="pl-pill is-scoped sc-tip"
+                      data-tip="@($"Only these steps ran: {string.Join(", ", _run.SelectedNodeIds)}. Anything else in the pipeline was not part of this run.")">
+                    partial · @_run.SelectedNodeIds.Count selected@(_hiddenCount > 0 ? $" · {_hiddenCount} step(s) hidden" : "")
+                </span>
+            }
+
             @if (_polling)
             {
                 <span class="pl-spin" aria-hidden="true"></span>
@@ -342,6 +359,13 @@ else if (_run is not null)
     private List<PipelineRunDto> _runs = new();
     private PipelineRunDto? _run;
     private List<PipelineRunStepDto> _steps = new();
+
+    /// <summary>
+    /// Nodes hidden from the canvas because this partial run did not include them. Surfaced rather than
+    /// silent: hiding a branch can make a fan-out look like a straight line, and a reader deserves to know
+    /// the picture is deliberately incomplete.
+    /// </summary>
+    private int _hiddenCount;
     private PipelineRunStepDto? _step;
 
     private PipelineGraph _graph = new();
@@ -402,6 +426,44 @@ else if (_run is not null)
         if (_live) StartPolling();
     }
 
+    /// <summary>
+    /// Reduces <see cref="_graph"/> to the steps this run actually executed, and returns how many nodes were
+    /// removed. A no-op for a full run.
+    /// <para>
+    /// The scope is recomputed with the engine's own <c>ClosureFor</c> rather than read off the step rows,
+    /// and the difference matters while a run is still going: step rows appear one at a time, so pruning to
+    /// them would make the canvas grow as the run progressed. The closure is the same answer the engine
+    /// reached, available in full the moment the page loads — including the ancestors the operator did not
+    /// pick but which had to run.
+    /// </para>
+    /// <para>
+    /// Falls back to the node ids that have step rows if the graph will not compile, so a run of a pipeline
+    /// since edited into an invalid state still shows something rather than everything.
+    /// </para>
+    /// </summary>
+    private int PruneToRunScope()
+    {
+        if (_run is null || !_run.IsPartial || _graph.Nodes.Count == 0) return 0;
+
+        var compiled = PipelineCompiler.Compile(_graph);
+
+        var scope = compiled.Graph is not null
+            ? new HashSet<string>(compiled.Graph.ClosureFor(_run.SelectedNodeIds), StringComparer.Ordinal)
+            : new HashSet<string>(_steps.Select(x => x.NodeId), StringComparer.Ordinal);
+
+        // Nothing resolved — better to show the whole graph than an empty canvas.
+        if (scope.Count == 0) return 0;
+
+        var before = _graph.Nodes.Count;
+
+        _graph.Nodes.RemoveAll(n => !scope.Contains(n.Id));
+
+        // An edge with either end removed would be drawn to nowhere.
+        _graph.Edges.RemoveAll(e => !scope.Contains(e.From) || !scope.Contains(e.To));
+
+        return before - _graph.Nodes.Count;
+    }
+
     private async Task LoadRunAsync()
     {
         _loading = true;
@@ -422,6 +484,11 @@ else if (_run is not null)
                 .GetFromJsonAsync<List<PipelineRunStepDto>>($"api/pipelines/runs/{RunId}/steps") ?? new();
 
             _runState = NodeRunState.FromSteps(_steps);
+
+            // A partial run shows only the steps it actually ran. Drawing the whole pipeline would fill the
+            // canvas with nodes that have no state, and there is no way to tell those apart from steps that
+            // were meant to run and never got there.
+            _hiddenCount = PruneToRunScope();
 
             // Pins are ignored in the run view: it is always auto-laid-out, so the shape is canonical.
             _graph.Layout = null;

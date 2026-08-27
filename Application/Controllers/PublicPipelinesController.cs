@@ -1,4 +1,4 @@
-using Application.Shared.Models.Data.Pipelines;
+﻿using Application.Shared.Models.Data.Pipelines;
 using Application.Shared.Services.Data.Pipelines;
 using Hangfire;
 using Microsoft.AspNetCore.Mvc;
@@ -69,7 +69,7 @@ public class PublicPipelinesController(
 
         var created = await pipelines.CreateQueuedRunAsync(
             companyId, pipeline.Id, PipelineTriggerType.Api, userId, request?.Params,
-            HttpContext.RequestAborted);
+            ct: HttpContext.RequestAborted);
 
         if (!created.Success) return BadRequest(new { error = created.Error });
 

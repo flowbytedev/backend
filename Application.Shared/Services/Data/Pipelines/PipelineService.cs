@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Application.Shared.Data;
 using Application.Shared.Models.Data.Pipelines;
 using Microsoft.EntityFrameworkCore;
@@ -35,9 +35,15 @@ public interface IPipelineService
     /// Inserts a Queued run and returns its id. Created before anything is enqueued so it appears in the UI
     /// immediately and so the worker has a row to claim rather than one to invent.
     /// </summary>
+    /// <param name="nodeIds">
+    /// For a partial run, the steps the operator selected. Null or empty runs everything. Only a manual run
+    /// may narrow its scope — a cron or API trigger that quietly ran a subset would be a pipeline that
+    /// looks scheduled and is not.
+    /// </param>
     Task<PipelineRunCreation> CreateQueuedRunAsync(
         string companyId, string pipelineId, string triggerType, string? triggeredBy,
-        Dictionary<string, string>? parameters, CancellationToken ct = default);
+        Dictionary<string, string>? parameters, IReadOnlyList<string>? nodeIds = null,
+        CancellationToken ct = default);
 
     Task SetRunJobIdAsync(string runId, string jobId, CancellationToken ct = default);
 
@@ -265,7 +271,8 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
 
     public async Task<PipelineRunCreation> CreateQueuedRunAsync(
         string companyId, string pipelineId, string triggerType, string? triggeredBy,
-        Dictionary<string, string>? parameters, CancellationToken ct = default)
+        Dictionary<string, string>? parameters, IReadOnlyList<string>? nodeIds = null,
+        CancellationToken ct = default)
     {
         var pipeline = await db.Pipeline.AsNoTracking()
             .FirstOrDefaultAsync(p => p.CompanyId == companyId && p.Id == pipelineId, ct);
@@ -287,6 +294,30 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
                     : $"This pipeline cannot run: {first.Message}");
         }
 
+        // A narrowed scope is a manual-only affordance. Allowing it on a cron would produce a pipeline that
+        // appears scheduled while silently never running some of its steps.
+        var selected = nodeIds?.Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal).ToList();
+
+        if (selected is { Count: > 0 })
+        {
+            if (scheduled)
+            {
+                return PipelineRunCreation.Failed(
+                    "Only a manual run can run a subset of the steps.");
+            }
+
+            var unknown = compiled.Graph!.UnknownIds(selected);
+            if (unknown.Count > 0)
+            {
+                // Refused, not narrowed — see PipelineEngine's matching check. A stale selection must not
+                // quietly run something other than what was asked for.
+                return PipelineRunCreation.Failed(
+                    $"These steps are no longer in the pipeline: {string.Join(", ", unknown)}. "
+                    + "Reload the editor and select again.");
+            }
+        }
+
         var run = new PipelineRun
         {
             Id = Guid.NewGuid().ToString(),
@@ -299,6 +330,9 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
             // Snapshotted, so editing the pipeline afterwards cannot change what this run appears to have done.
             GraphJson = pipeline.GraphJson,
             ParamsJson = parameters is { Count: > 0 } ? JsonSerializer.Serialize(parameters, Json) : null,
+            SelectedNodesJson = selected is { Count: > 0 }
+                ? JsonSerializer.Serialize(selected, Json)
+                : null,
             StartedAt = DateTime.UtcNow
         };
 
@@ -339,8 +373,10 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
         var rows = await query
             .OrderByDescending(r => r.StartedAt)
             .Take(Math.Clamp(take, 1, 500))
-            // Log and the two JSON blobs are excluded: a history page of 50 runs does not need 50 logs.
-            .Select(r => new PipelineRunDto
+            // Log and the graph/params blobs are excluded: a history page of 50 runs does not need 50 logs.
+            // The selection column IS fetched — it is a short array, and without it a partial run is
+            // indistinguishable from a run that lost most of its steps.
+            .Select(r => new { Selected = r.SelectedNodesJson, Dto = new PipelineRunDto
             {
                 Id = r.Id,
                 PipelineId = r.PipelineId,
@@ -361,10 +397,14 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
                 JobId = r.JobId,
                 StartedAt = r.StartedAt,
                 FinishedAt = r.FinishedAt
-            })
+            } })
             .ToListAsync(ct);
 
-        return rows;
+        // Parsed out here rather than in the projection: that Select is translated to SQL and cannot call a
+        // deserializer.
+        foreach (var row in rows) row.Dto.SelectedNodeIds = ParseNodeIds(row.Selected);
+
+        return rows.Select(r => r.Dto).ToList();
     }
 
     public async Task<PipelineRunDto?> GetRunAsync(string companyId, string runId, CancellationToken ct = default)
@@ -395,8 +435,29 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
             JobId = run.JobId,
             Log = run.Log,
             StartedAt = run.StartedAt,
-            FinishedAt = run.FinishedAt
+            FinishedAt = run.FinishedAt,
+            SelectedNodeIds = ParseNodeIds(run.SelectedNodesJson)
         };
+    }
+
+    /// <summary>
+    /// The stored selection for a partial run. Never throws: an unreadable value means "we cannot say this
+    /// was partial", which shows the run as an ordinary one rather than failing the whole history page.
+    /// </summary>
+    private static List<string> ParseNodeIds(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json)
+                       ?.Where(id => !string.IsNullOrWhiteSpace(id)).ToList()
+                   ?? [];
+        }
+        catch
+        {
+            return [];
+        }
     }
 
     public async Task<List<PipelineRunStepDto>> GetStepsAsync(

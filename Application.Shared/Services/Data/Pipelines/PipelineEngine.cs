@@ -116,9 +116,43 @@ public partial class PipelineEngine(
         }
 
         var plan = compiled.Graph!;
-        log.WriteLine($"Pipeline '{run.PipelineName}' — {plan.Order.Count} steps.");
 
-        run.StepsTotal = plan.Order.Count;
+        // A partial run: only the selected nodes and the ancestors they cannot run without. Resolved here,
+        // before StepsTotal is written, so progress counts the steps that will actually run rather than
+        // every node in the graph — otherwise a 5-step partial run of a 25-node pipeline reports 5/25 and
+        // reads like it stalled.
+        var selection = ParseSelection(run.SelectedNodesJson);
+
+        var unknown = plan.UnknownIds(selection);
+        if (unknown.Count > 0)
+        {
+            // Refused rather than narrowed. A selection naming a node that no longer exists means the graph
+            // changed under the operator, and running the remainder would execute something other than what
+            // was asked for.
+            return await FinalizeAsync(run, log, stopwatch, PipelineRunStatus.Failed,
+                $"This run selected step(s) that are no longer in the pipeline: {string.Join(", ", unknown)}.",
+                PipelineErrorType.Invalid, unknown[0], ct);
+        }
+
+        var scope = plan.ClosureFor(selection);
+
+        if (selection is { Count: > 0 })
+        {
+            var added = scope.Count - selection.Count;
+            log.WriteLine(
+                $"Pipeline '{run.PipelineName}' — partial run: {selection.Count} step(s) selected, "
+                + $"{scope.Count} will run"
+                + (added > 0 ? $" ({added} pulled in as required input)." : "."));
+
+            foreach (var id in scope.Where(id => !selection.Contains(id)))
+                log.WriteLine($"      + {plan.Node(id).Label ?? id} (required by the selection)");
+        }
+        else
+        {
+            log.WriteLine($"Pipeline '{run.PipelineName}' — {scope.Count} steps.");
+        }
+
+        run.StepsTotal = scope.Count;
         await db.SaveChangesAsync(ct);
 
         // The scratch dataset. A real (hidden) Dataset row, so every existing DuckDB primitive resolves its
@@ -151,6 +185,7 @@ public partial class PipelineEngine(
                 Params = ParseParams(run.ParamsJson),
                 RowLimit = null,
                 SkipDestinations = false,
+                Scope = scope,
                 Log = log,
                 Run = run
             };
@@ -293,7 +328,12 @@ public partial class PipelineEngine(
         var outcome = new ExecutionOutcome();
         var stepIndex = 0;
 
-        foreach (var nodeId in ctx.Plan.Order)
+        // The nodes this execution will walk. For a full run that is every node; for a partial run it is
+        // the selection's closure, already in topological order.
+        var scope = ctx.Scope ?? ctx.Plan.Order;
+        var inScope = new HashSet<string>(scope, StringComparer.Ordinal);
+
+        foreach (var nodeId in scope)
         {
             ct.ThrowIfCancellationRequested();
 
@@ -308,7 +348,7 @@ public partial class PipelineEngine(
 
             if (ctx.SkipDestinations && spec.IsTerminal)
             {
-                ctx.Log.WriteLine($"[{++stepIndex}/{ctx.Plan.Order.Count}] {label} — skipped (preview)");
+                ctx.Log.WriteLine($"[{++stepIndex}/{scope.Count}] {label} — skipped (preview)");
                 continue;
             }
 
@@ -320,7 +360,7 @@ public partial class PipelineEngine(
 
             if (blockedBy is not null)
             {
-                ctx.Log.WriteLine($"[{++stepIndex}/{ctx.Plan.Order.Count}] {label} — skipped ('{blockedBy}' did not produce data)");
+                ctx.Log.WriteLine($"[{++stepIndex}/{scope.Count}] {label} — skipped ('{blockedBy}' did not produce data)");
                 outcome.Results[nodeId] = NodeOutcome.Skipped();
                 await RecordStepAsync(ctx, nodeId, node, stepIndex, PipelineStepStatus.Skipped, null, null, 0, ct);
                 outcome.Skipped++;
@@ -328,7 +368,7 @@ public partial class PipelineEngine(
             }
 
             stepIndex++;
-            ctx.Log.WriteLine($"[{stepIndex}/{ctx.Plan.Order.Count}] {label}");
+            ctx.Log.WriteLine($"[{stepIndex}/{scope.Count}] {label}");
 
             // Marked running BEFORE the work, so the run view can show this step in progress and the live
             // row counter has a row to write into. Without it a long fetch is indistinguishable from a
@@ -390,8 +430,10 @@ public partial class PipelineEngine(
             if (ctx.StopAfterNodeId == nodeId) break;
         }
 
-        // Anything the break skipped still deserves a row, so the waterfall does not simply stop.
-        foreach (var nodeId in ctx.Plan.Order.Where(id => !outcome.Results.ContainsKey(id)))
+        // Anything the break skipped still deserves a row, so the waterfall does not simply stop. Nodes
+        // outside the scope get no row at all — they were never part of this run, and a Skipped row for
+        // each would drown the three steps the operator actually asked about.
+        foreach (var nodeId in ctx.Plan.Order.Where(id => inScope.Contains(id) && !outcome.Results.ContainsKey(id)))
         {
             if (ctx.SkipDestinations && ctx.Plan.Spec(nodeId).IsTerminal) continue;
             if (ctx.StopAfterNodeId is not null) continue;
@@ -1075,6 +1117,20 @@ public partial class PipelineEngine(
     /// column, and writing null would erase a real mark — turning the next run into a full reload of a table
     /// that had simply gone quiet.
     /// </para>
+    /// <para>
+    /// <b>Nor is a watermark committed when this run did not execute everything downstream of that source.</b>
+    /// A partial run is, from the point of view of a branch it left out, indistinguishable from a failed one:
+    /// advance the mark and the next run starts above rows that branch never loaded, silently and
+    /// permanently. So a source's mark advances only once every descendant of it has actually consumed the
+    /// window — which for a full run is always true, and for a partial run is exactly the condition worth
+    /// checking.
+    /// </para>
+    /// <para>
+    /// Holding the mark is not free either: re-reading a window means an <c>append</c> destination that DID
+    /// run can load those rows twice. That is the better failure — a duplicate is visible in the data,
+    /// whereas a gap is visible nowhere — and the log says which sources were held so the choice is not a
+    /// surprise.
+    /// </para>
     /// </summary>
     private async Task CommitWatermarksAsync(ExecutionContext ctx, PipelineRun run)
     {
@@ -1091,6 +1147,23 @@ public partial class PipelineEngine(
                 ctx.Log.WriteLine(
                     $"  {nodeId}: watermark left at {window.Low ?? "(unset)"} — the source had nothing to read.");
                 continue;
+            }
+
+            // The scope check. Only meaningful on a partial run; on a full run every descendant is in scope
+            // by definition, so this never holds a mark that used to advance.
+            if (ctx.Scope is not null)
+            {
+                var inScope = new HashSet<string>(ctx.Scope, StringComparer.Ordinal);
+                var unconsumed = ctx.Plan.Descendants(nodeId).Where(d => !inScope.Contains(d)).ToList();
+
+                if (unconsumed.Count > 0)
+                {
+                    ctx.Log.WriteLine(
+                        $"  {nodeId}: watermark HELD at {window.Low ?? "(unset)"} — this run did not include "
+                        + $"{unconsumed.Count} step(s) downstream of it, so advancing would skip rows they "
+                        + "have never read. The next full run will re-read this window.");
+                    continue;
+                }
             }
 
             var row = existing.FirstOrDefault(x => x.NodeId == nodeId);
@@ -1172,6 +1245,30 @@ public partial class PipelineEngine(
         _ => ImportMode.Append
     };
 
+    /// <summary>
+    /// The stored selection for a partial run. A malformed or empty array is treated as "no selection", so
+    /// the run does the whole pipeline rather than nothing — an empty scope would succeed having done
+    /// nothing at all, which is the one outcome nobody wants from pressing Run.
+    /// </summary>
+    private static List<string>? ParseSelection(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+
+        try
+        {
+            var ids = JsonSerializer.Deserialize<List<string>>(json)
+                ?.Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            return ids is { Count: > 0 } ? ids : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string? Str(JsonObject? config, string key)
     {
         var value = config?[key];
@@ -1220,6 +1317,17 @@ public partial class PipelineEngine(
         public required Dictionary<string, string> Params { get; init; }
         public required int? RowLimit { get; init; }
         public required bool SkipDestinations { get; init; }
+
+        /// <summary>
+        /// The nodes to execute, in topological order. Null means every node — a full run.
+        /// <para>
+        /// Always a closed set: every node in it has all of its inputs in it too, which is what lets the
+        /// existing "did my predecessor produce data?" check keep working untouched. An open set would make
+        /// every partial run report its first step as blocked.
+        /// </para>
+        /// </summary>
+        public IReadOnlyList<string>? Scope { get; init; }
+
         public string? StopAfterNodeId { get; init; }
         public string? UploadedFilePath { get; init; }
         public required RunLog Log { get; init; }

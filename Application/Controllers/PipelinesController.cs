@@ -184,7 +184,8 @@ public class PipelinesController(
         }
 
         var created = await pipelines.CreateQueuedRunAsync(
-            companyId, id, PipelineTriggerType.Manual, userId, request?.Params, HttpContext.RequestAborted);
+            companyId, id, PipelineTriggerType.Manual, userId, request?.Params, request?.NodeIds,
+            HttpContext.RequestAborted);
 
         if (!created.Success) return BadRequest(created.Error);
 

@@ -1,4 +1,4 @@
-@page "/data/pipelines/{Id}"
+﻿@page "/data/pipelines/{Id}"
 @using System.Net.Http.Json
 @using Application.Client.Pipelines
 @using Application.Shared.Authorization
@@ -54,6 +54,21 @@ else
                 <span class="pl-pill is-valid">ready</span>
             }
 
+            @* A selection changes what Run does, so it says so where the state pills already are. The
+               destination warning is a visible pill and not a tooltip on purpose: "this will email
+               somebody" is not something to hide behind a hover. *@
+            @if (_selected.Count > 0 && _runScope.Count > 0)
+            {
+                <span class="pl-pill is-scoped">
+                    @_selected.Count selected · @_runScope.Count will run
+                </span>
+
+                @foreach (var warning in _scopeWrites)
+                {
+                    <span class="pl-pill is-invalid">⚠ @warning</span>
+                }
+            }
+
             <span class="pl-topbar-spacer"></span>
 
             <button class="btn btn-ghost btn-sm sc-tip" data-tip="@UndoTip" disabled="@(!_history.CanUndo)"
@@ -75,8 +90,18 @@ else
                 @(_previewing ? "Previewing…" : "Preview step")
             </button>
             <a class="btn btn-ghost btn-sm" href="@($"data/pipelines/{Id}/runs?c={_companyId}")">History</a>
+
+            @if (_selected.Count > 0 && _runScope.Count > 0)
+            {
+                <button class="btn btn-secondary btn-sm sc-tip" data-tip="@RunSelectedTip"
+                        disabled="@(_errorCount > 0 || _running)"
+                        @onclick="() => RunAsync(selectedOnly: true)">
+                    @(_running ? "Starting…" : $"Run {_runScope.Count} step{(_runScope.Count == 1 ? "" : "s")}")
+                </button>
+            }
+
             <button class="btn btn-secondary btn-sm" disabled="@(_errorCount > 0 || _running)"
-                    @onclick="RunAsync">@(_running ? "Starting…" : "Run")</button>
+                    @onclick="() => RunAsync(selectedOnly: false)">@(_running ? "Starting…" : "Run all")</button>
             <button class="btn btn-primary btn-sm" disabled="@_saving" @onclick="SaveAsync">
                 @(_saving ? "Saving…" : "Save")
             </button>
@@ -313,6 +338,19 @@ else
 
     private List<PipelineIssueDto> _issues = new();
     private int _errorCount;
+
+    /// <summary>
+    /// The steps a "Run selected" would actually execute: the selection plus every ancestor it needs.
+    /// <para>
+    /// Computed with the very same <c>ClosureFor</c> the engine uses, off the same compiled graph the linter
+    /// already builds — so the number on the button cannot drift from the number that runs. The server
+    /// recomputes it regardless; this is for the label, not for authority.
+    /// </para>
+    /// </summary>
+    private IReadOnlyList<string> _runScope = [];
+
+    /// <summary>Human descriptions of every destination inside <see cref="_runScope"/>.</summary>
+    private List<string> _scopeWrites = new();
     private bool _requiresManualRun;
 
     private List<PipelineColumn> _upstreamColumns = new();
@@ -534,6 +572,23 @@ else
 
         _errorCount = _issues.Count(i => i.Severity == PipelineIssueSeverity.Error);
         _requiresManualRun = compiled.Graph?.RequiresManualRun ?? false;
+
+        // Empty selection means "run everything", and the button for that already exists — so an empty
+        // scope here, rather than the whole graph, is what keeps the selected-run button hidden.
+        _runScope = _selected.Count > 0 && compiled.Graph is not null
+            ? compiled.Graph.ClosureFor(_selected)
+            : [];
+
+        _scopeWrites = _runScope
+            .Select(id => compiled.Graph!.Node(id))
+            .Where(n => PipelineNodeTypes.IsDestination(n.Type))
+            .Select(n => n.Type switch
+            {
+                PipelineNodeTypes.DestinationEmail => $"sends email: {n.Label ?? n.Id}",
+                PipelineNodeTypes.DestinationApi => $"sends to an API: {n.Label ?? n.Id}",
+                _ => $"writes: {n.Label ?? n.Id}"
+            })
+            .ToList();
 
         _selectedNode = _selected.Count == 1
             ? _graph.Nodes.FirstOrDefault(n => n.Id == _selected.First())
@@ -851,7 +906,7 @@ else
             case "save": await SaveAsync(); break;
             case "undo": Undo(); break;
             case "redo": Redo(); break;
-            case "run": await RunAsync(); break;
+            case "run": await RunAsync(selectedOnly: false); break;
             case "delete": DeleteSelection(); break;
             case "selectAll":
                 _selected.Clear();
@@ -1065,7 +1120,31 @@ else
         }
     }
 
-    private async Task RunAsync()
+    /// <summary>
+    /// Explains the gap between "selected" and "will run", because that gap is not self-evident and a
+    /// number on a button with no explanation invites the wrong conclusion.
+    /// </summary>
+    private string RunSelectedTip
+    {
+        get
+        {
+            var added = _runScope.Count - _selected.Count(id => _runScope.Contains(id));
+
+            var tip = added > 0
+                ? $"Runs the {_selected.Count} selected step(s) plus {added} more that produce their input."
+                : $"Runs the {_selected.Count} selected step(s).";
+
+            return _scopeWrites.Count > 0
+                ? tip + " This WILL " + string.Join("; ", _scopeWrites) + "."
+                : tip + " No destination is selected, so nothing is written or sent.";
+        }
+    }
+
+    /// <param name="selectedOnly">
+    /// True runs only the selection's closure. False runs the whole pipeline, which is what the plain Run
+    /// button has always done — a selection left on the canvas must not silently narrow it.
+    /// </param>
+    private async Task RunAsync(bool selectedOnly = false)
     {
         if (_history.IsDirty)
         {
@@ -1073,11 +1152,13 @@ else
             return;
         }
 
+        var nodeIds = selectedOnly && _runScope.Count > 0 ? _runScope.ToList() : null;
+
         _running = true;
         try
         {
             var response = await _httpClient.PostAsJsonAsync($"api/pipelines/{Id}/runs",
-                new PipelineRunRequest());
+                new PipelineRunRequest { NodeIds = nodeIds });
 
             if (!response.IsSuccessStatusCode)
             {
@@ -1090,7 +1171,9 @@ else
             // between watching it happen and being handed a list to go and find it in.
             var queued = await response.Content.ReadFromJsonAsync<QueuedRunResponse>();
 
-            _toastService.ShowSuccess("Queued.");
+            _toastService.ShowSuccess(nodeIds is null
+                ? "Queued."
+                : $"Queued {nodeIds.Count} step(s).");
 
             _navigationManager.NavigateTo(string.IsNullOrWhiteSpace(queued?.RunId)
                 ? $"data/pipelines/{Id}/runs?c={_companyId}"

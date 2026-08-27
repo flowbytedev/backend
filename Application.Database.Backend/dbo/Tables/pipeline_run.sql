@@ -1,4 +1,4 @@
--- NOTE: deliberately NO foreign key to [pipeline]. A run is the audit record of something that happened
+﻿-- NOTE: deliberately NO foreign key to [pipeline]. A run is the audit record of something that happened
 -- to real data, so it must outlive the pipeline; and because every relationship in this database is
 -- DeleteBehavior.Restrict, an FK would instead make any pipeline with history undeletable. pipeline_name
 -- and graph_json are denormalized onto the run so it stays readable and reproducible on its own.
@@ -12,6 +12,9 @@ CREATE TABLE [dbo].[pipeline_run] (
     [triggered_by]        NVARCHAR (450) NULL,
     [graph_json]          NVARCHAR (MAX) NULL,
     [params_json]         NVARCHAR (MAX) NULL,
+    -- Partial run: the node ids the operator selected, as a JSON array. NULL means the whole pipeline ran.
+    -- Nullable and added after the fact, so an existing run row reads correctly as a full run.
+    [selected_nodes_json] NVARCHAR (MAX) NULL,
     [scratch_dataset_id]  NVARCHAR (450) NULL,
     [error]               NVARCHAR (MAX) NULL,
     [error_type]          NVARCHAR (64)  NULL,

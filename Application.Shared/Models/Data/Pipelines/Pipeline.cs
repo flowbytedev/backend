@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.ComponentModel.DataAnnotations;
 
 namespace Application.Shared.Models.Data.Pipelines;
@@ -129,6 +129,21 @@ public class PipelineRun
 
     /// <summary>Run parameters, available to config as <c>{{ params.* }}</c>.</summary>
     public string? ParamsJson { get; set; }
+
+    /// <summary>
+    /// For a partial run: the node ids the operator selected, as a JSON array. Null means the whole
+    /// pipeline ran.
+    /// <para>
+    /// Persisted rather than inferred, because a partial run and a badly broken full run look identical
+    /// from the step rows alone — both are mostly not-run nodes. Without this, history would present a
+    /// deliberate one-branch run as a pipeline that mostly failed to execute.
+    /// </para>
+    /// <para>
+    /// These are the ids <em>chosen</em>, not the ids that ran: the engine adds whatever ancestors they
+    /// need. Keeping the selection verbatim is what lets the run view explain the difference.
+    /// </para>
+    /// </summary>
+    public string? SelectedNodesJson { get; set; }
 
     /// <summary>
     /// The hidden scratch dataset this run used. Kept so the sweeper can clean up after a crash, and so a

@@ -1,4 +1,4 @@
-/* =====================================================================================================
+﻿/* =====================================================================================================
    Pipeline editor — the canvas, its chrome, the inspector, and the run views.
 
    Ported from relay's `.wf-*` rules. Class names are `.pl-*` and are NOT scoped to `.sc`, unlike the
@@ -42,6 +42,9 @@
 .pl-pill.is-dirty { color: var(--warning); border-color: var(--warning-border); background: var(--warning-subtle); }
 .pl-pill.is-valid { color: var(--success); border-color: var(--success-border); background: var(--success-subtle); }
 .pl-pill.is-invalid { color: var(--danger); border-color: var(--danger-border); background: var(--danger-subtle); }
+/* A partial-run scope. Informational, so it borrows the accent rather than a status colour — this is not a
+   problem to fix, it is a statement of what Run will do. */
+.pl-pill.is-scoped { color: var(--accent); border-color: var(--accent-border); background: var(--accent-subtle); }
 
 .pl-body {
     display: grid; min-height: 0;

@@ -761,6 +761,67 @@ public sealed record CompiledPipelineGraph(
         return seen;
     }
 
+    /// <summary>Nodes upstream of a node, transitively — the set it cannot run without.</summary>
+    public HashSet<string> Ancestors(string id)
+    {
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var queue = new Queue<string>();
+
+        foreach (var link in Predecessors.GetValueOrDefault(id) ?? [])
+            if (seen.Add(link.Other)) queue.Enqueue(link.Other);
+
+        while (queue.Count > 0)
+            foreach (var link in Predecessors.GetValueOrDefault(queue.Dequeue()) ?? [])
+                if (seen.Add(link.Other)) queue.Enqueue(link.Other);
+
+        return seen;
+    }
+
+    /// <summary>
+    /// The set a partial run must actually execute to satisfy <paramref name="selection"/>: the selected
+    /// nodes plus every ancestor they need, in this graph's topological order.
+    /// <para>
+    /// The ancestors are not a convenience — they are forced. A node's input is a DuckDB relation inside the
+    /// run's scratch database, and that database is created per run and deleted when the run succeeds, so
+    /// there is never a previous run's output for a mid-graph step to read. "Run this step" can only mean
+    /// "run this step and whatever produces its input".
+    /// </para>
+    /// <para>
+    /// A destination is terminal, so it has no successors and can never be pulled in as somebody else's
+    /// ancestor. That is what makes a partial run safe by construction: a write or an email happens only if
+    /// the node was selected deliberately.
+    /// </para>
+    /// <para>Returns every node when the selection is empty — no selection means the whole pipeline.</para>
+    /// </summary>
+    public IReadOnlyList<string> ClosureFor(IEnumerable<string>? selection)
+    {
+        if (selection is null) return Order;
+
+        var chosen = new HashSet<string>(selection.Where(id => !string.IsNullOrWhiteSpace(id)),
+            StringComparer.Ordinal);
+
+        if (chosen.Count == 0) return Order;
+
+        var needed = new HashSet<string>(chosen, StringComparer.Ordinal);
+        foreach (var id in chosen)
+        {
+            if (!Nodes.ContainsKey(id)) continue;
+            needed.UnionWith(Ancestors(id));
+        }
+
+        // Ordered by Order, never by the caller's iteration order: the walk depends on topological order,
+        // and a selection arrives from a UI as an arbitrary set.
+        return Order.Where(needed.Contains).ToList();
+    }
+
+    /// <summary>
+    /// Selected ids that are not nodes in this graph. A partial run is refused rather than silently run
+    /// against a smaller set — a stale selection would otherwise quietly execute something other than what
+    /// was asked for.
+    /// </summary>
+    public IReadOnlyList<string> UnknownIds(IEnumerable<string>? selection) =>
+        selection?.Where(id => !string.IsNullOrWhiteSpace(id) && !Nodes.ContainsKey(id)).ToList() ?? [];
+
     /// <summary>
     /// True when this graph cannot run unattended, because a file source expects a run-time upload.
     /// The service checks this before letting a cron or the API trigger be enabled.

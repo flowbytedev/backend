@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace Application.Shared.Models.Data.Pipelines;
 
@@ -113,6 +113,19 @@ public class PipelineRunDto
 
     /// <summary>Deep link into the Hangfire dashboard, when one is configured.</summary>
     public string? JobUrl { get; set; }
+
+    /// <summary>
+    /// For a partial run, the steps that were selected. Empty means the whole pipeline ran.
+    /// <para>
+    /// Carried on the history row too, not just the detail: a partial run has a smaller StepsTotal than the
+    /// pipeline has nodes, and without this a reader has no way to tell that apart from a run that lost
+    /// steps to a failure.
+    /// </para>
+    /// </summary>
+    public List<string> SelectedNodeIds { get; set; } = new();
+
+    /// <summary>True when this run deliberately ran a subset of the pipeline.</summary>
+    public bool IsPartial => SelectedNodeIds.Count > 0;
 }
 
 /// <summary>One step of a run, for the waterfall and the per-step inspector.</summary>
@@ -229,4 +242,19 @@ public class PipelineRunRequest
 
     /// <summary>Run the saved draft even if it has validation warnings.</summary>
     public bool UseDraft { get; set; } = true;
+
+    /// <summary>
+    /// Run only these steps. Empty or absent runs the whole pipeline.
+    /// <para>
+    /// The engine also runs whatever these steps need: a step's input is a relation in the run's scratch
+    /// database, which is created per run and deleted afterwards, so there is no earlier output for a
+    /// mid-graph step to read. Send the selection; the closure is computed server-side, because the client
+    /// must not be the thing that decides which steps a run may skip.
+    /// </para>
+    /// <para>
+    /// A destination in this list <b>writes or sends for real</b>. Destinations are terminal so one can
+    /// never be added automatically as another step's input — it runs only when named here.
+    /// </para>
+    /// </summary>
+    public List<string>? NodeIds { get; set; }
 }

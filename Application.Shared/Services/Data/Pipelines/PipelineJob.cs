@@ -1,4 +1,4 @@
-using Application.Shared.Models.Data.Pipelines;
+﻿using Application.Shared.Models.Data.Pipelines;
 using Hangfire.Server;
 
 namespace Application.Shared.Services.Data.Pipelines;
@@ -27,7 +27,7 @@ public class PipelineJob(IPipelineEngine engine, IPipelineService pipelines)
         if (string.IsNullOrWhiteSpace(runId))
         {
             var created = await pipelines.CreateQueuedRunAsync(
-                companyId, pipelineId, PipelineTriggerType.Cron, "schedule", null, ct);
+                companyId, pipelineId, PipelineTriggerType.Cron, "schedule", null, ct: ct);
 
             if (!created.Success)
             {
