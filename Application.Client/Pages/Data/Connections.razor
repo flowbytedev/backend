@@ -1,4 +1,4 @@
-@*
+﻿@*
     The credentials a pipeline needs but must never store itself.
 
     Both kinds on one page because they answer the same question — "what is this pipeline allowed to reach?"
@@ -254,12 +254,14 @@ else
 
                         <div class="field">
                             <label class="field-label">Authentication</label>
-                            <select class="select" @bind="_editApi.AuthType">
+                            <select class="select" @bind="_editApi.AuthType" @bind:after="OnAuthTypeChanged">
                                 <option value="@ApiAuthTypes.None">None</option>
                                 <option value="@ApiAuthTypes.Bearer">Bearer token</option>
                                 <option value="@ApiAuthTypes.Basic">Basic (username + password)</option>
                                 <option value="@ApiAuthTypes.Header">Secret in a header</option>
                                 <option value="@ApiAuthTypes.QueryParam">Secret in a query parameter</option>
+                                <option value="@ApiAuthTypes.FormField">Secret in a form field (OAuth2 client_secret)</option>
+                                <option value="@ApiAuthTypes.OAuth2">OAuth2 client credentials (fetches a token for you)</option>
                             </select>
                         </div>
 
@@ -289,6 +291,69 @@ else
                                 <div class="field-help">
                                     Weaker than a header — query strings are recorded in proxy and server logs.
                                     Use it only when the API offers nothing else.
+                                </div>
+                            </div>
+                        }
+
+                        @if (_editApi.AuthType == ApiAuthTypes.OAuth2)
+                        {
+                            <div class="field">
+                                <label class="field-label">Token URL</label>
+                                <input class="input" @bind="_editApi.TokenUrl" @bind:event="oninput"
+                                       placeholder="https://login.microsoftonline.com/<tenant>/oauth2/v2.0/token" />
+                                <div class="field-help">
+                                    Where the token is fetched from. Exempt from the base URL restriction
+                                    above — a token endpoint is nearly always on a different host from the
+                                    API it issues tokens for.
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label class="field-label">Token fields</label>
+                                <div class="pl-row-head pl-kv-row">
+                                    <span>Name</span><span>Value</span><span></span>
+                                </div>
+                                @foreach (var name in _tokenFields.Keys.ToList())
+                                {
+                                    var key = name;
+                                    <div class="pl-kv-row">
+                                        <input class="input input-mono" value="@key"
+                                               @onchange="e => RenameTokenField(key, e.Value?.ToString())" />
+                                        <input class="input input-mono" value="@_tokenFields[key]"
+                                               @onchange="e => SetTokenField(key, e.Value?.ToString())" />
+                                        <button class="btn btn-ghost btn-sm"
+                                                @onclick="() => RemoveTokenField(key)">✕</button>
+                                    </div>
+                                }
+                                <button class="btn btn-ghost btn-sm" @onclick="AddTokenField">Add</button>
+                                <div class="field-help">
+                                    Posted to the token endpoint, form-encoded — values are encoded for you.
+                                    The client_secret is NOT a row here: it goes in Secret below, under the
+                                    field name given above.
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label class="field-label">Secret field name</label>
+                                <input class="input" @bind="_editApi.FormFieldName" @bind:event="oninput"
+                                       placeholder="client_secret" />
+                                <div class="field-help">
+                                    Which field carries the secret. Empty means client_secret.
+                                </div>
+                            </div>
+                        }
+
+                        @if (_editApi.AuthType == ApiAuthTypes.FormField)
+                        {
+                            <div class="field">
+                                <label class="field-label">Form field name</label>
+                                <input class="input" @bind="_editApi.FormFieldName" @bind:event="oninput"
+                                       placeholder="client_secret" />
+                                <div class="field-help">
+                                    Appended to the step's form-encoded body, so the secret stays here rather
+                                    than in the pipeline's own body field — which is stored in the clear and
+                                    copied onto every run. The step must POST with content type
+                                    application/x-www-form-urlencoded.
                                 </div>
                             </div>
                         }
@@ -504,6 +569,7 @@ else
 
     private void StartCreateApi()
     {
+        _tokenFields.Clear();
         _editApi = new ApiCredentialModel { AuthType = ApiAuthTypes.None, IsEnabled = true };
         _editApiIsNew = true;
         _editApiOriginalName = null;
@@ -524,12 +590,16 @@ else
             Username = row.Username,
             HeaderName = row.HeaderName,
             QueryParamName = row.QueryParamName,
+            FormFieldName = row.FormFieldName,
+            TokenUrl = row.TokenUrl,
+            TokenFieldsJson = row.TokenFieldsJson,
             ExtraHeadersJson = row.ExtraHeadersJson,
             AllowWrite = row.AllowWrite,
             IsEnabled = row.IsEnabled,
             TimeoutSeconds = row.TimeoutSeconds,
             HasSecret = row.HasSecret
         };
+        LoadTokenFields(row.TokenFieldsJson);
         _editApiIsNew = false;
         _editApiOriginalName = row.Name;
         _secret = string.Empty;
@@ -553,6 +623,11 @@ else
             Secret = string.IsNullOrEmpty(_secret) ? null : _secret,
             _editApi.HeaderName,
             _editApi.QueryParamName,
+            _editApi.FormFieldName,
+            _editApi.TokenUrl,
+            // Serialized from the grid rather than bound directly: the grid is the editor, the JSON is the
+            // storage shape.
+            TokenFieldsJson = TokenFieldsAsJson(),
             _editApi.ExtraHeadersJson,
             _editApi.AllowWrite,
             _editApi.IsEnabled,
@@ -684,12 +759,120 @@ else
         }
     }
 
+    /// <summary>
+    /// The token-fields grid, as an ordered map. Kept separate from the model because the editor is a grid
+    /// and the stored shape is a JSON object; converting on load and save keeps both honest.
+    /// </summary>
+    private readonly Dictionary<string, string> _tokenFields = new(StringComparer.Ordinal);
+
+    private void LoadTokenFields(string? json)
+    {
+        _tokenFields.Clear();
+
+        if (string.IsNullOrWhiteSpace(json)) return;
+
+        try
+        {
+            if (System.Text.Json.Nodes.JsonNode.Parse(json!)
+                is System.Text.Json.Nodes.JsonObject obj)
+            {
+                foreach (var (name, value) in obj)
+                    if (!string.IsNullOrWhiteSpace(name))
+                        _tokenFields[name] = value?.ToString() ?? string.Empty;
+            }
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            // A hand-edited row with broken JSON shows an empty grid rather than failing the page. Saving
+            // then rewrites it, which is the recovery path.
+        }
+    }
+
+    private string? TokenFieldsAsJson()
+    {
+        if (_tokenFields.Count == 0) return null;
+
+        var obj = new System.Text.Json.Nodes.JsonObject();
+        foreach (var (name, value) in _tokenFields)
+            if (!string.IsNullOrWhiteSpace(name)) obj[name] = value;
+
+        return obj.Count == 0 ? null : obj.ToJsonString();
+    }
+
+    private void AddTokenField() => _tokenFields[string.Empty] = string.Empty;
+
+    private void SetTokenField(string name, string? value) => _tokenFields[name] = value ?? string.Empty;
+
+    private void RemoveTokenField(string name) => _tokenFields.Remove(name);
+
+    /// <summary>
+    /// Renames a row, preserving order by rebuilding — a plain remove-then-add would send the row to the
+    /// bottom of the grid mid-typing, which makes the field impossible to edit.
+    /// </summary>
+    private void RenameTokenField(string oldName, string? newName)
+    {
+        var name = (newName ?? string.Empty).Trim();
+        if (string.Equals(oldName, name, StringComparison.Ordinal)) return;
+
+        var entries = _tokenFields.Select(kv => (kv.Key, kv.Value)).ToList();
+        _tokenFields.Clear();
+
+        foreach (var (key, value) in entries)
+            _tokenFields[string.Equals(key, oldName, StringComparison.Ordinal) ? name : key] = value;
+    }
+
+    /// <summary>
+    /// Seeds the name field an auth type needs, when it is still empty.
+    /// <para>
+    /// A placeholder is not enough here. It shows the right answer in grey, which reads as already filled in
+    /// — and then the save is refused for a missing value the operator believes they supplied. Prefilling
+    /// makes the common case correct and still lets it be changed.
+    /// </para>
+    /// <para>
+    /// Only fills a blank. Switching away and back must not overwrite something deliberately typed.
+    /// </para>
+    /// </summary>
+    private void OnAuthTypeChanged()
+    {
+        if (_editApi is null) return;
+
+        switch (_editApi.AuthType)
+        {
+            // The name the OAuth2 spec gives it, so it is right for practically every endpoint.
+            case ApiAuthTypes.FormField when string.IsNullOrWhiteSpace(_editApi.FormFieldName):
+                _editApi.FormFieldName = "client_secret";
+                break;
+
+            case ApiAuthTypes.OAuth2:
+                if (string.IsNullOrWhiteSpace(_editApi.FormFieldName))
+                    _editApi.FormFieldName = "client_secret";
+
+                // The three fields a client-credentials request always has. Seeded so the grid opens with
+                // the shape of the answer rather than empty — grant_type is the same for every provider.
+                if (_tokenFields.Count == 0)
+                {
+                    _tokenFields["grant_type"] = "client_credentials";
+                    _tokenFields["client_id"] = string.Empty;
+                    _tokenFields["scope"] = string.Empty;
+                }
+                break;
+
+            // No comparable convention for these two — a header could be X-Api-Key, Authorization or
+            // anything the vendor chose, so guessing would be worse than an empty box.
+            case ApiAuthTypes.Header:
+            case ApiAuthTypes.QueryParam:
+                break;
+        }
+    }
+
     private static string AuthLabel(string? authType) => authType switch
     {
         ApiAuthTypes.Bearer => "Bearer",
         ApiAuthTypes.Basic => "Basic",
         ApiAuthTypes.Header => "Header",
         ApiAuthTypes.QueryParam => "Query",
+        ApiAuthTypes.FormField => "Form field",
+        ApiAuthTypes.OAuth2 => "OAuth2",
         _ => "None"
     };
 
@@ -703,6 +886,9 @@ else
         public string? Username { get; set; }
         public string? HeaderName { get; set; }
         public string? QueryParamName { get; set; }
+        public string? FormFieldName { get; set; }
+        public string? TokenUrl { get; set; }
+        public string? TokenFieldsJson { get; set; }
         public string? ExtraHeadersJson { get; set; }
         public bool AllowWrite { get; set; }
         public bool IsEnabled { get; set; }

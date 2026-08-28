@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
 namespace Application.Shared.Models.Data;
@@ -73,6 +73,32 @@ public class ApiCredential : BaseModel
     public string? QueryParamName { get; set; }
 
     /// <summary>
+    /// Form field to carry the secret in, for <see cref="ApiAuthTypes.FormField"/>. E.g.
+    /// <c>client_secret</c>.
+    /// </summary>
+    [MaxLength(100)]
+    public string? FormFieldName { get; set; }
+
+    /// <summary>
+    /// Token endpoint, for <see cref="ApiAuthTypes.OAuth2"/>. An absolute URL, and deliberately exempt from
+    /// the <see cref="BaseUrl"/> host restriction — a token endpoint is nearly always on a different host
+    /// from the API it issues tokens for.
+    /// </summary>
+    [MaxLength(1000)]
+    public string? TokenUrl { get; set; }
+
+    /// <summary>
+    /// Fields posted to the token endpoint, as a JSON object — <c>grant_type</c>, <c>client_id</c>,
+    /// <c>scope</c>. Sent form-encoded, each value encoded at send time.
+    /// <para>
+    /// The secret is NOT in here. It comes from <see cref="SecretEncrypted"/> under the name
+    /// <see cref="FormFieldName"/> (defaulting to <c>client_secret</c>), so the one value that needs
+    /// encrypting is the one value stored encrypted.
+    /// </para>
+    /// </summary>
+    public string? TokenFieldsJson { get; set; }
+
+    /// <summary>
     /// Static headers sent with every request, as a JSON object. For the unauthenticated constants an API
     /// requires — <c>Accept</c>, a version pin, a tenant id.
     /// </summary>
@@ -112,9 +138,40 @@ public static class ApiAuthTypes
     /// <summary>Secret in a named query-string parameter.</summary>
     public const string QueryParam = "query";
 
-    public static readonly string[] All = [None, Bearer, Basic, Header, QueryParam];
+    /// <summary>
+    /// Secret as a named field in a form-encoded request body — what an OAuth2 client-credentials token
+    /// request needs for <c>client_secret</c>.
+    /// <para>
+    /// Without this the only place to put that secret is the step's own body field, which lands in
+    /// <c>pipeline.graph_json</c>: stored in the clear, copied onto every run row as its snapshot, and
+    /// readable by anyone who can open the YAML tab. This type keeps it encrypted here instead, exactly as
+    /// <see cref="Header"/> and <see cref="QueryParam"/> already do for their own positions.
+    /// </para>
+    /// </summary>
+    public const string FormField = "form";
+
+    /// <summary>
+    /// OAuth2 client credentials. The client fetches an access token from the credential's token URL, caches
+    /// it until it expires, and sends it as a bearer token — so a step using this credential needs no token
+    /// request of its own.
+    /// <para>
+    /// This exists because doing it as pipeline steps is worse in three ways that are easy to miss: the token
+    /// lands in <c>pipeline_run_step.output_preview_json</c> in the clear for the retention window,
+    /// <c>expires_in</c> is ignored so every run pays for a fresh token, and the token step plus its capture
+    /// step have to be repeated in every pipeline that touches the API.
+    /// </para>
+    /// </summary>
+    public const string OAuth2 = "oauth2";
+
+    public static readonly string[] All = [None, Bearer, Basic, Header, QueryParam, FormField, OAuth2];
 
     /// <summary>True when this type needs <see cref="ApiCredential.SecretEncrypted"/> populated.</summary>
     public static bool NeedsSecret(string? authType) =>
-        authType is Bearer or Basic or Header or QueryParam;
+        authType is Bearer or Basic or Header or QueryParam or FormField or OAuth2;
+
+    /// <summary>
+    /// True when this type puts the secret in the request body, which constrains what the step may send: the
+    /// body has to be form-encoded, and a GET has no body at all.
+    /// </summary>
+    public static bool IsBodyAuth(string? authType) => authType == FormField;
 }

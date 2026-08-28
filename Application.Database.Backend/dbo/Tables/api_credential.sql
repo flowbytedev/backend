@@ -1,4 +1,4 @@
--- A named HTTP credential used by source.api / destination.api pipeline steps.
+﻿-- A named HTTP credential used by source.api / destination.api pipeline steps.
 --
 -- Why the secret lives here and not on the pipeline node: pipeline.graph_json is stored in the clear, is
 -- sent to the browser whole, and is editable as YAML by the pipeline author. A token in node config would
@@ -11,13 +11,21 @@ CREATE TABLE [dbo].[api_credential] (
     -- Optional base. A step's URL is resolved against it and must stay on this host, which is what stops a
     -- step from aiming this credential's token at an arbitrary server.
     [base_url]         NVARCHAR (1000) NULL,
-    -- none | bearer | basic | header | query
+    -- none | bearer | basic | header | query | form | oauth2
     [auth_type]        NVARCHAR (20)   DEFAULT ('none') NOT NULL,
     [username]         NVARCHAR (200)  NULL,
     [secret_encrypted] NVARCHAR (MAX)  NULL,
     -- Header or query-string parameter carrying the secret, for auth_type header/query respectively.
     [header_name]      NVARCHAR (100)  NULL,
     [query_param_name] NVARCHAR (100)  NULL,
+    -- Form field carrying the secret, for auth_type 'form' - an OAuth2 client_secret. Nullable and added
+    -- after the fact, so every existing row reads correctly as before.
+    [form_field_name]  NVARCHAR (100)  NULL,
+    -- OAuth2 client credentials: the token endpoint, and the non-secret fields posted to it as JSON.
+    -- The client_secret is NOT here - it stays in secret_encrypted under form_field_name. Both nullable and
+    -- added after the fact, so every existing row reads correctly as before.
+    [token_url]        NVARCHAR (1000) NULL,
+    [token_fields_json] NVARCHAR (MAX) NULL,
     -- Static headers sent on every request, as a JSON object.
     [extra_headers_json] NVARCHAR (MAX) NULL,
     -- Whether destination.api may SEND data with this credential. Off unless an operator says so: a read

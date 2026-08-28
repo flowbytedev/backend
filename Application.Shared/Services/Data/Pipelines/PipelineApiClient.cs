@@ -59,6 +59,17 @@ public sealed class ApiRequest
     public string? Body { get; init; }
 
     /// <summary>
+    /// Form fields to encode into the body, for a form-encoded request. Each value is percent-encoded at
+    /// send time, so it must arrive here <b>unencoded</b> — pre-escaping it would double-encode.
+    /// <para>
+    /// The alternative is making the author write <c>a=1&amp;b=2</c> by hand, which means making the author
+    /// remember that a space is <c>+</c> and that an <c>&amp;</c> inside a value has to be <c>%26</c>. That
+    /// is a silent-corruption trap, not a shortcut.
+    /// </para>
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? FormFields { get; init; }
+
+    /// <summary>
     /// The body's Content-Type. May carry parameters (<c>application/json; charset=utf-8</c>).
     /// <para>
     /// A <c>Content-Type</c> in <see cref="Headers"/> wins over this, because that is where somebody copying
@@ -91,7 +102,7 @@ public sealed class ApiResponse
         new() { Success = false, Error = error, ErrorType = errorType, StatusCode = status, SafeUrl = safeUrl };
 }
 
-public class PipelineApiClient(
+public partial class PipelineApiClient(
     ApplicationDbContext db,
     ICredentialProtector protector,
     IHttpClientFactory httpClientFactory,
@@ -137,16 +148,62 @@ public class PipelineApiClient(
                       ?? request.Credential.Credential.TimeoutSeconds
                       ?? options.ResolveApiTimeoutSeconds();
 
+        // OAuth2: the token is fetched once here, from cache when it is still good, and reused for every
+        // attempt below. Fetching inside the retry loop would mean a rate-limited endpoint produced a token
+        // request per attempt.
+        string? bearer = null;
+
+        if (request.Credential.AuthType == ApiAuthTypes.OAuth2)
+        {
+            var token = await AccessTokenAsync(request.Credential, forceRefresh: false, ct);
+            if (token.Error is not null)
+                return ApiResponse.Fail(token.Error, PipelineErrorType.ApiError);
+
+            bearer = token.Token;
+        }
+
         ApiResponse? last = null;
+        var refreshed = false;
 
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
-            var response = await SendOnceAsync(request, uri, timeout, MaxRedirects, ct);
+            var response = await SendOnceAsync(request, uri, timeout, MaxRedirects, bearer, ct);
+
+            if (response.Success) return response;
+
+            // A 401 on an OAuth2 credential most likely means the provider considers the token dead even
+            // though our clock says it is fine — revoked, or rotated behind us. Worth exactly one retry with
+            // a fresh token; retrying further would just replay a rejected credential.
+            if (bearer is not null && !refreshed && response.StatusCode == 401)
+            {
+                refreshed = true;
+                InvalidateToken(request.Credential);
+
+                var token = await AccessTokenAsync(request.Credential, forceRefresh: true, ct);
+                if (token.Error is not null) return response;
+
+                bearer = token.Token;
+                continue;
+            }
+
+            // A 401 that survived the refresh is not about token freshness, so say what the token actually
+            // WAS. The audience claim is usually the answer, and nothing else in the response reveals it.
+            if (request.Credential.AuthType == ApiAuthTypes.OAuth2 && response.StatusCode == 401)
+            {
+                return new ApiResponse
+                {
+                    Success = false,
+                    StatusCode = response.StatusCode,
+                    Body = response.Body,
+                    SafeUrl = response.SafeUrl,
+                    ErrorType = response.ErrorType,
+                    Error = (response.Error ?? string.Empty) + DescribeToken(bearer)
+                };
+            }
 
             // A 4xx other than 429 is a contract problem — the URL, the body or the token is wrong. Retrying
             // sends the same wrong request again, so fail immediately and say what came back.
-            if (response.Success || !IsTransient(response.StatusCode))
-                return response;
+            if (!IsTransient(response.StatusCode)) return response;
 
             last = response;
 
@@ -162,7 +219,8 @@ public class PipelineApiClient(
     // ------------------------------------------------------------------ one attempt
 
     private async Task<ApiResponse> SendOnceAsync(
-        ApiRequest request, Uri uri, int timeoutSeconds, int redirectsLeft, CancellationToken ct)
+        ApiRequest request, Uri uri, int timeoutSeconds, int redirectsLeft, string? bearer,
+        CancellationToken ct)
     {
         var safeUrl = Redact(uri, request.Credential);
 
@@ -176,10 +234,17 @@ public class PipelineApiClient(
             using var message = new HttpRequestMessage(
                 new HttpMethod(request.Method.ToUpperInvariant()), uri);
 
-            ApplyHeaders(message, request);
+            ApplyHeaders(message, request, bearer);
 
-            if (!string.IsNullOrEmpty(request.Body) && message.Method != HttpMethod.Get)
-                message.Content = BuildContent(request);
+            // Also when the body is empty: a form-field credential contributes the only field a token
+            // request may have, so skipping content because the author typed nothing would send a request
+            // with no secret and a confusing 400 from the far end.
+            var needsContent = message.Method != HttpMethod.Get
+                               && (!string.IsNullOrEmpty(request.Body)
+                                   || request.FormFields is { Count: > 0 }
+                                   || ApiAuthTypes.IsBodyAuth(request.Credential.AuthType));
+
+            if (needsContent) message.Content = BuildContent(request);
 
             using var response = await client.SendAsync(
                 message, HttpCompletionOption.ResponseContentRead, timeoutCts.Token);
@@ -202,7 +267,7 @@ public class PipelineApiClient(
                         + "than followed, because the credential's header would travel with it.",
                         PipelineErrorType.ApiError, (int)response.StatusCode, safeUrl);
 
-                return await SendOnceAsync(request, target, timeoutSeconds, redirectsLeft - 1, ct);
+                return await SendOnceAsync(request, target, timeoutSeconds, redirectsLeft - 1, bearer, ct);
             }
 
             var body = await response.Content.ReadAsStringAsync(timeoutCts.Token);
@@ -215,7 +280,9 @@ public class PipelineApiClient(
                     StatusCode = (int)response.StatusCode,
                     Body = body,
                     SafeUrl = safeUrl,
-                    Error = $"The API returned {(int)response.StatusCode} {response.StatusCode}: {Truncate(body)}",
+                    Error = $"The API returned {(int)response.StatusCode} {response.StatusCode}"
+                            + AuthChallenge(response)
+                            + (string.IsNullOrWhiteSpace(body) ? "." : $": {Truncate(body)}"),
                     ErrorType = PipelineErrorType.ApiError
                 };
             }
@@ -258,7 +325,7 @@ public class PipelineApiClient(
     /// </summary>
     internal static StringContent BuildContent(ApiRequest request)
     {
-        var content = new StringContent(request.Body!, Encoding.UTF8);
+        var content = new StringContent(BodyFor(request), Encoding.UTF8);
 
         var declared = EffectiveContentType(request);
 
@@ -272,6 +339,67 @@ public class PipelineApiClient(
         // than failing the send. The endpoint's own error is more useful than ours would be.
         return content;
     }
+
+    /// <summary>
+    /// The request body, with a form-field credential's secret merged in.
+    /// <para>
+    /// Appended here rather than by the caller so the secret never exists in anything the caller holds — not
+    /// in the step's config, not in <c>graph_json</c>, not in a log line, not in an error message. It is read
+    /// from the decrypted credential and goes straight into the content.
+    /// </para>
+    /// <para>
+    /// Only merged into a form-encoded body. Any other content type has no notion of a field to append, and
+    /// silently attaching a secret to JSON or XML would produce a malformed body carrying a credential — so
+    /// the body is left alone and the request fails at the far end rather than leaking on the way.
+    /// </para>
+    /// </summary>
+    internal static string BodyFor(ApiRequest request)
+    {
+        var body = request.Body ?? string.Empty;
+
+        var isForm = EffectiveContentType(request)
+            .StartsWith(PipelineApiContentTypes.Form, StringComparison.OrdinalIgnoreCase);
+
+        // Nothing to merge into a body that is not form-encoded. Attaching fields to JSON or XML would
+        // produce a malformed body — and for the secret, a malformed body carrying a credential.
+        if (!isForm) return body;
+
+        var parts = new List<string>();
+
+        if (body.Length > 0) parts.Add(body.TrimEnd('&'));
+
+        // The step's own fields, encoded here so the author never has to.
+        if (request.FormFields is not null)
+        {
+            foreach (var (name, value) in request.FormFields)
+            {
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                parts.Add(FormPair(name, value ?? string.Empty));
+            }
+        }
+
+        // The credential's secret last, so a field of the same name cannot displace it — the encrypted
+        // value is the one that should win.
+        if (ApiAuthTypes.IsBodyAuth(request.Credential.AuthType)
+            && request.Credential.Credential.FormFieldName is { } field
+            && !string.IsNullOrWhiteSpace(field))
+        {
+            parts.Add(FormPair(field, request.Credential.Secret ?? string.Empty));
+        }
+
+        return string.Join("&", parts.Where(p => p.Length > 0));
+    }
+
+    /// <summary>
+    /// One <c>key=value</c> pair, encoded the way <c>application/x-www-form-urlencoded</c> requires — a
+    /// space is <c>+</c>, which <c>EscapeDataString</c> does not do on its own. A client secret routinely
+    /// contains characters that must be encoded, so this is not optional politeness.
+    /// </summary>
+    private static string FormPair(string key, string value) =>
+        $"{Encode(key)}={Encode(value)}";
+
+    private static string Encode(string value) =>
+        Uri.EscapeDataString(value).Replace("%20", "+");
 
     /// <summary>
     /// The Content-Type actually used: a <c>Content-Type</c> among the step's extra headers if present,
@@ -300,7 +428,40 @@ public class PipelineApiClient(
             : request.ContentType.Trim();
     }
 
-    private static void ApplyHeaders(HttpRequestMessage message, ApiRequest request)
+    /// <summary>
+    /// The <c>WWW-Authenticate</c> challenge, when there is one, formatted for an error message.
+    /// <para>
+    /// This is where the answer to a 401 actually lives. Several APIs — Dynamics 365 among them — return 401
+    /// with an <b>empty body</b> and put the reason in this header: <c>error_description="The audience
+    /// 'https://graph.microsoft.com' is invalid"</c> says the scope is wrong, which is a completely different
+    /// fix from an expired token or an unregistered application. Without it, all three look identical.
+    /// </para>
+    /// </summary>
+    private static string AuthChallenge(HttpResponseMessage response)
+    {
+        if (!response.Headers.TryGetValues("WWW-Authenticate", out var values)) return string.Empty;
+
+        var challenge = string.Join(", ", values).Trim();
+
+        return string.IsNullOrWhiteSpace(challenge)
+            ? string.Empty
+            : $" [WWW-Authenticate: {Truncate(challenge, 400)}]";
+    }
+
+    /// <summary>
+    /// A header value with CR and LF removed.
+    /// <para>
+    /// Header values are added with <c>TryAddWithoutValidation</c> — the deliberately non-validating path,
+    /// used because a legitimate API header can hold characters the strict parser rejects. That leaves CR/LF
+    /// as a header-injection vector, and it became a reachable one the moment a header could contain
+    /// <c>{{ vars.* }}</c>: a captured value is whatever the far end returned. Stripping at this single
+    /// choke point covers step headers and the credential's static ones together.
+    /// </para>
+    /// </summary>
+    private static string SingleLine(string? value) =>
+        value is null ? string.Empty : value.Replace("\r", string.Empty).Replace("\n", string.Empty);
+
+    private static void ApplyHeaders(HttpRequestMessage message, ApiRequest request, string? bearer = null)
     {
         var credential = request.Credential.Credential;
 
@@ -312,7 +473,7 @@ public class PipelineApiClient(
                 if (JsonNode.Parse(credential.ExtraHeadersJson!) is JsonObject obj)
                     foreach (var (key, value) in obj)
                         if (value is not null)
-                            message.Headers.TryAddWithoutValidation(key, value.ToString());
+                            message.Headers.TryAddWithoutValidation(key, SingleLine(value.ToString()));
             }
             catch (JsonException)
             {
@@ -325,10 +486,16 @@ public class PipelineApiClient(
             foreach (var (key, value) in request.Headers)
             {
                 message.Headers.Remove(key);
-                message.Headers.TryAddWithoutValidation(key, value);
+                message.Headers.TryAddWithoutValidation(key, SingleLine(value));
             }
 
         var secret = request.Credential.Secret;
+
+        // OAuth2's token is fetched per request rather than stored, so it arrives as an argument rather than
+        // on the credential. Set before the switch so an explicit Authorization in the step's headers is
+        // still overridden by the credential, matching every other auth type.
+        if (request.Credential.AuthType == ApiAuthTypes.OAuth2 && !string.IsNullOrEmpty(bearer))
+            message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
 
         switch (request.Credential.AuthType)
         {

@@ -78,6 +78,18 @@ public interface IPipelineStore
     Task<PipelineScalarResult> ReadScalarAsync(
         string datasetId, string sql, int? timeoutSeconds = null, CancellationToken ct = default);
 
+    /// <summary>
+    /// One row of a read-only query, as column name to value. Null <c>Row</c> means the query returned
+    /// nothing, which is a legitimate answer rather than a failure.
+    /// <para>
+    /// Distinct from <see cref="ReadScalarAsync"/> because a capture step reads several values at once and
+    /// must read them from the <em>same</em> row — asking for each separately would let two aggregates
+    /// disagree if the data changed between reads, and would cost one connection each.
+    /// </para>
+    /// </summary>
+    Task<PipelineRowResult> ReadRowAsync(
+        string datasetId, string sql, int? timeoutSeconds = null, CancellationToken ct = default);
+
     Task<int> DropRelationsAsync(string datasetId, string prefix, CancellationToken ct = default);
 
     /// <summary>
@@ -119,6 +131,13 @@ public sealed record PipelineScalarResult(bool Success, object? Value, string? T
 {
     public static PipelineScalarResult Ok(object? value, string? typeName) => new(true, value, typeName, null);
     public static PipelineScalarResult Fail(string error) => new(false, null, null, error);
+}
+
+/// <summary>One row, or none. Errors are returned rather than thrown, like everything else here.</summary>
+public sealed record PipelineRowResult(bool Success, Dictionary<string, object?>? Row, string? Error)
+{
+    public static PipelineRowResult Ok(Dictionary<string, object?>? row) => new(true, row, null);
+    public static PipelineRowResult Fail(string error) => new(false, null, error);
 }
 
 /// <summary>The outcome of materializing a relation. Errors are returned, never thrown.</summary>

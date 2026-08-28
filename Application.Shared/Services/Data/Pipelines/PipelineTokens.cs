@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json.Nodes;
 
 namespace Application.Shared.Services.Data.Pipelines;
@@ -26,7 +26,23 @@ public static class PipelineTokens
     /// <summary>Values supplied when the run was started (manual form or API body).</summary>
     public const string ParamsRoot = "params";
 
-    public static readonly string[] Roots = [RunRoot, ParamsRoot];
+    /// <summary>
+    /// Values captured from a node's output by a <c>transform.capture</c> step.
+    /// <para>
+    /// This is the root the class comment above used to say could not exist, and the reasoning there still
+    /// holds for <em>rows</em>: data does not travel through config, and a relation never will. What travels
+    /// here is a single scalar, deliberately extracted, for the cases a relation genuinely cannot serve — a
+    /// URL, a file name, an email subject, a table name. Anything that ends up in the data should still be a
+    /// join, not a variable.
+    /// </para>
+    /// <para>
+    /// Unlike <see cref="RunRoot"/>, a value here is <b>external data</b>. It must be escaped for wherever it
+    /// is being substituted — see <c>PipelineTokenContexts</c>.
+    /// </para>
+    /// </summary>
+    public const string VarsRoot = "vars";
+
+    public static readonly string[] Roots = [RunRoot, ParamsRoot, VarsRoot];
 
     /// <summary>The <c>run.*</c> keys this build provides, for the editor's token helper.</summary>
     public static readonly string[] RunKeys =

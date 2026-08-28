@@ -535,13 +535,22 @@ public partial class PipelineEngine(
             };
         }
 
+        // Substitution for the transforms. This used to be missing entirely: PipelineSql.Build got the raw
+        // node, so a {{ }} in a filter reached DuckDB as those literal characters while the compiler
+        // cheerfully validated it. Resolving into a copy fixes every transform at once and keeps
+        // PipelineSql token-unaware. Each field is escaped for where it lands — see PipelineTokenResolver.
+        var resolvedNode = PipelineTokenResolver.Resolve(node, spec, Lookup(ctx));
+
+        if (node.Type == PipelineNodeTypes.TransformCapture)
+            return await ExecuteCaptureAsync(ctx, resolvedNode, nodeId, ct);
+
         // The one step that writes several relations rather than one.
         if (node.Type == PipelineNodeTypes.TransformSwitch)
-            return await ExecuteSwitchAsync(ctx, node, nodeId, spec, outcome, ct);
+            return await ExecuteSwitchAsync(ctx, resolvedNode, nodeId, spec, outcome, ct);
 
         // Every remaining type is a transform, and they all take the same path: compile to SQL, materialize.
         var inputs = BuildInputs(ctx, nodeId, spec, outcome);
-        var built = PipelineSql.Build(node, inputs);
+        var built = PipelineSql.Build(resolvedNode, inputs);
 
         if (!built.Success)
             return NodeOutcome.Failed(built.Error!, built.ErrorType ?? PipelineErrorType.Invalid);
@@ -1220,6 +1229,11 @@ public partial class PipelineEngine(
     {
         if (ctx.Tokens.TryGetValue(path, out var value)) return value;
 
+        // Captured values. Checked before params so a graph cannot shadow one with a request parameter —
+        // params arrive from an API caller, and letting them override a value the pipeline computed would
+        // hand an external caller control of a filter.
+        if (ctx.Vars.TryGetValue(path, out var captured)) return captured;
+
         if (path.StartsWith(PipelineTokens.ParamsRoot + ".", StringComparison.OrdinalIgnoreCase))
         {
             var key = path[(PipelineTokens.ParamsRoot.Length + 1)..];
@@ -1361,6 +1375,16 @@ public partial class PipelineEngine(
 
         /// <summary>Rows each incremental source read, recorded for the state row's diagnostics.</summary>
         public Dictionary<string, long> WatermarkRows { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Values published by <c>transform.capture</c> steps, keyed by full token path (<c>vars.x</c>).
+        /// <para>
+        /// Mutable during the walk, which is what makes this work at all: tokens are substituted per step as
+        /// that step executes, so a value captured at step 3 is available to step 4. The compiler guarantees
+        /// the capture comes first by turning the reference itself into an ordering dependency.
+        /// </para>
+        /// </summary>
+        public Dictionary<string, string> Vars { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>A preview must never move a watermark, however it ends.</summary>
         public bool IsPreview => Run is null || RowLimit is not null;

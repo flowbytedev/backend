@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using Application.Shared.Models.Data.Pipelines;
 using Application.Shared.Services.Data.Pipelines;
@@ -562,6 +562,13 @@ public static class NodeFactory
 
             case PipelineNodeTypes.TransformCompute:
                 config["columns"] = new JsonObject();
+                break;
+
+            case PipelineNodeTypes.TransformCapture:
+                config["values"] = new JsonObject();
+                // Failing on no rows is the safe default: an empty variable in a WHERE clause matches
+                // nothing and says nothing.
+                config["onEmpty"] = PipelineCaptureEmptyBehaviour.Fail;
                 break;
 
             case PipelineNodeTypes.TransformJoin:

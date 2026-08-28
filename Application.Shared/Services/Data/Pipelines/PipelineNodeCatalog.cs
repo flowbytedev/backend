@@ -74,7 +74,7 @@ public static class PipelineNodeCatalog
                     new("incrementalStart", "Start from", PipelineFieldKinds.Text,
                         Placeholder: "2026-01-01",
                         Help: "Where the first run begins. Empty means the first run reads the whole table."),
-                    new("where", "Filter", PipelineFieldKinds.Text,
+                    new("where", "Filter", PipelineFieldKinds.Text, TokenContext: PipelineTokenContexts.Sql,
                         Placeholder: "sale_date >= '2026-01-01'",
                         Help: "Optional SQL condition applied at the source, so fewer rows are ever transferred.")
                 ],
@@ -89,7 +89,7 @@ public static class PipelineNodeCatalog
                         Options: [new("table", "A whole table"), new("query", "A SQL query")]),
                     new("schema", "Schema", PipelineFieldKinds.Text, Placeholder: "dbo", VisibleWhen: "mode=table"),
                     new("table", "Table", PipelineFieldKinds.Text, VisibleWhen: "mode=table"),
-                    new("query", "Query", PipelineFieldKinds.Sql, VisibleWhen: "mode=query",
+                    new("query", "Query", PipelineFieldKinds.Sql, TokenContext: PipelineTokenContexts.Sql, VisibleWhen: "mode=query",
                         Placeholder: "SELECT * FROM dbo.sales WHERE sale_date >= '{{ run.date }}'"),
                     new("batchKeyColumn", "Batch by column", PipelineFieldKinds.Text,
                         Help: "A unique, sortable column. Set this for large tables so rows are paged out instead of buffered whole."),
@@ -217,7 +217,7 @@ public static class PipelineNodeCatalog
                 [
                     new("credential", "Credential", PipelineFieldKinds.ApiCredentialPicker, Required: true,
                         Help: "A registered API credential. The token is held there, never in this pipeline."),
-                    new("url", "URL or path", PipelineFieldKinds.Text, Required: true,
+                    new("url", "URL or path", PipelineFieldKinds.Text, TokenContext: PipelineTokenContexts.Url, Required: true,
                         Placeholder: "reports/sales?from={{ run.date }}",
                         Help: "A path under the credential's base URL, or a full URL on the same host."),
                     new("method", "Method", PipelineFieldKinds.Select,
@@ -229,6 +229,9 @@ public static class PipelineNodeCatalog
                     new("contentType", "Content type", PipelineFieldKinds.Text, VisibleWhen: "method=POST",
                         Placeholder: PipelineApiContentTypes.Json,
                         Help: "Free text, because this body is yours - a form body would be \"a=1&b=2\" with application/x-www-form-urlencoded. A charset is added if you do not give one. Defaults to application/json."),
+                    new("formFields", "Form fields", PipelineFieldKinds.KeyValue,
+                        VisibleWhen: "method=POST",
+                        Help: "For a form-encoded body: one row per field, values encoded for you. Use this rather than typing a=1&b=2 above - a space or an ampersand in a value has to be encoded, and getting that wrong corrupts the body silently. Both are merged if you use both."),
 
                     new("jsonPath", "Records are at", PipelineFieldKinds.Text,
                         Placeholder: "data.items",
@@ -293,7 +296,7 @@ public static class PipelineNodeCatalog
                 "Keeps only the rows matching a condition.",
                 "filter", [PipelinePorts.In], [PipelinePorts.Out],
                 [
-                    new("where", "Keep rows where", PipelineFieldKinds.Text, Required: true,
+                    new("where", "Keep rows where", PipelineFieldKinds.Text, TokenContext: PipelineTokenContexts.Sql, Required: true,
                         Placeholder: "qty > 0 AND region IN ('N','S')")
                 ]),
 
@@ -301,7 +304,7 @@ public static class PipelineNodeCatalog
                 "Adds columns calculated from the ones already there.",
                 "calculator", [PipelinePorts.In], [PipelinePorts.Out],
                 [
-                    new("columns", "New columns", PipelineFieldKinds.ExpressionList, Required: true,
+                    new("columns", "New columns", PipelineFieldKinds.ExpressionList, TokenContext: PipelineTokenContexts.Sql, Required: true,
                         Help: "Each row is a new column name and an expression, e.g. qty * unit_price.")
                 ]),
 
@@ -457,7 +460,7 @@ public static class PipelineNodeCatalog
                 // and it breaks the catalogue invariant that a non-terminal step has somewhere to send rows.
                 "git-fork", [PipelinePorts.In], ["match", PipelineSwitch.DefaultPort],
                 [
-                    new("outputs", "Outputs", PipelineFieldKinds.SwitchList, Required: true,
+                    new("outputs", "Outputs", PipelineFieldKinds.SwitchList, TokenContext: PipelineTokenContexts.Sql, Required: true,
                         Help: "Checked top to bottom - the first match wins, so put the most specific condition first."),
                     new("_note", "Nothing is dropped", PipelineFieldKinds.Note,
                         Help: "A row matching no condition goes to the built-in \"rest\" output. Leave it unconnected and those rows stop there; connect it to keep them.")
@@ -520,11 +523,36 @@ public static class PipelineNodeCatalog
 
             // ================= SQL =================
 
+            new(PipelineNodeTypes.TransformCapture, PipelineNodeCategories.Sql, "Capture values",
+                "Reads single values out of its input and makes them available to later steps as {{ vars.* }}. Passes its rows through unchanged.",
+                "variable", [PipelinePorts.In], [PipelinePorts.Out],
+                [
+                    new("values", "Values", PipelineFieldKinds.ExpressionList, Required: true,
+                        TokenContext: PipelineTokenContexts.Sql,
+                        Help: "A name, then a SQL expression over the incoming rows - max(order_date), count(*), json_extract_string(payload, '$.token')."),
+
+                    new("orderBy", "Read the value from", PipelineFieldKinds.Sql,
+                        TokenContext: PipelineTokenContexts.Sql,
+                        Placeholder: "received_at DESC",
+                        Help: "Only needed when an expression is not an aggregate. Without it, which row a plain column comes from is arbitrary - so that combination is refused rather than guessed."),
+
+                    new("onEmpty", "When there are no rows", PipelineFieldKinds.Select,
+                        Options:
+                        [
+                            new(PipelineCaptureEmptyBehaviour.Fail, "Fail the step"),
+                            new(PipelineCaptureEmptyBehaviour.Empty, "Publish empty values")
+                        ],
+                        Help: "Failing is the default: a variable that quietly becomes empty is a filter matching nothing, or a URL pointing somewhere else, and neither announces itself."),
+
+                    new("_note", "A value, never a fragment", PipelineFieldKinds.Note,
+                        Help: "A captured value is escaped for wherever it is used, so it can be a value in a comparison but never a column name, a table name or a piece of SQL. Do not put quotes around {{ vars.x }} yourself - the escaping adds them.")
+                ]),
+
             new(PipelineNodeTypes.TransformSql, PipelineNodeCategories.Sql, "SQL",
                 "Runs your own SELECT over the upstream data. Refer to an input by its node name.",
                 "code", [PipelinePorts.In], [PipelinePorts.Out],
                 [
-                    new("sql", "Query", PipelineFieldKinds.Sql, Required: true,
+                    new("sql", "Query", PipelineFieldKinds.Sql, TokenContext: PipelineTokenContexts.Sql, Required: true,
                         Placeholder: "SELECT store_id, SUM(qty) AS qty FROM erp GROUP BY store_id",
                         Help: "Read-only. Every connected input is available as a table named after its node.")
                 ],
@@ -565,7 +593,7 @@ public static class PipelineNodeCatalog
                 [
                     new("credential", "Credential", PipelineFieldKinds.ApiCredentialPicker, Required: true,
                         Help: "Must have \"May send data\" enabled. A credential without it is refused, not downgraded."),
-                    new("url", "URL or path", PipelineFieldKinds.Text, Required: true,
+                    new("url", "URL or path", PipelineFieldKinds.Text, TokenContext: PipelineTokenContexts.Url, Required: true,
                         Placeholder: "v2/orders/bulk"),
                     new("method", "Method", PipelineFieldKinds.Select, Required: true,
                         Options: [new("POST", "POST"), new("PUT", "PUT"), new("PATCH", "PATCH")]),
@@ -631,7 +659,7 @@ public static class PipelineNodeCatalog
                             new(PipelineExportFormats.Xlsx, "Excel (.xlsx)"),
                             new(PipelineExportFormats.Json, "JSON")
                         ]),
-                    new("fileName", "File name", PipelineFieldKinds.Text,
+                    new("fileName", "File name", PipelineFieldKinds.Text, TokenContext: PipelineTokenContexts.Path,
                         Placeholder: "orders_{{ run.date }}",
                         Help: "Without the extension - the format adds it. Defaults to the pipeline name and run date."),
                     new("delimiter", "Delimiter", PipelineFieldKinds.Text,
@@ -718,7 +746,13 @@ public sealed record PipelineFieldSpec(
     /// This field's options are loaded using another field's value — a table picker needs the chosen
     /// dataset. The inspector clears this field when the named field changes.
     /// </summary>
-    string? DependsOn = null);
+    string? DependsOn = null,
+    /// <summary>
+    /// Where this field's value ends up, and therefore how a substituted token must be escaped. See
+    /// <see cref="PipelineTokenContexts"/>. Defaults to Plain, which is verbatim — right for text a person
+    /// reads, wrong for anything a machine parses, so a SQL or URL field has to say so.
+    /// </summary>
+    string TokenContext = PipelineTokenContexts.Plain);
 
 public sealed record PipelineFieldOption(string Value, string Label);
 

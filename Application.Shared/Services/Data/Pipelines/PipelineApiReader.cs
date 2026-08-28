@@ -34,6 +34,9 @@ public sealed class ApiFetchRequest
     /// </summary>
     public string? ContentType { get; init; }
 
+    /// <summary>Form fields for a form-encoded body. Encoded by the client, so pass them unencoded.</summary>
+    public IReadOnlyDictionary<string, string>? FormFields { get; init; }
+
     /// <summary>Dotted path to the array of rows, e.g. <c>data.items</c>. Empty means the root.</summary>
     public string? JsonPath { get; init; }
 
@@ -107,6 +110,7 @@ public class PipelineApiReader(IPipelineApiClient client) : IPipelineApiReader
                         Headers = request.Headers,
                         Query = query,
                         Body = request.Body,
+                        FormFields = request.FormFields,
                         ContentType = string.IsNullOrWhiteSpace(request.ContentType)
                             ? PipelineApiContentTypes.Json
                             : request.ContentType!

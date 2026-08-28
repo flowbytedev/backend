@@ -133,6 +133,9 @@ public class PipelineSourceLoader(
             Headers = Headers(config, "headers", request.ResolveTokens),
             Body = request.ResolveTokens(Str(config, "body")),
             ContentType = Str(config, "contentType"),
+            // Deliberately NOT escaped for a URL by the token resolver: the client percent-encodes each
+            // value when it builds the body, so pre-escaping here would double-encode.
+            FormFields = Headers(config, "formFields", request.ResolveTokens),
             JsonPath = Str(config, "jsonPath"),
 
             Pagination = pagination,

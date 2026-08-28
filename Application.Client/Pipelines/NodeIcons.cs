@@ -1,4 +1,4 @@
-using Application.Shared.Models.Data.Pipelines;
+﻿using Application.Shared.Models.Data.Pipelines;
 using Microsoft.AspNetCore.Components;
 
 namespace Application.Client.Pipelines;
@@ -38,6 +38,8 @@ public static class NodeIcons
         "list" => "<path d='M8 6h13M8 12h13M8 18h13'/><path d='M3 6h.01M3 12h.01M3 18h.01'/>",
         "braces" => "<path d='M8 3H7a2 2 0 0 0-2 2v4a2 2 0 0 1-2 2 2 2 0 0 1 2 2v4a2 2 0 0 0 2 2h1'/><path d='M16 3h1a2 2 0 0 1 2 2v4a2 2 0 0 0 2 2 2 2 0 0 0-2 2v4a2 2 0 0 1-2 2h-1'/>",
         "git-fork" => "<circle cx='12' cy='18' r='3'/><circle cx='6' cy='6' r='3'/><circle cx='18' cy='6' r='3'/><path d='M18 9v1a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V9'/><path d='M12 12v3'/>",
+        "mail" => "<rect x='2' y='4' width='20' height='16' rx='2'/><path d='M2 7l10 7 10-7'/>",
+        "variable" => "<path d='M8 3a12 12 0 0 0 0 18'/><path d='M16 3a12 12 0 0 1 0 18'/><path d='M9 9l6 6'/><path d='M15 9l-6 6'/>",
         _ => "<circle cx='12' cy='12' r='8'/>"
     });
 

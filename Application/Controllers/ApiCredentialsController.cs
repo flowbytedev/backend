@@ -1,4 +1,4 @@
-using Application.Shared.Authorization;
+﻿using Application.Shared.Authorization;
 using Application.Shared.Data;
 using Application.Shared.Models.Data;
 using Application.Shared.Services;
@@ -181,6 +181,9 @@ public class ApiCredentialsController(
         row.Username = request.Username?.Trim();
         row.HeaderName = request.HeaderName?.Trim();
         row.QueryParamName = request.QueryParamName?.Trim();
+        row.FormFieldName = request.FormFieldName?.Trim();
+        row.TokenUrl = request.TokenUrl?.Trim();
+        row.TokenFieldsJson = request.TokenFieldsJson?.Trim();
         row.ExtraHeadersJson = string.IsNullOrWhiteSpace(request.ExtraHeadersJson)
             ? null
             : request.ExtraHeadersJson!.Trim();
@@ -218,6 +221,39 @@ public class ApiCredentialsController(
 
         if (authType == ApiAuthTypes.QueryParam && string.IsNullOrWhiteSpace(request.QueryParamName))
             return "Query-parameter auth needs the parameter name.";
+
+        if (authType == ApiAuthTypes.FormField && string.IsNullOrWhiteSpace(request.FormFieldName))
+            return "Form-field auth needs the field name, for example client_secret.";
+
+        if (authType == ApiAuthTypes.OAuth2)
+        {
+            if (string.IsNullOrWhiteSpace(request.TokenUrl))
+                return "OAuth2 needs the token URL.";
+
+            if (!Uri.TryCreate(request.TokenUrl, UriKind.Absolute, out var tokenUri))
+                return "The token URL must be an absolute URL.";
+
+            if (tokenUri.Scheme != Uri.UriSchemeHttp && tokenUri.Scheme != Uri.UriSchemeHttps)
+                return "The token URL must be http or https.";
+
+            // Checked at save so a typo surfaces here rather than as a failed token request at 3am. A
+            // malformed value would otherwise be swallowed by the fetcher, which cannot fail the save.
+            if (!string.IsNullOrWhiteSpace(request.TokenFieldsJson))
+            {
+                try
+                {
+                    if (System.Text.Json.Nodes.JsonNode.Parse(request.TokenFieldsJson!)
+                        is not System.Text.Json.Nodes.JsonObject)
+                    {
+                        return "The token fields must be a JSON object.";
+                    }
+                }
+                catch (System.Text.Json.JsonException)
+                {
+                    return "The token fields are not valid JSON.";
+                }
+            }
+        }
 
         if (authType == ApiAuthTypes.Basic && string.IsNullOrWhiteSpace(request.Username))
             return "Basic auth needs a username.";
@@ -261,6 +297,9 @@ public class ApiCredentialsController(
         Username = row.Username,
         HeaderName = row.HeaderName,
         QueryParamName = row.QueryParamName,
+        FormFieldName = row.FormFieldName,
+        TokenUrl = row.TokenUrl,
+        TokenFieldsJson = row.TokenFieldsJson,
         ExtraHeadersJson = row.ExtraHeadersJson,
         AllowWrite = row.AllowWrite,
         IsEnabled = row.IsEnabled,
@@ -306,6 +345,12 @@ public sealed class ApiCredentialDto
     public string? Username { get; set; }
     public string? HeaderName { get; set; }
     public string? QueryParamName { get; set; }
+
+    public string? FormFieldName { get; set; }
+
+    public string? TokenUrl { get; set; }
+
+    public string? TokenFieldsJson { get; set; }
     public string? ExtraHeadersJson { get; set; }
     public bool AllowWrite { get; set; }
     public bool IsEnabled { get; set; }
@@ -330,6 +375,12 @@ public sealed class ApiCredentialSaveRequest
 
     public string? HeaderName { get; set; }
     public string? QueryParamName { get; set; }
+
+    public string? FormFieldName { get; set; }
+
+    public string? TokenUrl { get; set; }
+
+    public string? TokenFieldsJson { get; set; }
     public string? ExtraHeadersJson { get; set; }
     public bool AllowWrite { get; set; }
     public bool IsEnabled { get; set; } = true;

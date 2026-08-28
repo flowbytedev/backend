@@ -1111,7 +1111,10 @@
 
         builder.OpenElement(seq++, "div");
         builder.AddAttribute(seq++, "class", "pl-row-head pl-kv-row");
-        builder.AddContent(seq++, Header("From", "To", string.Empty));
+        // Name/Value, not From/To. Every field using this editor - request headers and form fields - is a
+        // name paired with a value, and "From/To" reads as a mapping, which invites putting a list in each
+        // box rather than one row per entry.
+        builder.AddContent(seq++, Header("Name", "Value", string.Empty));
         builder.CloseElement();
 
         foreach (var entry in map.Select(kv => kv.Key).ToList())

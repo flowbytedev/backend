@@ -535,6 +535,54 @@ public partial class DuckdbService
         return result;
     }
 
+    /// <summary>
+    /// One row from a read-only query. Guarded by <see cref="SelectOnlyGuard"/> because the caller composes
+    /// the SQL from author-written expressions.
+    /// </summary>
+    public async Task<PipelineRowResult> ReadRowAsync(
+        string datasetId, string sql, int? timeoutSeconds = null, CancellationToken ct = default)
+    {
+        if (!SelectOnlyGuard.IsSafeSelect(sql, out var guardError))
+            return PipelineRowResult.Fail(guardError ?? "Only a read-only SELECT can be run here.");
+
+        var path = ResolveDbPath(datasetId);
+        if (!File.Exists(path))
+            return PipelineRowResult.Fail($"Dataset database not found at '{path}'.");
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds ?? _option.ResolveQueryTimeoutSeconds()));
+
+        try
+        {
+            // Read-only: a capture reads a relation somebody may be looking at in the data viewer.
+            await using var connection = await OpenWithRetryAsync(path, readOnly: true, cts.Token);
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandText = sql;
+
+            await using var reader = await cmd.ExecuteReaderAsync(cts.Token);
+
+            if (!await reader.ReadAsync(cts.Token)) return PipelineRowResult.Ok(null);
+
+            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < reader.FieldCount; i++)
+                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+
+            return PipelineRowResult.Ok(row);
+        }
+        catch (DuckDbBusyException ex)
+        {
+            return PipelineRowResult.Fail(ex.Message);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return PipelineRowResult.Fail("Reading the captured values timed out.");
+        }
+        catch (Exception ex)
+        {
+            return PipelineRowResult.Fail(ex.Message.Split('\n')[0]);
+        }
+    }
+
     // ------------------------------------------------------------------ export
 
     /// <summary>

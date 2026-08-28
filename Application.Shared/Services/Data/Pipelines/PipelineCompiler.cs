@@ -211,13 +211,90 @@ public static class PipelineCompiler
             }
         }
 
+        // ---- 3b. Ordering dependencies created by {{ vars.* }} ----
+        // A token reference is a real dependency with no edge behind it. Nothing else would order these:
+        // unconnected nodes are tie-broken by document order, so a capture could otherwise run AFTER the step
+        // that reads its value and the token would resolve to nothing.
+        //
+        // These feed the topological sort ONLY. They must never reach Predecessors/Successors, which the
+        // engine reads to decide what a node's INPUT relations are — a capture is not an input to the step
+        // that mentions its variable, and treating it as one would have that step read the wrong rows.
+        var varProducers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var node in graph.Nodes.Where(n => n.Type == PipelineNodeTypes.TransformCapture))
+        {
+            if (!specs.ContainsKey(node.Id)) continue;
+
+            foreach (var value in CaptureNames(node))
+            {
+                if (varProducers.TryGetValue(value, out var already))
+                {
+                    issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldInvalid,
+                        $"'{value}' is captured by both '{Name(nodes, already)}' and " +
+                        $"'{Name(nodes, node.Id)}'. Which one a later step would see depends on run order, " +
+                        "so give them different names."));
+                    continue;
+                }
+
+                varProducers[value] = node.Id;
+            }
+        }
+
+        var orderExtra = specs.Keys.ToDictionary(
+            id => id, _ => new HashSet<string>(StringComparer.Ordinal), StringComparer.Ordinal);
+
+        foreach (var node in graph.Nodes)
+        {
+            if (!specs.ContainsKey(node.Id)) continue;
+
+            foreach (var path in PipelineTokens.ReferencedPaths(node.Config))
+            {
+                if (!path.StartsWith(PipelineTokens.VarsRoot + ".", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var name = path[(PipelineTokens.VarsRoot.Length + 1)..];
+
+                if (!varProducers.TryGetValue(name, out var producer))
+                {
+                    issues.Add(new(node.Id, PipelineIssueCodes.TokenUnknownRoot,
+                        $"'{{{{ {path} }}}}' is not captured anywhere. Add a \"Capture values\" step that " +
+                        $"produces '{name}'."));
+                    continue;
+                }
+
+                if (producer == node.Id)
+                {
+                    issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldInvalid,
+                        $"'{Name(nodes, node.Id)}' uses '{{{{ {path} }}}}', which it captures itself."));
+                    continue;
+                }
+
+                orderExtra[node.Id].Add(producer);
+            }
+        }
+
         // ---- 4. Kahn: topological order + layers. The residual set IS the cycle, so the error is free. ----
         var layer = new Dictionary<string, int>(StringComparer.Ordinal);
         var order = new List<string>();
-        var remainingInDegree = specs.Keys.ToDictionary(
+
+        // Real edges plus the variable dependencies, deduplicated per (node, predecessor).
+        var orderPredecessors = specs.Keys.ToDictionary(
             id => id,
-            id => predecessors[id].Select(l => l.Other).Distinct(StringComparer.Ordinal).Count(),
+            id => predecessors[id].Select(l => l.Other)
+                .Concat(orderExtra[id])
+                .Distinct(StringComparer.Ordinal)
+                .ToList(),
             StringComparer.Ordinal);
+
+        var orderSuccessors = specs.Keys.ToDictionary(
+            id => id, _ => new List<string>(), StringComparer.Ordinal);
+
+        foreach (var (id, preds) in orderPredecessors)
+            foreach (var pred in preds)
+                orderSuccessors[pred].Add(id);
+
+        var remainingInDegree = specs.Keys.ToDictionary(
+            id => id, id => orderPredecessors[id].Count, StringComparer.Ordinal);
 
         // Deterministic seeding and tie-breaking: document order, never Dictionary enumeration order.
         // Non-determinism here shows up as the canvas reshuffling itself on every save.
@@ -235,9 +312,8 @@ public static class PipelineCompiler
             ready.RemoveAt(0);
             order.Add(id);
 
-            foreach (var link in successors[id].DistinctBy(l => l.Other, StringComparer.Ordinal))
+            foreach (var next in orderSuccessors[id].Distinct(StringComparer.Ordinal))
             {
-                var next = link.Other;
                 layer[next] = Math.Max(layer.GetValueOrDefault(next, 0), layer[id] + 1);
                 if (--remainingInDegree[next] == 0)
                 {
@@ -252,7 +328,8 @@ public static class PipelineCompiler
             var inCycle = specs.Keys.Where(id => !order.Contains(id)).OrderBy(id => documentIndex[id]).ToList();
             issues.Add(new(inCycle.FirstOrDefault(), PipelineIssueCodes.GraphCycle,
                 $"These steps form a loop: {string.Join(" -> ", inCycle.Select(i => Name(nodes, i)))}. " +
-                "Data has to flow one way."));
+                "Data has to flow one way. A loop can also come from a {{ vars.* }} reference, which " +
+                "creates an ordering dependency even without a connection on the canvas."));
             return PipelineCompileResult.Failed(issues);
         }
 
@@ -411,6 +488,52 @@ public static class PipelineCompiler
                 break;
             }
 
+            case PipelineNodeTypes.TransformCapture:
+            {
+                var values = CaptureNames(node).ToList();
+
+                if (values.Count == 0)
+                {
+                    issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldRequired,
+                        $"'{node.Label ?? node.Id}' captures nothing — add a name and an expression."));
+                    break;
+                }
+
+                foreach (var name in values)
+                {
+                    // The name becomes {{ vars.<name> }}, so it has to be a plain token path. A dot would
+                    // make the reference ambiguous and a space could not be written at all.
+                    if (!name.All(c => char.IsLetterOrDigit(c) || c == '_'))
+                    {
+                        issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldInvalid,
+                            $"'{name}' cannot be a variable name — use letters, digits and underscores, " +
+                            "since it becomes {{ vars." + name + " }}."));
+                    }
+                }
+
+                // LIMIT 1 without ORDER BY picks an arbitrary row. That is stable enough to look correct in
+                // testing and to change in production, which is the same trap the dedupe step warns about —
+                // so a non-aggregate expression without an explicit order is refused rather than guessed.
+                if (string.IsNullOrWhiteSpace(Str(config, "orderBy")))
+                {
+                    var bare = CaptureExpressions(node)
+                        .Where(e => !LooksAggregate(e.Value))
+                        .Select(e => e.Key)
+                        .ToList();
+
+                    if (bare.Count > 0)
+                    {
+                        issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldRequired,
+                            $"'{string.Join("', '", bare)}' " +
+                            (bare.Count == 1 ? "is not an aggregate" : "are not aggregates") +
+                            ", so which row the value comes from is arbitrary. Add \"Read the value from\", " +
+                            "or wrap it in max()/min()/any_value()."));
+                    }
+                }
+
+                break;
+            }
+
             case PipelineNodeTypes.DestinationApi:
             {
                 var contentType = Str(config, "contentType");
@@ -506,6 +629,50 @@ public static class PipelineCompiler
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// The (name, expression) pairs a capture step declares. Mirrors PipelineEngine.Expressions so the compiler
+    /// and the engine cannot disagree about what a step captures.
+    /// </summary>
+    private static IEnumerable<KeyValuePair<string, string>> CaptureExpressions(
+        PipelineNodeDef node)
+    {
+        if (node.Config?["values"] is not JsonObject obj) yield break;
+
+        foreach (var (name, expression) in obj)
+        {
+            if (string.IsNullOrWhiteSpace(name)) continue;
+            if (expression is not JsonValue v || !v.TryGetValue<string>(out var text)) continue;
+            if (string.IsNullOrWhiteSpace(text)) continue;
+
+            yield return new(name, text!);
+        }
+    }
+
+    private static IEnumerable<string> CaptureNames(PipelineNodeDef node) =>
+        CaptureExpressions(node).Select(e => e.Key);
+
+    /// <summary>
+    /// Whether an expression collapses many rows to one, making <c>LIMIT 1</c> meaningful without an order.
+    /// <para>
+    /// A name check, not a parse. It errs toward calling something an aggregate when it is not — a false
+    /// "this is fine" costs an arbitrary row, whereas a false alarm blocks a legitimate save, and the second
+    /// is the one an author cannot work around.
+    /// </para>
+    /// </summary>
+    private static bool LooksAggregate(string expression)
+    {
+        var text = expression.TrimStart();
+
+        string[] aggregates =
+        [
+            "max(", "min(", "sum(", "avg(", "count(", "any_value(", "first(", "last(",
+            "string_agg(", "list(", "array_agg(", "median(", "mode(", "bool_and(", "bool_or(",
+            "arg_max(", "arg_min(", "product("
+        ];
+
+        return aggregates.Any(a => text.StartsWith(a, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Catches typos like <c>{{ rnu.date }}</c> at save time instead of mid-run.</summary>
