@@ -334,6 +334,48 @@ public static class PipelineEmailOversizeBehaviour
 }
 
 /// <summary>
+/// Request body encodings an API step can send.
+/// <para>
+/// The source and the destination do NOT offer the same list, and the asymmetry is the point. A
+/// <c>source.api</c> body is text the author typed, so the content type is only a header and anything is
+/// legitimate. A <c>destination.api</c> body is <em>generated from rows</em>, so the only content types on
+/// offer are the ones this app can actually serialize rows into. Offering XML on the destination would be a
+/// promise with no serializer behind it.
+/// </para>
+/// </summary>
+public static class PipelineApiContentTypes
+{
+    public const string Json = "application/json";
+
+    /// <summary>
+    /// <c>a=1&amp;b=2</c>. Cannot express an array, which is why a batching destination refuses it — see
+    /// <see cref="SupportsBatch"/>.
+    /// </summary>
+    public const string Form = "application/x-www-form-urlencoded";
+
+    public const string Text = "text/plain";
+    public const string Xml = "application/xml";
+    public const string Ndjson = "application/x-ndjson";
+
+    /// <summary>Everything a source may declare. The source never generates the body, so this is a hint list.</summary>
+    public static readonly string[] All = [Json, Form, Text, Xml, Ndjson];
+
+    /// <summary>The content types a destination can actually build a body for.</summary>
+    public static readonly string[] Writable = [Json, Form];
+
+    /// <summary>
+    /// Whether a batch of rows can be expressed in this encoding. False for form encoding: there is no
+    /// standard way to put an array in it — <c>records[0][sku]=</c> is one framework's convention and
+    /// <c>records[]=</c> is another — so guessing would produce a body the endpoint may silently misread.
+    /// </summary>
+    public static bool SupportsBatch(string? contentType) => contentType != Form;
+
+    /// <summary>Normalizes to a known value, falling back to JSON. Empty config means JSON, as before.</summary>
+    public static string ResolveWritable(string? contentType) =>
+        string.IsNullOrWhiteSpace(contentType) || !Writable.Contains(contentType) ? Json : contentType!;
+}
+
+/// <summary>
 /// What a <c>source.api</c> step does with nested JSON before it becomes columns.
 /// </summary>
 public static class PipelineApiFlatten

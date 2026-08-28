@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -27,6 +27,12 @@ public sealed class ApiFetchRequest
     public string Method { get; init; } = "GET";
     public IReadOnlyDictionary<string, string>? Headers { get; init; }
     public string? Body { get; init; }
+
+    /// <summary>
+    /// Content-Type for the request body. Free-form, unlike the destination's: this body is text the author
+    /// typed, so the content type is only a header and any value is legitimate.
+    /// </summary>
+    public string? ContentType { get; init; }
 
     /// <summary>Dotted path to the array of rows, e.g. <c>data.items</c>. Empty means the root.</summary>
     public string? JsonPath { get; init; }
@@ -100,7 +106,10 @@ public class PipelineApiReader(IPipelineApiClient client) : IPipelineApiReader
                         Method = request.Method,
                         Headers = request.Headers,
                         Query = query,
-                        Body = request.Body
+                        Body = request.Body,
+                        ContentType = string.IsNullOrWhiteSpace(request.ContentType)
+                            ? PipelineApiContentTypes.Json
+                            : request.ContentType!
                     }, ct);
 
                     if (!response.Success)

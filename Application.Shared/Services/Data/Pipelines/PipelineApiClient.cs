@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
@@ -57,7 +57,16 @@ public sealed class ApiRequest
     public IReadOnlyDictionary<string, string>? Query { get; init; }
 
     public string? Body { get; init; }
-    public string ContentType { get; init; } = "application/json";
+
+    /// <summary>
+    /// The body's Content-Type. May carry parameters (<c>application/json; charset=utf-8</c>).
+    /// <para>
+    /// A <c>Content-Type</c> in <see cref="Headers"/> wins over this, because that is where somebody copying
+    /// a curl example will put it — and <c>HttpRequestMessage.Headers</c> silently discards content headers,
+    /// so honouring it there is the difference between working and quietly doing nothing.
+    /// </para>
+    /// </summary>
+    public string ContentType { get; init; } = PipelineApiContentTypes.Json;
 
     /// <summary>Overrides the credential's and the server's default.</summary>
     public int? TimeoutSeconds { get; init; }
@@ -170,7 +179,7 @@ public class PipelineApiClient(
             ApplyHeaders(message, request);
 
             if (!string.IsNullOrEmpty(request.Body) && message.Method != HttpMethod.Get)
-                message.Content = new StringContent(request.Body!, Encoding.UTF8, request.ContentType);
+                message.Content = BuildContent(request);
 
             using var response = await client.SendAsync(
                 message, HttpCompletionOption.ResponseContentRead, timeoutCts.Token);
@@ -232,6 +241,63 @@ public class PipelineApiClient(
             return ApiResponse.Fail(
                 $"The API could not be reached: {ex.Message}", PipelineErrorType.ApiError, 0, safeUrl);
         }
+    }
+
+    /// <summary>
+    /// The request body, with its Content-Type applied.
+    /// <para>
+    /// Not <c>new StringContent(body, Encoding.UTF8, contentType)</c>, which is what this used to be: that
+    /// overload takes a bare media type and <b>throws</b> on anything carrying a parameter, so a perfectly
+    /// ordinary <c>application/json; charset=utf-8</c> typed into the step would have crashed the request
+    /// rather than sent it. Parsing the header instead accepts both forms.
+    /// </para>
+    /// <para>
+    /// A charset is added when the author did not give one, because the bytes really are UTF-8 and some
+    /// endpoints reject a body that does not say so.
+    /// </para>
+    /// </summary>
+    internal static StringContent BuildContent(ApiRequest request)
+    {
+        var content = new StringContent(request.Body!, Encoding.UTF8);
+
+        var declared = EffectiveContentType(request);
+
+        if (MediaTypeHeaderValue.TryParse(declared, out var mediaType) && mediaType is not null)
+        {
+            if (string.IsNullOrWhiteSpace(mediaType.CharSet)) mediaType.CharSet = "utf-8";
+            content.Headers.ContentType = mediaType;
+        }
+
+        // An unparseable value leaves the StringContent default (text/plain; charset=utf-8) in place rather
+        // than failing the send. The endpoint's own error is more useful than ours would be.
+        return content;
+    }
+
+    /// <summary>
+    /// The Content-Type actually used: a <c>Content-Type</c> among the step's extra headers if present,
+    /// otherwise the step's own content-type setting, otherwise JSON.
+    /// <para>
+    /// The header takes precedence deliberately. <c>ApplyHeaders</c> uses
+    /// <c>TryAddWithoutValidation</c>, which returns false for a content header rather than throwing — so a
+    /// <c>Content-Type</c> typed into "Extra headers" used to be dropped without a word. Somebody
+    /// translating a curl command will put it there, and silently ignoring it is the worst of the three
+    /// possible behaviours.
+    /// </para>
+    /// </summary>
+    internal static string EffectiveContentType(ApiRequest request)
+    {
+        if (request.Headers is not null)
+        {
+            foreach (var (key, value) in request.Headers)
+            {
+                if (!string.Equals(key, "Content-Type", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.IsNullOrWhiteSpace(value)) return value.Trim();
+            }
+        }
+
+        return string.IsNullOrWhiteSpace(request.ContentType)
+            ? PipelineApiContentTypes.Json
+            : request.ContentType.Trim();
     }
 
     private static void ApplyHeaders(HttpRequestMessage message, ApiRequest request)

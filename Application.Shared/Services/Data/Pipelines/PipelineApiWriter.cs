@@ -1,4 +1,4 @@
-using System.Data.Common;
+﻿using System.Data.Common;
 using System.Globalization;
 using System.Text.Json.Nodes;
 using Application.Shared.Models.Data;
@@ -39,6 +39,15 @@ public sealed class ApiWriteRequest
 
     /// <summary>One of <see cref="PipelineApiWriteShapes"/>.</summary>
     public string Shape { get; init; } = PipelineApiWriteShapes.Batch;
+
+    /// <summary>
+    /// How the rows are encoded into the body — one of <see cref="PipelineApiContentTypes.Writable"/>.
+    /// <para>
+    /// Only the encodings this class can actually produce are offered. Form encoding additionally forces
+    /// one request per row, because there is no standard way to put an array into it.
+    /// </para>
+    /// </summary>
+    public string ContentType { get; init; } = PipelineApiContentTypes.Json;
 
     public int BatchSize { get; init; } = 500;
 
@@ -98,7 +107,11 @@ public class PipelineApiWriter(
                 + "\"May send data\" on the credential if this endpoint is meant to be written to.",
                 PipelineErrorType.NotWritable);
 
+        // Form encoding cannot express an array, so it is one row per request whatever the shape says. The
+        // compiler rejects that combination at save time; this is the run-time backstop, because a graph can
+        // be edited into an invalid state and a silently mis-encoded body is worse than a slow one.
         var batchSize = request.Shape == PipelineApiWriteShapes.Row
+                        || !PipelineApiContentTypes.SupportsBatch(request.ContentType)
             ? 1
             : Math.Max(1, request.BatchSize);
 
@@ -139,7 +152,8 @@ public class PipelineApiWriter(
                 Url = request.Url,
                 Method = request.Method,
                 Headers = request.Headers,
-                Body = body
+                Body = body,
+                ContentType = request.ContentType
             }, ct);
 
             requests++;
@@ -209,6 +223,10 @@ public class PipelineApiWriter(
 
     private static string BuildBody(ApiWriteRequest request, List<JsonObject> buffer)
     {
+        // Form encoding is single-row by construction — see the batchSize note in WriteAsync.
+        if (request.ContentType == PipelineApiContentTypes.Form)
+            return FormEncode(buffer[0], request.BodyProperty);
+
         if (request.Shape == PipelineApiWriteShapes.Row)
             return buffer[0].ToJsonString();
 
@@ -220,6 +238,52 @@ public class PipelineApiWriter(
 
         return new JsonObject { [request.BodyProperty!] = array }.ToJsonString();
     }
+
+    /// <summary>
+    /// One row as <c>a=1&amp;b=2</c>, percent-encoded.
+    /// <para>
+    /// Two choices here are worth naming. A <b>null becomes an empty value</b> rather than being omitted:
+    /// form encoding has no null, and an HTML form submits an empty field rather than dropping it, so this
+    /// keeps the key set stable across rows — an endpoint that positionally trusts the fields would otherwise
+    /// see a different shape per row. And <c>Uri.EscapeDataString</c> is used, then <c>%20</c> is rewritten
+    /// to <c>+</c>, because that is what <c>application/x-www-form-urlencoded</c> specifies for a space and
+    /// EscapeDataString does not do it.
+    /// </para>
+    /// <para>
+    /// <paramref name="bodyProperty"/> prefixes every key — <c>record[sku]=…</c> — for endpoints that expect
+    /// a named group. Empty sends bare keys.
+    /// </para>
+    /// </summary>
+    internal static string FormEncode(JsonObject row, string? bodyProperty)
+    {
+        var parts = new List<string>(row.Count);
+
+        foreach (var (name, value) in row)
+        {
+            var key = string.IsNullOrWhiteSpace(bodyProperty)
+                ? name
+                : $"{bodyProperty}[{name}]";
+
+            parts.Add($"{Encode(key)}={Encode(Scalar(value))}");
+        }
+
+        return string.Join("&", parts);
+    }
+
+    /// <summary>
+    /// A JSON value as the text that goes into a form field. An object or array is kept as JSON text — form
+    /// encoding has no nesting, and dropping the column would lose data silently.
+    /// </summary>
+    private static string Scalar(JsonNode? value) => value switch
+    {
+        null => string.Empty,
+        JsonValue v when v.TryGetValue<string>(out var s) => s,
+        JsonValue v when v.TryGetValue<bool>(out var b) => b ? "true" : "false",
+        _ => value.ToJsonString().Trim('"')
+    };
+
+    private static string Encode(string value) =>
+        Uri.EscapeDataString(value).Replace("%20", "+");
 
     /// <summary>
     /// DuckDB value to JSON. Dates and times go out as ISO-8601 strings rather than whatever the invariant

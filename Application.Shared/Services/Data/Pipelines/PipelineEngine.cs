@@ -690,9 +690,19 @@ public partial class PipelineEngine(
         var shape = Str(config, "shape") ?? PipelineApiWriteShapes.Batch;
         var batchSize = Int(config, "batchSize") ?? options.ResolveApiWriteBatchSize();
 
+        var contentType = PipelineApiContentTypes.ResolveWritable(Str(config, "contentType"));
+
+        // Form encoding silently becomes one-per-row, so the log has to say so — otherwise a step
+        // configured for 500-row batches reports batches and sends singles.
+        var effectiveShape = PipelineApiContentTypes.SupportsBatch(contentType)
+            ? shape
+            : PipelineApiWriteShapes.Row;
+
         ctx.Log.WriteLine(
-            $"      sending to {credential}:{url} ("
-            + (shape == PipelineApiWriteShapes.Row ? "one request per row" : $"{batchSize:N0} rows per request")
+            $"      sending to {credential}:{url} as {contentType} ("
+            + (effectiveShape == PipelineApiWriteShapes.Row
+                ? "one request per row"
+                : $"{batchSize:N0} rows per request")
             + ")");
 
         var result = await apiWriter.WriteAsync(new ApiWriteRequest
@@ -706,6 +716,7 @@ public partial class PipelineEngine(
             Headers = HeaderDictionary(config, "headers", resolve),
             Shape = shape,
             BatchSize = batchSize,
+            ContentType = PipelineApiContentTypes.ResolveWritable(Str(config, "contentType")),
             BodyProperty = resolve(Str(config, "bodyProperty")),
             StopOnError = config?["stopOnError"] is not JsonValue v || !v.TryGetValue<bool>(out var stop) || stop,
             Progress = ctx.Log

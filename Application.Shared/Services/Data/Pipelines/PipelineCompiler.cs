@@ -411,6 +411,32 @@ public static class PipelineCompiler
                 break;
             }
 
+            case PipelineNodeTypes.DestinationApi:
+            {
+                var contentType = Str(config, "contentType");
+
+                if (contentType is not null && !PipelineApiContentTypes.Writable.Contains(contentType))
+                {
+                    issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldInvalid,
+                        $"'{contentType}' is not a format this step can build a body in. " +
+                        $"Available: {string.Join(", ", PipelineApiContentTypes.Writable)}."));
+                }
+
+                // Caught here rather than left to the run-time backstop, because the two settings LOOK
+                // compatible in the form: a step reading "500 rows per request" that in fact sends one row
+                // per request is a surprise best had at save time.
+                if (!PipelineApiContentTypes.SupportsBatch(contentType)
+                    && Str(config, "shape") == PipelineApiWriteShapes.Batch)
+                {
+                    issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldInvalid,
+                        $"'{node.Label ?? node.Id}' sends form-encoded bodies, which cannot hold a list, " +
+                        "so it will send one request per row rather than batches.",
+                        PipelineIssueSeverity.Warning));
+                }
+
+                break;
+            }
+
             case PipelineNodeTypes.DestinationEmail:
             {
                 // Recipients: caught here rather than at run time because an email step with an empty To is
@@ -592,11 +618,27 @@ public static class PipelineCompiler
         }
     }
 
+    /// <summary>
+    /// Whether a field's <c>VisibleWhen</c> is satisfied. Grammar: <c>key=a|b</c> is any-of, and <c>&amp;</c>
+    /// joins conditions that must ALL hold.
+    /// <para>
+    /// Must behave identically to <c>PipelineInspector.IsVisible</c> — a disagreement means this requires a
+    /// field the form never showed, which is an error nobody can act on.
+    /// </para>
+    /// </summary>
     private static bool IsVisible(PipelineFieldSpec field, PipelineNodeDef node)
     {
         if (string.IsNullOrWhiteSpace(field.VisibleWhen)) return true;
 
-        var parts = field.VisibleWhen.Split('=', 2);
+        foreach (var clause in field.VisibleWhen.Split('&', StringSplitOptions.RemoveEmptyEntries))
+            if (!ClauseHolds(clause, node)) return false;
+
+        return true;
+    }
+
+    private static bool ClauseHolds(string clause, PipelineNodeDef node)
+    {
+        var parts = clause.Split('=', 2);
         if (parts.Length != 2) return true;
 
         var actual = node.Config?[parts[0]];

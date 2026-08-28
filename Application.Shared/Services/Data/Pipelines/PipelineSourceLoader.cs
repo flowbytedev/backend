@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text;
 using System.Text.Json.Nodes;
 using Application.Shared.Data;
@@ -132,6 +132,7 @@ public class PipelineSourceLoader(
             Method = Str(config, "method") ?? "GET",
             Headers = Headers(config, "headers", request.ResolveTokens),
             Body = request.ResolveTokens(Str(config, "body")),
+            ContentType = Str(config, "contentType"),
             JsonPath = Str(config, "jsonPath"),
 
             Pagination = pagination,

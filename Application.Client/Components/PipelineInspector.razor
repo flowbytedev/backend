@@ -469,27 +469,40 @@
         return result;
     }
 
+    /// <summary>
+    /// Whether a field's <c>VisibleWhen</c> is satisfied. Grammar: <c>key=a|b</c> is any-of, and <c>&amp;</c>
+    /// joins conditions that must ALL hold — <c>contentType=application/json&amp;shape=batch</c>.
+    /// <para>
+    /// This must behave identically to <c>PipelineCompiler.IsVisible</c>. If they disagree, the compiler
+    /// either requires a field the form never showed or ignores one it did.
+    /// </para>
+    /// </summary>
     private bool IsVisible(PipelineFieldSpec field)
     {
         if (string.IsNullOrWhiteSpace(field.VisibleWhen)) return true;
 
-        var parts = field.VisibleWhen.Split('=', 2);
-        if (parts.Length != 2) return true;
-
-        var actual = Config()[parts[0]];
-        var text = actual switch
+        foreach (var clause in field.VisibleWhen.Split('&', StringSplitOptions.RemoveEmptyEntries))
         {
-            null => null,
-            JsonValue v when v.TryGetValue<string>(out var s) => s,
-            JsonValue v when v.TryGetValue<bool>(out var b) => b ? "true" : "false",
-            _ => actual.ToString()
-        };
+            var parts = clause.Split('=', 2);
+            if (parts.Length != 2) continue;
 
-        // "key=a|b" means any-of; see the matching comment in PipelineCompiler.IsVisible. These two must
-        // agree, or the compiler requires a field the form never showed.
-        return parts[1]
-            .Split('|', StringSplitOptions.RemoveEmptyEntries)
-            .Any(allowed => string.Equals(text, allowed, StringComparison.OrdinalIgnoreCase));
+            var actual = Config()[parts[0]];
+            var text = actual switch
+            {
+                null => null,
+                JsonValue v when v.TryGetValue<string>(out var s) => s,
+                JsonValue v when v.TryGetValue<bool>(out var b) => b ? "true" : "false",
+                _ => actual.ToString()
+            };
+
+            var satisfied = parts[1]
+                .Split('|', StringSplitOptions.RemoveEmptyEntries)
+                .Any(allowed => string.Equals(text, allowed, StringComparison.OrdinalIgnoreCase));
+
+            if (!satisfied) return false;
+        }
+
+        return true;
     }
 
     // ---------------- writes ----------------

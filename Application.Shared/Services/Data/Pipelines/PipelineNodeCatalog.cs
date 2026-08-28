@@ -225,7 +225,10 @@ public static class PipelineNodeCatalog
                     new("headers", "Extra headers", PipelineFieldKinds.KeyValue,
                         Help: "Merged over the credential's own headers."),
                     new("body", "Request body", PipelineFieldKinds.TextArea, VisibleWhen: "method=POST",
-                        Help: "JSON sent with each request, including each page."),
+                        Help: "Sent with each request, including each page. Written in whichever format the content type below declares."),
+                    new("contentType", "Content type", PipelineFieldKinds.Text, VisibleWhen: "method=POST",
+                        Placeholder: PipelineApiContentTypes.Json,
+                        Help: "Free text, because this body is yours - a form body would be \"a=1&b=2\" with application/x-www-form-urlencoded. A charset is added if you do not give one. Defaults to application/json."),
 
                     new("jsonPath", "Records are at", PipelineFieldKinds.Text,
                         Placeholder: "data.items",
@@ -568,17 +571,32 @@ public static class PipelineNodeCatalog
                         Options: [new("POST", "POST"), new("PUT", "PUT"), new("PATCH", "PATCH")]),
                     new("headers", "Extra headers", PipelineFieldKinds.KeyValue),
 
+                    // A closed list, unlike the source's: this body is BUILT from rows, so the only content
+                    // types on offer are the ones there is a serializer for. Offering XML here would be a
+                    // promise with nothing behind it.
+                    new("contentType", "Send as", PipelineFieldKinds.Select,
+                        Options:
+                        [
+                            new(PipelineApiContentTypes.Json, "JSON"),
+                            new(PipelineApiContentTypes.Form, "Form (application/x-www-form-urlencoded)")
+                        ],
+                        Help: "Form encoding cannot express a list, so it always sends one request per row."),
+
                     new("shape", "Send rows as", PipelineFieldKinds.Select, Required: true,
+                        VisibleWhen: $"contentType={PipelineApiContentTypes.Json}",
                         Options:
                         [
                             new(PipelineApiWriteShapes.Batch, "A batch per request"),
                             new(PipelineApiWriteShapes.Row, "One request per row")
                         ]),
                     new("batchSize", "Rows per request", PipelineFieldKinds.Number,
-                        VisibleWhen: "shape=batch", SupportsTokens: false),
+                        // BOTH conditions: a form-encoded step sends one row per request whatever shape
+                        // says, so showing "rows per request" there would be a control that does nothing.
+                        VisibleWhen: $"contentType={PipelineApiContentTypes.Json}&shape=batch",
+                        SupportsTokens: false),
                     new("bodyProperty", "Wrap the batch in", PipelineFieldKinds.Text,
-                        VisibleWhen: "shape=batch", Placeholder: "records",
-                        Help: "Sends a named property holding the array. Leave empty to send the bare array."),
+                        Placeholder: "records",
+                        Help: "JSON: sends a named property holding the array. Form: prefixes every field, so \"record\" sends record[sku]=... Leave empty for neither."),
 
                     new("stopOnError", "Stop at the first failed request", PipelineFieldKinds.Checkbox,
                         SupportsTokens: false,
