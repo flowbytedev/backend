@@ -29,6 +29,42 @@
 
             <!-- Body -->
             <div class="apidocs-body">
+                @* Layer picker — only for a dataset backed by an external database, because only then are
+                   there two layers to choose between. Every path and snippet below follows it. *@
+                @if (IsExternalSource)
+                {
+                    <section class="apidocs-layer">
+                        <div class="apidocs-layer-head">
+                            <span class="apidocs-layer-label">Read from</span>
+                            <div class="apidocs-seg">
+                                <button type="button" class="apidocs-seg-btn @(liveMode ? "" : "apidocs-seg-active")"
+                                        @onclick="() => liveMode = false">Snapshot</button>
+                                <button type="button" class="apidocs-seg-btn @(liveMode ? "apidocs-seg-active" : "")"
+                                        @onclick="() => liveMode = true">Live source</button>
+                            </div>
+                        </div>
+                        @if (liveMode)
+                        {
+                            <p class="apidocs-layer-note">
+                                Every call below carries <code>?source=live</code> and reads the external database
+                                directly, so the rows are always current. Table names are qualified
+                                (<code>schema.table</code>) — the form <code>GET .../tables?source=live</code> returns.
+                                Rows are capped at <strong>5,000 per call</strong>, so a download of a large table comes
+                                back cut off: check the <code>X-Rows-Truncated</code> response header. Import is
+                                snapshot-only — the source is read-only from here.
+                            </p>
+                        }
+                        else
+                        {
+                            <p class="apidocs-layer-note">
+                                Reads this dataset's saved local copy. It is backed by an external database, so the local
+                                copy holds only the snapshots someone saved into it — it can be stale, or missing tables
+                                entirely. Switch to <strong>Live source</strong> for current data.
+                            </p>
+                        }
+                    </section>
+                }
+
                 <!-- Step 1: key -->
                 <section class="apidocs-section">
                     <h3 class="apidocs-h3"><span class="apidocs-step">1</span> Get an API key</h3>
@@ -67,6 +103,15 @@
 
                     <p class="apidocs-p" style="margin-top:0.75rem">Request body fields (all optional):</p>
                     @CodeBlock(BodyExample())
+                    @if (liveMode)
+                    {
+                        <p class="apidocs-note">
+                            Paging, filters and sorting are pushed into the source query, so a large table isn't
+                            scanned just to return one page. <code>totalRows</code> costs an extra
+                            <code>COUNT(*)</code> on the source — append <code>&amp;includeTotal=false</code> to skip
+                            it, and ignore <code>totalRows</code> when you do.
+                        </p>
+                    }
                 </section>
 
                 <!-- Endpoint reference -->
@@ -85,15 +130,28 @@
                     <p class="apidocs-note">
                         Each endpoint requires the matching grant on your key: <strong>read</strong> for list/columns/data/download,
                         <strong>import</strong> for upload. Requests outside your key's scope return <code>403</code>.
+                        @if (liveMode)
+                        {
+                            <span>
+                                A key restricted to specific tables must name them in the qualified
+                                <code>schema.table</code> form to match a live read.
+                            </span>
+                        }
                     </p>
                 </section>
 
                 <!-- Examples -->
                 <section class="apidocs-section">
                     <h3 class="apidocs-h3"><span class="apidocs-step">5</span> Download &amp; import (curl)</h3>
-                    <p class="apidocs-p">Download the whole table as CSV:</p>
+                    <p class="apidocs-p">
+                        @(liveMode
+                            ? "Download rows as CSV (up to the 5,000-row cap):"
+                            : "Download the whole table as CSV:")
+                    </p>
                     @CodeBlock(DownloadCurl())
-                    <p class="apidocs-p" style="margin-top:0.75rem">Append rows from a CSV file (requires import grant):</p>
+                    <p class="apidocs-p" style="margin-top:0.75rem">
+                        Append rows from a CSV file (requires import grant)@(liveMode ? " — writes to the snapshot, never the source:" : ":")
+                    </p>
                     @CodeBlock(ImportCurl())
                 </section>
             </div>
@@ -109,18 +167,50 @@
     [Parameter] public string? TableName { get; set; }
     [Parameter] public string? DatasetName { get; set; }
 
+    /// <summary>
+    /// True when the dataset is backed by an external database. Only then is there a second layer to read,
+    /// so only then does the panel offer the Snapshot / Live source choice.
+    /// </summary>
+    [Parameter] public bool IsExternalSource { get; set; }
+
+    /// <summary>
+    /// Whether the caller is currently looking at the live source layer. Seeds the picker so the snippets
+    /// match the table the user just had open, rather than making them re-pick.
+    /// </summary>
+    [Parameter] public bool LiveSource { get; set; }
+
     private static readonly string[] Languages = { "curl", "JavaScript", "Python" };
     private string activeLang = "curl";
+
+    // Which layer the snippets target. Re-seeded each time the panel opens (below) — never persisted, since
+    // the user may open it next from a table on the other layer.
+    private bool liveMode;
+    private bool wasVisible;
+
+    protected override void OnParametersSet()
+    {
+        if (IsVisible && !wasVisible)
+            liveMode = IsExternalSource && LiveSource;
+
+        // A local dataset has no live layer, so the flag can never be left on for one.
+        if (!IsExternalSource) liveMode = false;
+
+        wasVisible = IsVisible;
+    }
 
     private record Endpoint(string Verb, string Path, string Description);
 
     private string BaseUrl => _navigationManager.BaseUri.TrimEnd('/');
     private string ApiKeysUrl => $"/data/api-keys?c={CompanyId}";
 
+    // ?source=live is what routes a read to the external database instead of the local snapshot. Absent, the
+    // API reads the snapshot — so the snapshot snippets carry no query string at all, exactly as before.
+    private string SourceQuery => liveMode ? "?source=live" : string.Empty;
+
     private string TablesPath => $"{BaseUrl}/api/external/datasets/{DatasetId}/tables";
-    private string ColumnsPath => $"{TablesPath}/{TableName}/columns";
-    private string DataPath => $"{TablesPath}/{TableName}/data";
-    private string DownloadPath => $"{TablesPath}/{TableName}/download";
+    private string ColumnsPath => $"{TablesPath}/{TableName}/columns{SourceQuery}";
+    private string DataPath => $"{TablesPath}/{TableName}/data{SourceQuery}";
+    private string DownloadPath => $"{TablesPath}/{TableName}/download{SourceQuery}";
     private string ImportPath => $"{TablesPath}/{TableName}/import";
 
     private async Task Close()
@@ -129,14 +219,20 @@
         if (IsVisibleChanged.HasDelegate) await IsVisibleChanged.InvokeAsync(false);
     }
 
-    private List<Endpoint> Endpoints() => new()
+    private List<Endpoint> Endpoints()
     {
-        new("GET",  $"/api/external/datasets/{DatasetId}/tables", "List tables you can read"),
-        new("GET",  $"/api/external/datasets/{DatasetId}/tables/{TableName}/columns", "Column names and types"),
-        new("POST", $"/api/external/datasets/{DatasetId}/tables/{TableName}/data", "Query rows (paged, filtered)"),
-        new("GET",  $"/api/external/datasets/{DatasetId}/tables/{TableName}/download", "Download full table as CSV"),
-        new("POST", $"/api/external/datasets/{DatasetId}/tables/{TableName}/import", "Append rows from a CSV file"),
-    };
+        var root = $"/api/external/datasets/{DatasetId}/tables";
+        return new()
+        {
+            new("GET",  $"{root}{SourceQuery}", "List tables you can read"),
+            new("GET",  $"{root}/{TableName}/columns{SourceQuery}", "Column names and types"),
+            new("POST", $"{root}/{TableName}/data{SourceQuery}", "Query rows (paged, filtered)"),
+            new("GET",  $"{root}/{TableName}/download{SourceQuery}",
+                liveMode ? "Download rows as CSV (max 5,000)" : "Download full table as CSV"),
+            new("POST", $"{root}/{TableName}/import",
+                liveMode ? "Append rows from a CSV file (snapshot only)" : "Append rows from a CSV file"),
+        };
+    }
 
     private string BodyExample() =>
 @"{
@@ -276,6 +372,23 @@ $@"curl -X POST ""{ImportPath}"" \
     .apidocs-ep-desc { font-size: 0.75rem; color: #71717a; }
     .apidocs-note { font-size: 0.75rem; color: #71717a; margin: 0.625rem 0 0; line-height: 1.5; }
 
+    /* Layer picker (external-source datasets only) */
+    .apidocs-layer {
+        border: 1px solid #e4e4e7; border-radius: 0.5rem; background: #fafafa;
+        padding: 0.75rem 0.875rem; margin-bottom: 1.25rem;
+    }
+    .apidocs-layer-head { display: flex; align-items: center; gap: 0.625rem; flex-wrap: wrap; }
+    .apidocs-layer-label { font-size: 0.8125rem; font-weight: 600; color: #18181b; }
+    .apidocs-seg { display: flex; border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden; background: #fff; }
+    .apidocs-seg-btn {
+        padding: 0.3rem 0.75rem; font-size: 0.78125rem; font-weight: 600; border: none;
+        cursor: pointer; background: transparent; color: #52525b;
+    }
+    .apidocs-seg-btn + .apidocs-seg-btn { border-left: 1px solid #e4e4e7; }
+    .apidocs-seg-active { background: #eef2ff; color: #4338ca; }
+    .apidocs-layer-note { margin: 0.5rem 0 0; font-size: 0.75rem; color: #52525b; line-height: 1.55; }
+    .apidocs-layer-note code { background: #f4f4f5; padding: 0.0625rem 0.3125rem; border-radius: 4px; }
+
     /* ── Dark mode ─────────────────────────────────────────────────────── */
     [data-theme="dark"] .apidocs-panel { background: #181a20; box-shadow: 0 20px 60px rgba(0,0,0,0.6); }
     [data-theme="dark"] .apidocs-header { border-bottom-color: #2b303b; }
@@ -293,4 +406,12 @@ $@"curl -X POST ""{ImportPath}"" \
     [data-theme="dark"] .apidocs-ep-path { color: #e6e9ef; }
     [data-theme="dark"] .apidocs-ep-desc { color: #9aa1ac; }
     [data-theme="dark"] .apidocs-note { color: #9aa1ac; }
+    [data-theme="dark"] .apidocs-layer { background: #1a1e26; border-color: #2b303b; }
+    [data-theme="dark"] .apidocs-layer-label { color: #f3f4f6; }
+    [data-theme="dark"] .apidocs-seg { background: #181a20; border-color: #2b303b; }
+    [data-theme="dark"] .apidocs-seg-btn { color: #c5cad4; }
+    [data-theme="dark"] .apidocs-seg-btn + .apidocs-seg-btn { border-left-color: #2b303b; }
+    [data-theme="dark"] .apidocs-seg-active { background: rgba(99,102,241,0.2); color: #c7d2fe; }
+    [data-theme="dark"] .apidocs-layer-note { color: #c5cad4; }
+    [data-theme="dark"] .apidocs-layer-note code { background: #1e222b; }
 </style>

@@ -244,6 +244,187 @@ public class DatabaseTableService : IDatabaseTableService
         _ => $"SELECT * FROM {tableName} LIMIT {limit}",
     };
 
+    public async Task<ExternalTableDataResult> QueryTableDataAsync(string entityId, string companyId,
+        TableDataQuery query, bool includeTotalRows = true, CancellationToken ct = default)
+    {
+        var outcome = new ExternalTableDataResult();
+
+        if (query == null || string.IsNullOrWhiteSpace(query.TableName))
+        {
+            outcome.Error = "Table name is required.";
+            return outcome;
+        }
+
+        var connection = await LoadDecryptedAsync(entityId, companyId, ct);
+        if (connection == null)
+        {
+            outcome.Error = "No connection is configured for this database source.";
+            return outcome;
+        }
+
+        var page = query.Page > 0 ? query.Page : 1;
+        var requested = query.PageSize > 0 ? query.PageSize : 50;
+        var pageSize = Math.Min(requested, MaxExternalRows);
+        // long: a caller asking for page int.MaxValue would overflow an int multiply. OFFSET takes a bigint
+        // on every engine here, so the wide value goes straight into the SQL.
+        var offset = (long)(page - 1) * pageSize;
+
+        var sw = Stopwatch.StartNew();
+        var grid = new SqlQueryResult { IsSelect = true };
+        await RunGridAsync(connection, BuildPageSql(connection.DatabaseType, query, pageSize, offset), pageSize, grid, ct);
+
+        if (!string.IsNullOrEmpty(grid.Error))
+        {
+            sw.Stop();
+            outcome.Error = grid.Error;
+            outcome.ElapsedMs = (long)sw.Elapsed.TotalMilliseconds;
+            return outcome;
+        }
+
+        var data = new TableDataResult
+        {
+            Columns = grid.Columns,
+            // DBNull rather than null, matching IDuckdbService.QueryTableDataAsync so both layers of a
+            // dataset hand the caller the same row shape.
+            Data = grid.Rows
+                .Select(r => r.ToDictionary(kv => kv.Key, kv => kv.Value ?? (object)DBNull.Value))
+                .ToList(),
+            Page = page,
+            PageSize = pageSize,
+            TotalRows = 0
+        };
+
+        if (includeTotalRows)
+        {
+            var count = new SqlQueryResult { IsSelect = true };
+            await RunGridAsync(connection, BuildCountSql(connection.DatabaseType, query), 1, count, ct);
+
+            if (!string.IsNullOrEmpty(count.Error))
+            {
+                sw.Stop();
+                outcome.Error = count.Error;
+                outcome.ElapsedMs = (long)sw.Elapsed.TotalMilliseconds;
+                return outcome;
+            }
+
+            data.TotalRows = ReadCountScalar(count);
+        }
+
+        sw.Stop();
+        outcome.Data = data;
+        // Truncation here means one specific thing: the caller asked for a bigger page than the ceiling
+        // allows AND we filled that ceiling, so rows it will never see may exist. Not read from
+        // SqlQueryResult.Truncated — the row limit is in the SQL, so the reader never overruns its cap and
+        // that flag stays false on this path. Ordinary "there are more pages" is TotalRows' job.
+        outcome.Truncated = requested > pageSize && data.Data.Count >= pageSize;
+        outcome.ElapsedMs = (long)sw.Elapsed.TotalMilliseconds;
+        return outcome;
+    }
+
+    /// <summary>
+    /// Reads the single value a COUNT query returned. Clamped to <see cref="int.MaxValue"/> rather than
+    /// wrapped — <see cref="TableDataResult.TotalRows"/> is an int and a source table can hold more rows
+    /// than that. ClickHouse returns 64-bit integers as JSON <i>strings</i>, hence the string-tolerant
+    /// conversion; anything unparseable degrades to 0 rather than failing a page that was already fetched.
+    /// </summary>
+    private static int ReadCountScalar(SqlQueryResult count)
+    {
+        var scalar = count.Rows.FirstOrDefault()?.Values.FirstOrDefault();
+        if (scalar == null || scalar is DBNull) return 0;
+
+        try
+        {
+            var total = Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
+            return total <= 0 ? 0 : (int)Math.Min(total, int.MaxValue);
+        }
+        catch (Exception ex) when (ex is FormatException or InvalidCastException or OverflowException)
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>One page of a source table, with the filters/sort/paging pushed server-side.</summary>
+    private static string BuildPageSql(DataSourceType type, TableDataQuery query, int pageSize, long offset)
+    {
+        var table = QuoteQualified(type, query.TableName);
+
+        var select = query.SelectedColumns?.Any() == true
+            ? string.Join(", ", query.SelectedColumns.Select(c => QuoteIdentifier(type, c)))
+            : "*";
+
+        var where = BuildWhereClause(type, query.Filters);
+
+        var order = query.SortColumns?.Any() == true
+            ? " ORDER BY " + string.Join(", ", query.SortColumns
+                .Where(s => !string.IsNullOrWhiteSpace(s.ColumnName))
+                .Select(s => $"{QuoteIdentifier(type, s.ColumnName)} {(s.IsDescending ? "DESC" : "ASC")}"))
+            : string.Empty;
+        if (order.Trim() == "ORDER BY") order = string.Empty; // every sort column was blank
+
+        // SQL Server has no LIMIT/OFFSET. Its OFFSET…FETCH form requires an ORDER BY, hence the
+        // (SELECT NULL) placeholder when the caller didn't sort; the first page skips paging entirely and
+        // uses TOP, which needs no ordering at all.
+        if (type == DataSourceType.SQLServer)
+        {
+            if (offset == 0 && order.Length == 0)
+                return $"SELECT TOP {pageSize} {select} FROM {table}{where}";
+
+            var ordered = order.Length == 0 ? " ORDER BY (SELECT NULL)" : order;
+            return $"SELECT {select} FROM {table}{where}{ordered} OFFSET {offset} ROWS FETCH NEXT {pageSize} ROWS ONLY";
+        }
+
+        return $"SELECT {select} FROM {table}{where}{order} LIMIT {pageSize} OFFSET {offset}";
+    }
+
+    /// <summary>Row count for the same filtered set the page came from, so the pager's total matches it.</summary>
+    private static string BuildCountSql(DataSourceType type, TableDataQuery query)
+    {
+        var table = QuoteQualified(type, query.TableName);
+        var where = BuildWhereClause(type, query.Filters);
+        // SQL Server's COUNT(*) is int and overflows past ~2.1B rows; COUNT_BIG(*) is bigint.
+        var countExpr = type == DataSourceType.SQLServer ? "COUNT_BIG(*)" : "COUNT(*)";
+        return $"SELECT {countExpr} AS row_count FROM {table}{where}";
+    }
+
+    private static string BuildWhereClause(DataSourceType type, List<FilterCondition>? filters)
+    {
+        if (filters?.Any() != true) return string.Empty;
+
+        var clauses = filters
+            .Select(f => BuildFilterClause(type, f))
+            .Where(c => !string.IsNullOrEmpty(c))
+            .ToList();
+
+        return clauses.Count == 0 ? string.Empty : $" WHERE {string.Join(" AND ", clauses)}";
+    }
+
+    /// <summary>
+    /// One filter condition, using the same operator vocabulary as the DuckDB path
+    /// (<c>equals/contains/startswith/endswith/greaterthan/lessthan</c>) so a caller's filters mean the same
+    /// thing on either layer of a dataset. Values are compared as string literals, as they are there — which
+    /// relies on the engine's implicit conversion, so a <c>contains</c> on a numeric column will be rejected
+    /// by strict engines like PostgreSQL. Identifiers are quoted and literals escaped, so neither can break
+    /// out of the statement.
+    /// </summary>
+    private static string BuildFilterClause(DataSourceType type, FilterCondition filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter?.ColumnName) || string.IsNullOrWhiteSpace(filter.Value))
+            return string.Empty;
+
+        var column = QuoteIdentifier(type, filter.ColumnName);
+        var value = EscapeLiteral(filter.Value);
+
+        return (filter.Operator ?? string.Empty).ToLowerInvariant() switch
+        {
+            "contains" => $"{column} LIKE '%{value}%'",
+            "startswith" => $"{column} LIKE '{value}%'",
+            "endswith" => $"{column} LIKE '%{value}'",
+            "greaterthan" => $"{column} > '{value}'",
+            "lessthan" => $"{column} < '{value}'",
+            _ => $"{column} = '{value}'"
+        };
+    }
+
     private async Task RunGridAsync(DatabaseConnection connection, string sql, int cap, SqlQueryResult result, CancellationToken ct)
     {
         var sw = Stopwatch.StartNew();

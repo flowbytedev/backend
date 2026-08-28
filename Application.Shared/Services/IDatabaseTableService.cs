@@ -33,6 +33,29 @@ public interface IDatabaseTableService
     /// via <see cref="SqlQueryResult.Error"/>, never thrown.</summary>
     Task<SqlQueryResult> GetTableSampleAsync(string entityId, string companyId, string tableName, int maxRows, CancellationToken ct = default);
 
+    /// <summary>
+    /// Paged, filtered and sorted read of one live source table or view — the external-source counterpart of
+    /// <c>IDuckdbService.QueryTableDataAsync</c>, so the same <see cref="TableDataQuery"/> serves both layers
+    /// of a dataset.
+    /// </summary>
+    /// <remarks>
+    /// The page, the filters and the sort are pushed <b>into</b> the SQL (dialect-correct: SQL Server has no
+    /// <c>LIMIT</c>, so it gets <c>TOP</c>/<c>OFFSET…FETCH</c>) — a client-side cap would make the source
+    /// evaluate the whole table to hand back fifty rows. <see cref="TableDataResult.TotalRows"/> comes from a
+    /// matching <c>COUNT(*)</c> so the pager can move past page one; pass
+    /// <paramref name="includeTotalRows"/> = false to skip that second round trip, which is the expensive
+    /// half on a large source table.
+    /// <para>
+    /// <see cref="TableDataQuery.IncludeRowId"/> is ignored: <c>rowid</c> is a DuckDB pseudocolumn and these
+    /// rows are not editable anyway. <see cref="TableDataQuery.DatasetId"/> is ignored too — the source is
+    /// addressed by <paramref name="entityId"/>. Page size is clamped to the same external row ceiling as
+    /// <see cref="ExecuteQueryAsync"/>. Failures are returned via
+    /// <see cref="ExternalTableDataResult.Error"/>, never thrown.
+    /// </para>
+    /// </remarks>
+    Task<ExternalTableDataResult> QueryTableDataAsync(string entityId, string companyId, TableDataQuery query,
+        bool includeTotalRows = true, CancellationToken ct = default);
+
     /// <summary>Reads only the column shape (name + type) of a source table/view <b>without executing the
     /// query or transferring rows</b> — a schema-only describe (<c>CommandBehavior.SchemaOnly</c> for ADO
     /// engines, <c>DESCRIBE TABLE</c> for ClickHouse). Far cheaper than SELECT-ing a row for schema discovery,

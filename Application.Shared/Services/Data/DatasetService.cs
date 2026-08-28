@@ -32,6 +32,15 @@ public class DatasetService : IDatasetService
         return dataset;
     }
 
+    public async Task<Dataset?> GetDatasetForCompanyAsync(string id, string companyId)
+    {
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(companyId))
+            return null;
+
+        return await _context.Dataset.AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == id && d.CompanyId == companyId);
+    }
+
     public async Task<HashSet<string>?> GetAccessibleTablesAsync(string datasetId, string userId)
     {
         var dataset = await _context.Dataset.AsNoTracking().FirstOrDefaultAsync(d => d.Id == datasetId);

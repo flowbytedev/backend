@@ -90,3 +90,28 @@ public class UserColumnPreferences
     public List<ColumnSettings> ColumnSettings { get; set; } = new();
     public DateTime LastModified { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>
+/// Outcome of a paged read against a dataset's <b>live external source</b>
+/// (<c>IDatabaseTableService.QueryTableDataAsync</c>). Follows <see cref="SqlQueryResult"/>'s contract
+/// rather than <see cref="TableDataResult"/>'s: a connection or query failure arrives in
+/// <see cref="Error"/> instead of as an exception, because the source is outside our control and the
+/// caller has to be able to report <i>why</i> the read failed rather than get a 500.
+/// </summary>
+public class ExternalTableDataResult
+{
+    /// <summary>The page of rows + column shape. Null when <see cref="Error"/> is set.</summary>
+    public TableDataResult? Data { get; set; }
+
+    /// <summary>Set when the read failed; <see cref="Data"/> is then null.</summary>
+    public string? Error { get; set; }
+
+    /// <summary>
+    /// True when the source still had rows beyond the page returned <i>because the page size was clamped
+    /// to the external row ceiling</i> — not the ordinary "there are more pages" case, which
+    /// <see cref="TableDataResult.TotalRows"/> already tells you.
+    /// </summary>
+    public bool Truncated { get; set; }
+
+    public long ElapsedMs { get; set; }
+}

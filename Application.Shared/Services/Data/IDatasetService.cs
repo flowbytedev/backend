@@ -9,6 +9,14 @@ public interface IDatasetService
     Task<Dataset?> GetDatasetAsync(string id, string userId);
 
     /// <summary>
+    /// Loads a dataset by id scoped to a <b>company only</b> — no per-user share check. For the API-key
+    /// authenticated surfaces (<c>api/external/*</c>), where the key carries the tenant and an acting user
+    /// is optional: <see cref="GetDatasetAsync"/> would 404 every request that names no user. Callers are
+    /// responsible for whatever user-level check applies to their path.
+    /// </summary>
+    Task<Dataset?> GetDatasetForCompanyAsync(string id, string companyId);
+
+    /// <summary>
     /// Resolves which tables a user may access within a dataset. Returns <c>null</c> when the user has
     /// access to ALL tables (dataset owner, a dataset-Admin share, or a share with no table restriction).
     /// Returns a (case-insensitive) set when the user is restricted to specific tables, or an empty set

@@ -146,7 +146,9 @@ else
                CompanyId="@c"
                DatasetId="@DatasetId"
                DatasetName="@(DatasetInfo?.Name)"
-               TableName="@TableName" />
+               TableName="@TableName"
+               IsExternalSource="@(DatasetInfo?.SourceType == DatasetSourceType.External)"
+               LiveSource="@sourceMode" />
 }
 
 @code {

@@ -457,6 +457,11 @@ builder.Services.AddScoped<ISchemaInferenceService, SchemaInferenceService>();
 // External-access API keys (issue/scope/validate) + the data API they unlock.
 builder.Services.AddScoped<IApiKeyService, ApiKeyService>();
 
+// Gate for the ?source=live option on api/external/* — resolves a dataset's external source connection and
+// refuses the live layer when the acting user's column/row restrictions could not be enforced against it.
+builder.Services.AddScoped<Application.Shared.Services.Data.IDatasetLiveSourceService,
+    Application.Shared.Services.Data.DatasetLiveSourceService>();
+
 // SQL query workbench — saved queries (ad-hoc execution lives on IDuckdbService).
 builder.Services.AddScoped<ISavedQueryService, SavedQueryService>();
 
