@@ -197,6 +197,7 @@ else
                                IsEnabled="_pipeline.IsEnabled"
                                ApiEnabled="_pipeline.ApiEnabled"
                                Cron="@_pipeline.CronExpression"
+                               TimeZone="@_pipeline.TimeZone"
                                RequiresManualRun="_requiresManualRun"
                                Settings="_graph.Settings"
                                OnNameChanged="v => { _pipeline.Name = v; MarkDirty(); }"
@@ -204,6 +205,7 @@ else
                                OnEnabledChanged="v => { _pipeline.IsEnabled = v; MarkDirty(); }"
                                OnApiEnabledChanged="v => { _pipeline.ApiEnabled = v; MarkDirty(); }"
                                OnCronChanged="v => { _pipeline.CronExpression = v; MarkDirty(); }"
+                               OnTimeZoneChanged="v => { _pipeline.TimeZone = v; MarkDirty(); }"
                                OnSettingsChanged="() => { MarkDirty(); Recompute(false); }"
                                OnNodeEdited="OnNodeEdited" />
         </div>

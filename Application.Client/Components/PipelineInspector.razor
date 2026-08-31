@@ -58,6 +58,17 @@
                         </div>
                     </div>
 
+                    <div class="field">
+                        <label class="field-label">Time zone</label>
+                        <TimeZonePicker Value="@TimeZone"
+                                        ValueChanged="v => OnTimeZoneChanged.InvokeAsync(v)"
+                                        DefaultId="@ScheduleTimeZones.DefaultId"
+                                        Disabled="@string.IsNullOrWhiteSpace(Cron)" />
+                        <div class="field-help">
+                            The hours above are read in this zone, daylight saving included.
+                        </div>
+                    </div>
+
                     @if (RequiresManualRun)
                     {
                         @* The compiler refuses this combination at save time; saying so here means the author
@@ -405,6 +416,10 @@
     [Parameter] public bool IsEnabled { get; set; }
     [Parameter] public bool ApiEnabled { get; set; }
     [Parameter] public string? Cron { get; set; }
+
+    /// <summary>IANA id, or null for the scheduler's own default.</summary>
+    [Parameter] public string? TimeZone { get; set; }
+
     [Parameter] public bool RequiresManualRun { get; set; }
     [Parameter] public PipelineSettings Settings { get; set; } = new();
 
@@ -413,6 +428,7 @@
     [Parameter] public EventCallback<bool> OnEnabledChanged { get; set; }
     [Parameter] public EventCallback<bool> OnApiEnabledChanged { get; set; }
     [Parameter] public EventCallback<string?> OnCronChanged { get; set; }
+    [Parameter] public EventCallback<string?> OnTimeZoneChanged { get; set; }
     [Parameter] public EventCallback OnSettingsChanged { get; set; }
 
     /// <summary>

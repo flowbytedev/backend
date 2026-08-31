@@ -1,4 +1,5 @@
 using Application.Shared.Data;
+using Application.Shared.Models;
 using Hangfire;
 using Hangfire.Server;
 using Hangfire.Storage;
@@ -40,7 +41,7 @@ public class PipelineRegistrarJob(ApplicationDbContext db, ILogger<PipelineRegis
                 continue;
             }
 
-            var tz = ResolveTimeZone(pipeline.TimeZone);
+            var tz = ResolveTimeZone(pipeline.TimeZone, pipeline.Id, pipeline.Name);
             try
             {
                 // Queue pinned explicitly: in Hangfire 1.8 a [Queue] attribute alone is not honoured for
@@ -66,20 +67,28 @@ public class PipelineRegistrarJob(ApplicationDbContext db, ILogger<PipelineRegis
         using var connection = JobStorage.Current.GetConnection();
         foreach (var recurring in connection.GetRecurringJobs())
         {
-            if (recurring.Id.StartsWith(JobPrefix, StringComparison.Ordinal) && !liveJobIds.Contains(recurring.Id))
+            if (RegistrarSweep.IsOwned(recurring.Id, JobPrefix) && !liveJobIds.Contains(recurring.Id))
                 RecurringJob.RemoveIfExists(recurring.Id);
         }
     }
 
-    private static TimeZoneInfo? ResolveTimeZone(string? id)
+    /// <summary>
+    /// The zone this pipeline's cron is read in. Falling back is right for a pipeline that names no zone,
+    /// and is the least-bad option for one whose zone this box cannot resolve — but the second case is a
+    /// pipeline running at an hour nobody asked for, so it is said out loud rather than swallowed.
+    /// </summary>
+    private TimeZoneInfo? ResolveTimeZone(string? id, string pipelineId, string name)
     {
-        if (string.IsNullOrWhiteSpace(id)) id = "Asia/Beirut";
-        try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
-        catch
-        {
-            // Windows uses a different id for the same zone; this is the fallback the other jobs use too.
-            try { return TimeZoneInfo.FindSystemTimeZoneById("Middle East Standard Time"); }
-            catch { return null; }
-        }
+        if (string.IsNullOrWhiteSpace(id)) return ScheduleTimeZones.Default;
+
+        var resolved = ScheduleTimeZones.Resolve(id);
+        if (resolved is not null) return resolved;
+
+        logger.LogWarning(
+            "Pipeline {PipelineId} '{Name}' asks for time zone '{TimeZone}', which this host cannot resolve. "
+            + "Its schedule will run on {Fallback} instead.",
+            pipelineId, name, id, ScheduleTimeZones.DefaultId);
+
+        return ScheduleTimeZones.Default;
     }
 }

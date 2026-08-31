@@ -1,0 +1,165 @@
+/* Time-zone picker. Tokens are the ones shadcn.css publishes on :root, so this follows light/dark
+   with the rest of the app without needing the .sc wrapper its host happens to sit in. */
+
+.tzp {
+    position: relative;
+    width: 100%;
+}
+
+.tzp-trigger,
+.tzp-fallback {
+    width: 100%;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    font-family: var(--font-body);
+    font-size: 13px;
+    text-align: left;
+    color: var(--text-primary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    outline: none;
+    cursor: pointer;
+    transition: border-color .12s ease, box-shadow .12s ease;
+}
+
+.tzp-fallback {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    cursor: text;
+}
+
+.tzp-trigger:hover:not(:disabled) {
+    border-color: var(--border-strong);
+}
+
+.tzp-trigger:focus-visible,
+.tzp-trigger.is-open,
+.tzp-fallback:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--ring);
+}
+
+.tzp.is-disabled .tzp-trigger,
+.tzp-trigger:disabled,
+.tzp-fallback:disabled {
+    background: var(--surface-subtle);
+    color: var(--text-muted);
+    cursor: not-allowed;
+}
+
+.tzp-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.tzp-id {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+}
+
+.tzp-muted {
+    color: var(--text-muted);
+}
+
+.tzp-offset {
+    flex: 0 0 auto;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.tzp-unknown {
+    color: var(--danger);
+}
+
+.tzp-chevron {
+    flex: 0 0 auto;
+    color: var(--text-muted);
+}
+
+/* Catches the click that should dismiss the list. Transparent and behind the panel, so the panel's own
+   rows still receive their clicks. */
+.tzp-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+}
+
+/* In flow, not absolute: the host panel is an overflow container and would clip a floating list. */
+.tzp-panel {
+    position: relative;
+    z-index: 11;
+    margin-top: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .12);
+    overflow: hidden;
+}
+
+.tzp-search {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    font-family: var(--font-body);
+    font-size: 13px;
+    color: var(--text-primary);
+    background: var(--surface);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    outline: none;
+}
+
+.tzp-search::placeholder {
+    color: var(--text-muted);
+}
+
+.tzp-list {
+    max-height: 232px;
+    overflow-y: auto;
+}
+
+.tzp-opt {
+    width: 100%;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 10px;
+    text-align: left;
+    background: none;
+    border: none;
+    cursor: pointer;
+}
+
+.tzp-opt.is-active {
+    background: var(--surface-subtle);
+}
+
+.tzp-opt.is-selected .tzp-id {
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.tzp-empty,
+.tzp-more {
+    padding: 8px 10px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.tzp-more {
+    border-top: 1px solid var(--border);
+    background: var(--surface-subtle);
+}

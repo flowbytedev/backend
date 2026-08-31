@@ -1,4 +1,5 @@
 using Application.Shared.Data;
+using Application.Shared.Models;
 using Hangfire;
 using Hangfire.Server;
 using Hangfire.Storage;
@@ -62,19 +63,16 @@ public class IngestionRegistrarJob
         using var connection = JobStorage.Current.GetConnection();
         foreach (var recurring in connection.GetRecurringJobs())
         {
-            if (recurring.Id.StartsWith(JobPrefix, StringComparison.Ordinal) && !liveJobIds.Contains(recurring.Id))
+            if (RegistrarSweep.IsOwned(recurring.Id, JobPrefix) && !liveJobIds.Contains(recurring.Id))
                 RecurringJob.RemoveIfExists(recurring.Id);
         }
     }
 
-    private static TimeZoneInfo? ResolveTimeZone(string? id)
-    {
-        if (string.IsNullOrWhiteSpace(id)) id = "Asia/Beirut";
-        try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
-        catch
-        {
-            try { return TimeZoneInfo.FindSystemTimeZoneById("Middle East Standard Time"); }
-            catch { return null; }
-        }
-    }
+    /// <summary>
+    /// The zone this schedule's cron is read in, falling back to the default when it names none — or names
+    /// one this host cannot resolve. See <see cref="ScheduleTimeZones"/> for why the id that ends up stored
+    /// on the recurring job matters more than the one we looked up.
+    /// </summary>
+    private static TimeZoneInfo? ResolveTimeZone(string? id) =>
+        ScheduleTimeZones.Resolve(id) ?? ScheduleTimeZones.Default;
 }

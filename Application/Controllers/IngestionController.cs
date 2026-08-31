@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Application.Shared.Authorization;
+using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Application.Shared.Services.Data;
 using Hangfire;
@@ -324,16 +325,12 @@ public class IngestionController : ControllerBase
         }
     }
 
-    private static TimeZoneInfo? ResolveTimeZone(string? id)
-    {
-        if (string.IsNullOrWhiteSpace(id)) id = "Asia/Beirut";
-        try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
-        catch
-        {
-            try { return TimeZoneInfo.FindSystemTimeZoneById("Middle East Standard Time"); }
-            catch { return null; }
-        }
-    }
+    /// <summary>
+    /// The zone this source's next-run time is shown in. Display only — the registrar decides what the
+    /// schedule actually runs on — but it resolves the same way so the two cannot disagree.
+    /// </summary>
+    private static TimeZoneInfo? ResolveTimeZone(string? id) =>
+        ScheduleTimeZones.Resolve(id) ?? ScheduleTimeZones.Default;
 
     private (string companyId, string userId, string? error) ReadHeaders()
     {

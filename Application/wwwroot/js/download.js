@@ -16,6 +16,13 @@ window.scrollToElement = function (id) {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
 };
 
+// The keyboard-navigation variant: no animation and the smallest scroll that reveals the row, which is
+// what a listbox needs — 'smooth' + 'center' queues an animation per keypress and fights held arrow keys.
+window.scrollIntoViewNearest = function (id) {
+    const el = document.getElementById(id);
+    if (el) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+};
+
 // Triggers a browser download of in-memory text content (no server round trip) — used for exporting a
 // notebook cell's result grid to CSV/Excel straight from the rows already loaded client-side.
 window.downloadTextFile = function (fileName, mimeType, content) {

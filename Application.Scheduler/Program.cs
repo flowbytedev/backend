@@ -4,6 +4,7 @@ using Application.Scheduler.Options;
 using Application.Scheduler.Repositories;
 using Application.Scheduler.Services;
 using Application.Shared.Data;
+using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Microsoft.AspNetCore.DataProtection;
 using Hangfire;
@@ -423,6 +424,19 @@ if (ownsDefaultQueue)
     {
         Console.WriteLine($"Initial notebook-run reconcile failed: {ex.Message}");
     }
+
+    // Pipelines get the same startup pass as the two above. Without it a schedule only reaches Hangfire on
+    // the registrar's next */5 tick, and for a long while it never reached it at all: the sweep below the
+    // registration loop used to match its own "pipeline-" prefixed id and delete itself on that first pass.
+    try
+    {
+        var pipelineRegistrar = scope.ServiceProvider.GetRequiredService<PipelineRegistrarJob>();
+        await pipelineRegistrar.RunAsync(null, CancellationToken.None);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Initial pipeline reconcile failed: {ex.Message}");
+    }
 }
 
 
@@ -430,12 +444,7 @@ app.Run();
 
 
 
-static TimeZoneInfo? GetTimeZone(string id)
-{
-    try { return TimeZoneInfo.FindSystemTimeZoneById(id); }
-    catch
-    { /* Windows/Linux name differences */
-        try { return TimeZoneInfo.FindSystemTimeZoneById("Middle East Standard Time"); } // Windows for Beirut
-        catch { return null; } // fall back to server local time
-    }
-}
+// Every recurring job below is registered with this. It resolves to the id form that survives being
+// stored and re-read by another server — see ScheduleTimeZones. Null means this host has no usable time
+// zone data at all, and Hangfire falls back to server local time.
+static TimeZoneInfo? GetTimeZone(string id) => ScheduleTimeZones.Resolve(id) ?? ScheduleTimeZones.Default;

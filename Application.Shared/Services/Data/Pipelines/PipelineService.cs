@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using Application.Shared.Models;
+using System.Text.Json;
 using Application.Shared.Data;
 using Application.Shared.Models.Data.Pipelines;
 using Microsoft.EntityFrameworkCore;
@@ -645,6 +646,15 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
         if (cron is not null && !LooksLikeCron(cron))
             return $"'{cron}' is not a valid schedule. Use five fields, for example '0 3 * * *' for 3am daily.";
 
+        // Checked against this host's tz database, which is a proxy for the scheduler box's rather than a
+        // guarantee — but it catches the case that matters, an id that is simply not a time zone. Without
+        // it the registrar silently falls back and the pipeline quietly runs on Beirut hours.
+        var timeZone = string.IsNullOrWhiteSpace(request.TimeZone) ? null : request.TimeZone!.Trim();
+
+        if (timeZone is not null && !ScheduleTimeZones.IsKnown(timeZone))
+            return $"'{timeZone}' is not a time zone this server knows. " +
+                   $"Leave it empty to use {ScheduleTimeZones.DefaultId}.";
+
         // The rule that earns the compiler's `scheduled` parameter: an uploaded file exists for exactly one
         // run, so a pipeline that reads one cannot be given an unattended trigger. Caught here rather than
         // at 3am, when the answer would be a failed run and no file.
@@ -659,7 +669,7 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
         }
 
         pipeline.CronExpression = cron;
-        pipeline.TimeZone = string.IsNullOrWhiteSpace(request.TimeZone) ? null : request.TimeZone!.Trim();
+        pipeline.TimeZone = timeZone;
         pipeline.ApiEnabled = request.ApiEnabled;
         return null;
     }

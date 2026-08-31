@@ -1,0 +1,283 @@
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@inject IJSRuntime _js
+
+@*
+    A searchable time-zone picker, bindable with @bind-Value.
+
+    The options are the runtime's own tz database rather than a hand-kept constant, so the list cannot
+    drift from what the scheduler will actually resolve. Ids are normalised to IANA ("Asia/Beirut"):
+    that is what the row stores and what the Windows scheduler box converts from — a Windows id resolves
+    too, but it reads wrong everywhere else.
+
+    The list renders in flow rather than as an absolutely positioned panel. This control's first home is
+    the pipeline inspector, which is its own `overflow: auto` container, and an absolute panel would be
+    clipped by it.
+*@
+
+<div class="tzp @(Disabled ? "is-disabled" : "")">
+    @if (All.Count < 2)
+    {
+        @* No usable tz database (a trimmed or invariant-timezone build). A plain text box is the honest
+           degraded mode: the scheduler still accepts any id it can resolve on its own side. *@
+        <input class="tzp-fallback" placeholder="@DefaultId" value="@Value" disabled="@Disabled"
+               @onchange="e => PickAsync(Blank(e.Value?.ToString()))" />
+    }
+    else
+    {
+        <button type="button" class="tzp-trigger @(_open ? "is-open" : "")" disabled="@Disabled" @onclick="Toggle">
+            <span class="tzp-main">
+                @if (Selected is { } zone)
+                {
+                    <span class="tzp-id">@zone.Id</span>
+                    <span class="tzp-offset">@zone.Offset</span>
+                }
+                else if (!string.IsNullOrWhiteSpace(Value))
+                {
+                    @* Saved before this id left the tz database, or set through the API. Shown as it is
+                       rather than silently swapped for the default, which would hide the problem. *@
+                    <span class="tzp-id">@Value</span>
+                    <span class="tzp-offset tzp-unknown">not recognised</span>
+                }
+                else
+                {
+                    <span class="tzp-id tzp-muted">@DefaultId</span>
+                    <span class="tzp-offset">default</span>
+                }
+            </span>
+            <svg class="tzp-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m6 9 6 6 6-6" />
+            </svg>
+        </button>
+
+        @if (_open)
+        {
+            <div class="tzp-backdrop" @onclick="Close"></div>
+            <div class="tzp-panel">
+                <input class="tzp-search" @ref="_searchRef" placeholder="Search time zones…"
+                       @bind="_filter" @bind:event="oninput" @bind:after="OnFilterChanged"
+                       @onkeydown="OnKeyDownAsync" />
+
+                <div class="tzp-list">
+                    @{ var index = 0; }
+
+                    @if (ShowDefaultRow)
+                    {
+                        var defaultIndex = index++;
+                        <button type="button" id="@OptionId(defaultIndex)"
+                                class="tzp-opt @(defaultIndex == _active ? "is-active" : "")"
+                                @onclick="() => PickAsync(null)"
+                                @onmouseover="() => _active = defaultIndex">
+                            <span class="tzp-id tzp-muted">Use the default</span>
+                            <span class="tzp-offset">@DefaultId</span>
+                        </button>
+                    }
+
+                    @foreach (var option in _shown)
+                    {
+                        var optionIndex = index++;
+                        <button type="button" id="@OptionId(optionIndex)"
+                                class="tzp-opt @(optionIndex == _active ? "is-active" : "") @(option.Id == Value ? "is-selected" : "")"
+                                @onclick="() => PickAsync(option.Id)"
+                                @onmouseover="() => _active = optionIndex">
+                            <span class="tzp-id">@option.Id</span>
+                            <span class="tzp-offset">@option.Offset</span>
+                        </button>
+                    }
+
+                    @if (_shown.Count == 0)
+                    {
+                        <div class="tzp-empty">No time zone matches “@_filter”.</div>
+                    }
+                </div>
+
+                @if (_matched > _shown.Count)
+                {
+                    @* Said out loud rather than left to look like the whole list: a silent cut is how
+                       someone concludes their zone is missing. *@
+                    <div class="tzp-more">Showing @_shown.Count of @_matched — keep typing to narrow.</div>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+
+    /// <summary>The zone used when nothing is chosen — i.e. what the scheduler falls back to.</summary>
+    [Parameter] public string DefaultId { get; set; } = "Asia/Beirut";
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>
+    /// Rendering all ~450 zones costs more than it is worth in wasm, and nobody scrolls that far anyway.
+    /// </summary>
+    private const int MaxRendered = 100;
+
+    private readonly string _instanceId = "tzp-" + Guid.NewGuid().ToString("N")[..8];
+
+    private ElementReference _searchRef;
+    private bool _open;
+    private bool _focusSearch;
+    private string _filter = string.Empty;
+    private int _active;
+    private int _matched;
+    private List<Zone> _shown = new();
+
+    private static IReadOnlyList<Zone>? _all;
+
+    private static IReadOnlyList<Zone> All => _all ??= BuildZones();
+
+    private Zone? Selected => string.IsNullOrWhiteSpace(Value)
+        ? null
+        : All.FirstOrDefault(z => string.Equals(z.Id, Value, StringComparison.OrdinalIgnoreCase));
+
+    // Offering "the default" while a zone is set is the only way back to it without deleting text.
+    private bool ShowDefaultRow => !string.IsNullOrWhiteSpace(Value) && _filter.Trim().Length == 0;
+
+    private int OptionCount => (ShowDefaultRow ? 1 : 0) + _shown.Count;
+
+    private string OptionId(int index) => $"{_instanceId}-{index}";
+
+    private void Toggle()
+    {
+        if (_open) { Close(); return; }
+
+        _open = true;
+        _focusSearch = true;
+        _filter = string.Empty;
+        Refilter();
+
+        // Open on the current zone rather than the top of an alphabetical list of 450.
+        var selected = Selected;
+        var selectedIndex = selected is null ? -1 : _shown.FindIndex(z => z.Id == selected.Id);
+        _active = selectedIndex >= 0 ? selectedIndex + (ShowDefaultRow ? 1 : 0) : 0;
+    }
+
+    private void Close()
+    {
+        _open = false;
+        _filter = string.Empty;
+    }
+
+    private void OnFilterChanged()
+    {
+        Refilter();
+        _active = 0;
+    }
+
+    private void Refilter()
+    {
+        var query = _filter.Trim();
+
+        if (query.Length == 0)
+        {
+            _matched = All.Count;
+            _shown = All.Take(MaxRendered).ToList();
+            return;
+        }
+
+        var matches = All.Where(z => z.Search.Contains(query, StringComparison.OrdinalIgnoreCase)).ToList();
+        _matched = matches.Count;
+        _shown = matches.Take(MaxRendered).ToList();
+    }
+
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
+    {
+        switch (e.Key)
+        {
+            case "Escape":
+                Close();
+                break;
+
+            case "ArrowDown":
+                await MoveAsync(1);
+                break;
+
+            case "ArrowUp":
+                await MoveAsync(-1);
+                break;
+
+            case "Enter":
+                await PickActiveAsync();
+                break;
+        }
+    }
+
+    private async Task MoveAsync(int delta)
+    {
+        var count = OptionCount;
+        if (count == 0) return;
+
+        _active = Math.Clamp(_active + delta, 0, count - 1);
+
+        // The row is rendered but may be below the fold; the browser scrolls the list, not the page.
+        try { await _js.InvokeVoidAsync("scrollIntoViewNearest", OptionId(_active)); }
+        catch (JSException) { /* helper not loaded — navigation still works, it just does not scroll. */ }
+    }
+
+    private Task PickActiveAsync()
+    {
+        if (ShowDefaultRow && _active == 0) return PickAsync(null);
+
+        var zoneIndex = _active - (ShowDefaultRow ? 1 : 0);
+        if (zoneIndex < 0 || zoneIndex >= _shown.Count) return Task.CompletedTask;
+
+        return PickAsync(_shown[zoneIndex].Id);
+    }
+
+    private async Task PickAsync(string? id)
+    {
+        Close();
+
+        if (string.Equals(id, Value, StringComparison.Ordinal)) return;
+
+        Value = id;
+        await ValueChanged.InvokeAsync(id);
+    }
+
+    private static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_focusSearch) return;
+        _focusSearch = false;
+        if (!_open) return;
+
+        try { await _searchRef.FocusAsync(); }
+        catch (JSException) { /* panel closed again before the focus call landed. */ }
+    }
+
+    private sealed record Zone(string Id, string Offset, string Search);
+
+    private static List<Zone> BuildZones()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var zones = new List<Zone>();
+
+        foreach (var tz in TimeZoneInfo.GetSystemTimeZones())
+        {
+            var id = tz.Id;
+
+            // The browser runtime hands back IANA ids and a server-side render on Windows hands back
+            // Windows ones. Normalising here means the id we store does not depend on which rendered.
+            if (!id.Contains('/') && TimeZoneInfo.TryConvertWindowsIdToIanaId(id, out var iana) && iana is not null)
+                id = iana;
+
+            if (!seen.Add(id)) continue;
+
+            var offset = tz.GetUtcOffset(now);
+            var label = $"UTC{(offset < TimeSpan.Zero ? '-' : '+')}{offset.Duration():hh\\:mm}";
+
+            // Searched against the readable form too, so "new york" finds America/New_York.
+            zones.Add(new Zone(id, label, $"{id} {id.Replace('_', ' ').Replace('/', ' ')} {label}"));
+        }
+
+        zones.Sort((a, b) => string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase));
+        return zones;
+    }
+}
