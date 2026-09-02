@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -61,10 +62,33 @@ public class ApiKeysController : ControllerBase
 
         if (request == null || string.IsNullOrWhiteSpace(request.Name))
             return BadRequest("A name is required");
+        if (request.Scopes == null || !request.Scopes.Any())
+            return BadRequest("At least one dataset/table grant is required. Revoke the key to cut off access entirely.");
 
         var updated = await _apiKeyService.UpdateKeyAsync(companyId, id, request);
         if (updated == null) return NotFound();
         return Ok(updated);
+    }
+
+    // POST: api/ApiKeys/{id}/rotate  → issues a new secret, returned exactly once. Name, expiry
+    // and grants are untouched, so callers only have to swap the secret they send.
+    [HttpPost("{id}/rotate")]
+    public async Task<ActionResult<CreateApiKeyResult>> RotateKey(string id)
+    {
+        var companyId = CompanyId();
+        if (string.IsNullOrWhiteSpace(companyId)) return BadRequest("Company ID is required");
+        if (!User.HasCompanyRole(companyId)) return Forbid();
+
+        try
+        {
+            var result = await _apiKeyService.RotateKeyAsync(companyId, id);
+            if (result == null) return NotFound();
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(ex.Message);
+        }
     }
 
     // POST: api/ApiKeys/{id}/revoke

@@ -15,6 +15,12 @@ public interface IApiKeyService
     Task<List<ApiKeyDto>> GetKeysAsync(string companyId);
     Task<CreateApiKeyResult> CreateKeyAsync(string companyId, CreateApiKeyRequest request, string? createdBy);
     Task<ApiKeyDto?> UpdateKeyAsync(string companyId, string id, UpdateApiKeyRequest request);
+
+    /// <summary>
+    /// Issues a brand-new secret for an existing key, keeping its name, expiry and grants.
+    /// Returns null when the key does not exist; throws when it is revoked.
+    /// </summary>
+    Task<CreateApiKeyResult?> RotateKeyAsync(string companyId, string id);
     Task<bool> RevokeKeyAsync(string companyId, string id);
     Task<bool> DeleteKeyAsync(string companyId, string id);
 
@@ -99,6 +105,32 @@ public class ApiKeyService : IApiKeyService
 
         var datasetNames = await GetDatasetNamesAsync(companyId);
         return ToDto(key, datasetNames);
+    }
+
+    public async Task<CreateApiKeyResult?> RotateKeyAsync(string companyId, string id)
+    {
+        var key = await _db.ApiKey
+            .Where(k => k.CompanyId == companyId && k.Id == id)
+            .Include(k => k.Scopes)
+            .FirstOrDefaultAsync();
+        if (key == null) return null;
+
+        // A revoked key stays dead. Handing it a working secret would silently restore access that
+        // someone deliberately cut off; creating a new key makes that decision visible instead.
+        if (key.RevokedAt != null)
+            throw new InvalidOperationException("This key is revoked. Create a new key instead of resetting this one.");
+
+        var (rawKey, prefix, hash) = GenerateKey();
+        key.KeyHash = hash;
+        key.KeyPrefix = prefix;
+        // The new secret has never been used; carrying the old stamp over would misreport it as live.
+        key.LastUsedAt = null;
+        key.ModifiedAt = DateTime.UtcNow;
+
+        await _db.SaveChangesAsync();
+
+        var datasetNames = await GetDatasetNamesAsync(companyId);
+        return new CreateApiKeyResult { Key = ToDto(key, datasetNames), PlainTextKey = rawKey };
     }
 
     public async Task<bool> RevokeKeyAsync(string companyId, string id)

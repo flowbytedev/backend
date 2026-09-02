@@ -42,7 +42,7 @@ public class UpdateApiKeyRequest
     public List<ApiKeyScopeDto> Scopes { get; set; } = new();
 }
 
-/// <summary>Returned only by create — the one time the raw key is revealed.</summary>
+/// <summary>Returned by create and rotate — the one time the raw key is revealed.</summary>
 public class CreateApiKeyResult
 {
     public ApiKeyDto Key { get; set; } = new();

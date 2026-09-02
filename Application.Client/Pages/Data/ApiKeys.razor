@@ -28,7 +28,7 @@ else
             <h1 class="ds-title">API Keys</h1>
             <p class="ds-subtitle">Grant external systems scoped, read or import access to your data.</p>
         </div>
-        @if (!showCreate)
+        @if (!showForm)
         {
             <button class="btn btn-default" @onclick="StartCreate">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
@@ -37,13 +37,19 @@ else
         }
     </div>
 
-    @* One-time reveal of a freshly created key. *@
+    @* One-time reveal of a freshly created or reset key. *@
     @if (!string.IsNullOrEmpty(createdPlainKey))
     {
         <div class="ds-card" style="margin-bottom:1rem;border:1px solid #16a34a;background:#f0fdf4">
             <div style="padding:1rem">
-                <p style="font-weight:600;color:#15803d;margin:0 0 0.25rem">Copy your API key now</p>
-                <p style="font-size:0.8125rem;color:#3f6212;margin:0 0 0.75rem">This is the only time the full key is shown. Store it somewhere safe — you can't retrieve it again.</p>
+                <p style="font-weight:600;color:#15803d;margin:0 0 0.25rem">@RevealTitle</p>
+                <p style="font-size:0.8125rem;color:#3f6212;margin:0 0 0.75rem">
+                    This is the only time the full key is shown. Store it somewhere safe — you can't retrieve it again.
+                    @if (revealIsReset)
+                    {
+                        <span>The previous secret stopped working immediately; update anything still using it.</span>
+                    }
+                </p>
                 <div style="display:flex;gap:0.5rem;align-items:center">
                     <code style="flex:1;padding:0.5rem 0.75rem;background:#fff;border:1px solid #bbf7d0;border-radius:6px;font-size:0.8125rem;overflow:auto;word-break:break-all">@createdPlainKey</code>
                     <button class="btn btn-outline" @onclick="CopyKey">Copy</button>
@@ -55,11 +61,17 @@ else
         </div>
     }
 
-    @* Create form. *@
-    @if (showCreate)
+    @* Create/edit form — the same fields either way; only the target differs. *@
+    @if (showForm)
     {
         <div class="ds-form-card" style="margin-bottom:1rem">
-            <p class="ds-section-title">New API Key</p>
+            <p class="ds-section-title">@(editingKeyId == null ? "New API Key" : "Edit API Key")</p>
+            @if (editingKeyId != null)
+            {
+                <p style="font-size:0.8125rem;color:#71717a;margin:-0.25rem 0 0.75rem">
+                    Editing <code>@editingKeyPrefix…</code> — the secret itself is unchanged. Use <strong>Reset key</strong> to issue a new one.
+                </p>
+            }
 
             <div class="ds-field">
                 <label class="ds-label">Name</label>
@@ -121,9 +133,16 @@ else
             </div>
 
             <div class="ds-step-nav">
-                <button class="btn btn-outline" @onclick="CancelCreate" disabled="@isSaving">Cancel</button>
-                <button class="btn btn-default" @onclick="CreateKey" disabled="@isSaving">
-                    @if (isSaving) { <span>Creating…</span> } else { <span>Create key</span> }
+                <button class="btn btn-outline" @onclick="CancelForm" disabled="@isSaving">Cancel</button>
+                <button class="btn btn-default" @onclick="SaveKey" disabled="@isSaving">
+                    @if (isSaving)
+                    {
+                        <span>@(editingKeyId == null ? "Creating…" : "Saving…")</span>
+                    }
+                    else
+                    {
+                        <span>@(editingKeyId == null ? "Create key" : "Save changes")</span>
+                    }
                 </button>
             </div>
         </div>
@@ -159,6 +178,15 @@ else
                                 <td class="ds-td ds-td-date">@(key.LastUsedAt?.ToLocalTime().ToString("MMM dd, yyyy HH:mm") ?? "—")</td>
                                 <td class="ds-td ds-td-actions-cell">
                                     <div class="ds-actions">
+                                        <button class="btn-icon" title="Edit name, expiry and grants" @onclick="() => StartEdit(key)">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                                        </button>
+                                        @if (key.RevokedAt == null)
+                                        {
+                                            <button class="btn-icon" title="Reset key (issue a new secret)" @onclick="() => ResetKey(key)">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+                                            </button>
+                                        }
                                         @if (key.IsActive)
                                         {
                                             <button class="btn-icon" title="Revoke key" @onclick="() => RevokeKey(key)">
@@ -213,12 +241,22 @@ else
     private bool isLoading = true;
     private bool isSaving = false;
     private bool canManage;
-    private bool showCreate = false;
+    private bool showForm = false;
     private string? companyId;
+
+    // Null while creating; the key's id while editing an existing one.
+    private string? editingKeyId;
+    private string? editingKeyPrefix;
 
     private string newName = string.Empty;
     private DateTime? newExpiry;
     private string? createdPlainKey;
+    private bool revealIsReset;
+    private string? revealKeyName;
+
+    private string RevealTitle => revealIsReset
+        ? $"New key for '{revealKeyName}' — copy it now"
+        : "Copy your API key now";
 
     [SupplyParameterFromQuery]
     public string? c { get; set; }
@@ -315,15 +353,51 @@ else
 
     private void StartCreate()
     {
+        editingKeyId = null;
+        editingKeyPrefix = null;
         newName = string.Empty;
         newExpiry = null;
         scopeRows = new() { new ScopeRow() };
-        showCreate = true;
+        showForm = true;
     }
 
-    private void CancelCreate()
+    private async Task StartEdit(ApiKeyDto key)
     {
-        showCreate = false;
+        editingKeyId = key.Id;
+        editingKeyPrefix = key.KeyPrefix;
+        newName = key.Name;
+        newExpiry = key.ExpiresAt?.ToLocalTime().Date;
+        scopeRows = (key.Scopes ?? new()).Select(s => new ScopeRow
+        {
+            DatasetId = s.DatasetId,
+            TableName = string.IsNullOrWhiteSpace(s.TableName) ? null : s.TableName,
+            CanRead = s.CanRead,
+            CanImport = s.CanImport,
+        }).ToList();
+        if (!scopeRows.Any()) scopeRows.Add(new ScopeRow());
+        showForm = true;
+
+        // The table dropdowns are driven by this cache, so a grant cannot render its own selection
+        // until the dataset's tables are loaded.
+        foreach (var row in scopeRows.Where(r => !string.IsNullOrEmpty(r.DatasetId)))
+        {
+            await EnsureTablesLoaded(row.DatasetId);
+            // Keep a grant on a table that has since disappeared visible rather than silently
+            // resetting it to "All tables" — widening access is not something to do quietly.
+            if (!string.IsNullOrEmpty(row.TableName)
+                && tablesByDataset.TryGetValue(row.DatasetId, out var tables)
+                && !tables.Contains(row.TableName!))
+            {
+                tables.Insert(0, row.TableName!);
+            }
+        }
+    }
+
+    private void CancelForm()
+    {
+        showForm = false;
+        editingKeyId = null;
+        editingKeyPrefix = null;
         scopeRows.Clear();
     }
 
@@ -336,7 +410,7 @@ else
         await EnsureTablesLoaded(row.DatasetId);
     }
 
-    private async Task CreateKey()
+    private async Task SaveKey()
     {
         if (string.IsNullOrWhiteSpace(newName))
         {
@@ -361,39 +435,87 @@ else
             return;
         }
 
+        var isEdit = editingKeyId != null;
         try
         {
             isSaving = true;
-            var request = new CreateApiKeyRequest
+            HttpResponseMessage response;
+            if (isEdit)
             {
-                Name = newName.Trim(),
-                ExpiresAt = newExpiry?.ToUniversalTime(),
-                Scopes = scopes,
-            };
-            var response = await _httpClient.PostAsJsonAsync("api/ApiKeys", request);
+                var request = new UpdateApiKeyRequest
+                {
+                    Name = newName.Trim(),
+                    ExpiresAt = newExpiry?.ToUniversalTime(),
+                    Scopes = scopes,
+                };
+                response = await _httpClient.PutAsJsonAsync($"api/ApiKeys/{editingKeyId}", request);
+            }
+            else
+            {
+                var request = new CreateApiKeyRequest
+                {
+                    Name = newName.Trim(),
+                    ExpiresAt = newExpiry?.ToUniversalTime(),
+                    Scopes = scopes,
+                };
+                response = await _httpClient.PostAsJsonAsync("api/ApiKeys", request);
+            }
+
             if (response.IsSuccessStatusCode)
             {
-                var result = await response.Content.ReadFromJsonAsync<CreateApiKeyResult>();
-                createdPlainKey = result?.PlainTextKey;
-                _toastService.ShowSuccess("API key created");
-                showCreate = false;
-                scopeRows.Clear();
+                // Only a create hands back a secret; an edit leaves the existing one in place.
+                if (!isEdit)
+                {
+                    var result = await response.Content.ReadFromJsonAsync<CreateApiKeyResult>();
+                    createdPlainKey = result?.PlainTextKey;
+                    revealIsReset = false;
+                    revealKeyName = null;
+                }
+                _toastService.ShowSuccess(isEdit ? "API key updated" : "API key created");
+                CancelForm();
                 await LoadKeys();
             }
             else
             {
                 var msg = await response.Content.ReadAsStringAsync();
-                _toastService.ShowError($"Failed to create key: {msg}");
+                _toastService.ShowError($"Failed to {(isEdit ? "update" : "create")} key: {msg}");
             }
         }
         catch (Exception ex)
         {
-            _toastService.ShowError($"Error creating key: {ex.Message}");
+            _toastService.ShowError($"Error {(isEdit ? "updating" : "creating")} key: {ex.Message}");
         }
         finally
         {
             isSaving = false;
         }
+    }
+
+    private async Task ResetKey(ApiKeyDto key)
+    {
+        var confirmed = await _js.InvokeAsync<bool>("confirm",
+            $"Reset '{key.Name}'? The current secret stops working immediately, and anything still using it will fail until you hand over the new one.");
+        if (!confirmed) return;
+
+        try
+        {
+            var response = await _httpClient.PostAsync($"api/ApiKeys/{key.Id}/rotate", null);
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<CreateApiKeyResult>();
+                createdPlainKey = result?.PlainTextKey;
+                revealIsReset = true;
+                revealKeyName = key.Name;
+                _toastService.ShowSuccess("New key issued");
+                await LoadKeys();
+            }
+            else
+            {
+                var msg = await response.Content.ReadAsStringAsync();
+                _toastService.ShowError($"Failed to reset key: {msg}");
+            }
+        }
+        catch (Exception ex) { _toastService.ShowError($"Error resetting key: {ex.Message}"); }
     }
 
     private async Task RevokeKey(ApiKeyDto key)
