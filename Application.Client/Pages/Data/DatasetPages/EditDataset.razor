@@ -1,4 +1,5 @@
 @page "/data/datasets/edit/{id}"
+@using Application.Shared.Enums
 @inject HttpClient _httpClient
 @inject IToastService _toastService
 @inject NavigationManager _navigationManager
@@ -85,6 +86,13 @@ else
                         <InputText id="ds-path" class="ds-input" @bind-Value="datasetModel.Path" placeholder="C:/duckdb" />
                         <span class="ds-hint">Folder where this dataset's DuckDB file is stored. Defaults to C:/duckdb.</span>
                     </div>
+
+                    @* Only external datasets have a live path to secure; a Local dataset is enforced by
+                       rewriting against its own DuckDB snapshot, which needs no decision. *@
+                    @if (datasetModel.SourceType == DatasetSourceType.External)
+                    {
+                        <RlsEnforcementPanel SourceEntityId="@datasetModel.SourceEntityId" />
+                    }
 
                     <div class="ds-form-actions">
                         <button type="submit" class="btn btn-default" disabled="@(isSubmitting || nameChecking || nameError != null)">
@@ -186,7 +194,15 @@ else
                 }
             }
 
-            var response = await _httpClient.GetAsync($"api/Datasets/item/{Id}");
+            // The route authorises on a company role read from this header, so without it the request is
+            // Forbidden rather than merely unscoped.
+            if (!string.IsNullOrEmpty(companyId))
+            {
+                _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
+                _httpClient.DefaultRequestHeaders.Add("X-Company-Id", companyId);
+            }
+
+            var response = await _httpClient.GetAsync($"api/Datasets/{Id}");
             if (response.IsSuccessStatusCode)
             {
                 datasetModel = await response.Content.ReadFromJsonAsync<Dataset>();

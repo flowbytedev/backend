@@ -117,6 +117,13 @@ public class DatasetUserDto
 /// <see cref="AllowedValues"/>. Column names are matched dataset-wide (across the dataset's tables).</summary>
 public class RlsFilterItem
 {
+    /// <summary>
+    /// The table the filter applies to. Required for new filters — a column name does not mean the same
+    /// thing in every table, and a native row policy has to name one table. Empty is accepted only so
+    /// that legacy table-less rows round-trip through the editor unchanged.
+    /// </summary>
+    public string TableName { get; set; } = string.Empty;
+
     [Required]
     public string ColumnName { get; set; } = string.Empty;
     public List<string> AllowedValues { get; set; } = new();

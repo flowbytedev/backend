@@ -20,11 +20,10 @@ namespace Application.Shared.Services.Data;
 /// <remarks>
 /// <b>This service is the enforcement point for column masking and row-level security.</b> Until it
 /// existed, the header comment on <see cref="UserRlsFilter"/> was accurate: this backend served the
-/// grants and left it to "the consuming query engine" to apply them. The consumer that prompted this
-/// endpoint (Relay's dataset agent) cannot apply them — the RLS records carry no table name, so a
-/// consumer has no way to know which table a filter belongs to — and, more fundamentally, a consumer is
-/// the wrong place for it: <c>X-User-Id</c> is caller-asserted, so only the side holding the grants can
-/// decide anything.
+/// grants and left it to "the consuming query engine" to apply them. A consumer is the wrong place for
+/// it: <c>X-User-Id</c> is caller-asserted, so only the side holding the grants can decide anything —
+/// and on the live path enforcement now has two shapes (source-provisioned policies, or a rewrite whose
+/// safety rests on a fail-closed verification pass) that a consumer could not reproduce.
 /// <para>
 /// Consequently nothing here may assume a caller validated anything. The SQL is re-checked, the grants
 /// are re-read, and the query is rewritten to run against secured relations
@@ -69,6 +68,9 @@ public class PublicSqlQueryService : IPublicSqlQueryService
     private readonly IDatabaseTableService _dbTables;
     private readonly IDatasetDocService _docs;
     private readonly ISqlTableResolver _resolver;
+    private readonly IRlsModeService _rlsMode;
+    private readonly IRlsPlanBuilder _rlsPlans;
+    private readonly INativeRlsExecutor _nativeExecutor;
     private readonly PublicApiOptions _options;
 
     public PublicSqlQueryService(
@@ -78,6 +80,9 @@ public class PublicSqlQueryService : IPublicSqlQueryService
         IDatabaseTableService dbTables,
         IDatasetDocService docs,
         ISqlTableResolver resolver,
+        IRlsModeService rlsMode,
+        IRlsPlanBuilder rlsPlans,
+        INativeRlsExecutor nativeExecutor,
         PublicApiOptions options)
     {
         _db = db;
@@ -86,6 +91,9 @@ public class PublicSqlQueryService : IPublicSqlQueryService
         _dbTables = dbTables;
         _docs = docs;
         _resolver = resolver;
+        _rlsMode = rlsMode;
+        _rlsPlans = rlsPlans;
+        _nativeExecutor = nativeExecutor;
         _options = options;
     }
 
@@ -253,27 +261,64 @@ public class PublicSqlQueryService : IPublicSqlQueryService
 
         var hasRestrictions = columnGrants.Count > 0 || rlsRows.Count > 0;
 
-        // External live sources cannot be secured by CTE shadowing: their table names are
-        // "{schema}.{name}", a CTE cannot be named that, and a CTE named "orders" does not shadow
-        // "dbo.orders". Table-level grants still work (they need no rewrite), so only the narrow case of
-        // an actually-restricted user on the live path is refused.
-        if (isExternalLive && hasRestrictions)
-            return Fail(response, PublicSqlErrorCodes.SecurityNotEnforceable,
-                "Column or row security for this dataset cannot be enforced against the live source. " +
-                "Retry with \"snapshotMode\": true to query the local snapshot instead.");
+        // How the live path enforces these grants is a recorded per-source decision. CTE shadowing (the
+        // snapshot mechanism) is unavailable here: live table names are "{schema}.{name}", a CTE cannot be
+        // named that, and a CTE named "orders" does not shadow "dbo.orders". So either the source enforces
+        // it natively, or LiveSourceSqlRewriter substitutes a secured subquery at each reference.
+        //
+        var liveMode = RlsEnforcementMode.Undecided;
+        var liveDialect = DataSourceType.DuckDB;
+
+        if (isExternalLive)
+        {
+            liveMode = await _rlsMode.GetModeAsync(dataset.SourceEntityId ?? string.Empty, companyId, ct);
+
+            // No decision recorded is only a problem for a user who has something to enforce. An
+            // unrestricted user needs neither a rewrite nor a role, so refusing them would break every
+            // pre-existing external dataset the moment this shipped, for no gain.
+            if (liveMode == RlsEnforcementMode.Undecided && hasRestrictions)
+                return Fail(response, PublicSqlErrorCodes.SecurityNotEnforceable,
+                    "Column or row security for this dataset's live source is not configured yet, so this "
+                    + "query was not run. An administrator must choose how it is enforced on the dataset's "
+                    + "source, or you can query the local snapshot with \"snapshotMode\": true.");
+
+            var connection = await _dbTables.GetConnectionAsync(dataset.SourceEntityId ?? string.Empty, companyId, ct);
+            if (connection is null)
+                return Fail(response, PublicSqlErrorCodes.SchemaUnavailable,
+                    "The dataset's source connection could not be read, so access cannot be verified.");
+
+            liveDialect = connection.DatabaseType;
+
+            // Native: the engine applies the user's role as the query runs, so nothing is rewritten. The
+            // work happens after the reference checks below — see the Native branch near ExecuteAsync.
+        }
 
         var relations = new List<SecuredSqlBuilder.SecuredRelation>();
+        var liveRelations = new Dictionary<string, LiveSourceSqlRewriter.LiveRelation>(StringComparer.OrdinalIgnoreCase);
         var maskedColumns = new List<string>();
         var appliedFilters = new List<PublicSqlRowFilterDto>();
 
-        if (!isExternalLive)
+        // Relations are built for the secured snapshot path and for live rewriting alike — the difference
+        // is only how they are woven into the SQL, not what they contain.
+        //
+        // An unrestricted live user skips this even on a Rewrite source: there is nothing to mask or
+        // filter, so wrapping their tables in subqueries would add risk (the verification sweep can
+        // false-positive) for no enforcement at all.
+        var buildRelations = !isExternalLive
+                             || (liveMode == RlsEnforcementMode.Rewrite && hasRestrictions);
+
+        if (buildRelations)
         {
             foreach (var table in referencedTables)
             {
                 List<Column> liveColumns;
                 try
                 {
-                    liveColumns = await _duckdb.GetTableColumnsAsync(datasetId, table);
+                    // Live reads go through the same call the data catalog uses, so the columns enforced
+                    // here are exactly the columns the caller was told the table has.
+                    liveColumns = isExternalLive
+                        ? await _docs.GetLiveColumnsAsync(companyId, datasetId, table, snapshotMode: false, ct)
+                        : await _duckdb.GetTableColumnsAsync(datasetId, table);
                 }
                 catch (Exception ex)
                 {
@@ -299,14 +344,14 @@ public class PublicSqlQueryService : IPublicSqlQueryService
                     return Fail(response, PublicSqlErrorCodes.ColumnNotPermitted,
                         $"You have no readable columns in table '{table}'.");
 
-                // An RLS filter names a column but not a table, so it applies to every referenced table
-                // that has a column of that name. Both directions of that are wrong and neither can be
-                // fixed here: a filter on a common name ("region", "year") applies to tables where it
-                // means something else, and a table without the column is left unfiltered. The applied
-                // set is echoed back in Security.RowFilters so a caller can see what actually happened;
-                // the real fix is a table_name column on user_rls_filter.
+                // A filter now names its table, so it applies to that table only. Rows created before
+                // user_rls_filter.table_name existed carry the '' sentinel and keep the old behaviour:
+                // they apply to every referenced table having a column of that name, which is wrong in
+                // both directions (a filter on a common name like "region" hits tables where it means
+                // something else, and a table lacking the column is left unfiltered). The applied set is
+                // echoed back in Security.RowFilters so a caller can see what actually happened.
                 var predicates = new List<SecuredSqlBuilder.RlsPredicate>();
-                foreach (var rls in rlsRows)
+                foreach (var rls in rlsRows.Where(r => r.AppliesTo(table)))
                 {
                     var column = liveColumns.FirstOrDefault(c =>
                         string.Equals(c.Name, rls.ColumnName, StringComparison.OrdinalIgnoreCase));
@@ -331,11 +376,23 @@ public class PublicSqlQueryService : IPublicSqlQueryService
                     });
                 }
 
-                relations.Add(new SecuredSqlBuilder.SecuredRelation(
-                    TableName: table,
-                    QualifiedSource: $"main.{SecuredSqlBuilder.Quote(table)}",
-                    Columns: granted,
-                    Predicates: predicates));
+                if (isExternalLive)
+                {
+                    // The rewriter quotes the catalog name itself, per dotted part and per dialect — the
+                    // "main." prefix below is DuckDB's schema and means nothing on a live source.
+                    liveRelations[table] = new LiveSourceSqlRewriter.LiveRelation(
+                        CatalogTable: table,
+                        Columns: granted,
+                        Predicates: predicates);
+                }
+                else
+                {
+                    relations.Add(new SecuredSqlBuilder.SecuredRelation(
+                        TableName: table,
+                        QualifiedSource: $"main.{SecuredSqlBuilder.Quote(table)}",
+                        Columns: granted,
+                        Predicates: predicates));
+                }
             }
         }
 
@@ -355,8 +412,22 @@ public class PublicSqlQueryService : IPublicSqlQueryService
                 $"Column '{mentioned}' is not readable by this user.");
 
         string effectiveSql;
-        if (isExternalLive)
+        if (isExternalLive && liveMode == RlsEnforcementMode.Rewrite)
         {
+            // Substitute a secured subquery at every reference, then refuse unless no route to a base
+            // table survived. The verification pass inside is what makes this safe to run at all.
+            if (!LiveSourceSqlRewriter.TryBuild(request.Sql, resolution.References, liveRelations,
+                    resolution.AllTables, liveDialect,
+                    out effectiveSql, out var rewriteError, out var rewriteCode))
+            {
+                return Fail(response, rewriteCode ?? PublicSqlErrorCodes.SecurityNotEnforceable, rewriteError!);
+            }
+        }
+        else if (isExternalLive)
+        {
+            // Either an unrestricted user (nothing to mask or filter, so table grants are the whole
+            // control) or Native mode, where the engine applies the user's role as the query runs. Both
+            // send the caller's SQL unchanged; Native differs only in the identity it runs as.
             effectiveSql = request.Sql;
         }
         else if (!SecuredSqlBuilder.TryBuild(request.Sql, scan, relations, resolution.CteNames,
@@ -367,13 +438,35 @@ public class PublicSqlQueryService : IPublicSqlQueryService
 
         response.EffectiveSql = effectiveSql;
 
+        // Native mode runs as the unprivileged query account with only this user's role enabled, so the
+        // plan (what our records say they may see) has to travel to the executor, which verifies the
+        // source really is enforcing it before running anything.
+        //
+        // Applies to every user on a Native source, not only restricted ones. Running an unrestricted
+        // user through the privileged connection credential instead would leave table scope resting
+        // entirely on this service's reference scanner — and a table reference the scanner missed would
+        // then be read with full privileges. Under the role it is refused by the engine, because the role
+        // only grants the tables that user may read.
+        RlsProvisioningPlan? nativePlan = null;
+        if (isExternalLive && liveMode == RlsEnforcementMode.Native)
+        {
+            nativePlan = await _rlsPlans.BuildAsync(companyId, datasetId, userId, ct);
+            if (nativePlan is null)
+                return Fail(response, PublicSqlErrorCodes.SecurityNotEnforceable,
+                    "This user's access to the dataset could not be resolved, so it cannot be confirmed "
+                    + "that the source is enforcing it. Nothing was run.");
+        }
+
         if (!request.IncludeRows)
         {
             // Validated only: run with a one-row cap and report the column shape, discarding the row.
             // No LIMIT is appended to the SQL — that is not dialect-safe and would change the meaning of
             // a query that already has its own ORDER BY or LIMIT — so the source still evaluates the
             // query; this saves the row transfer, not the source's work.
-            var probe = await ExecuteAsync(dataset, effectiveSql, 1, isExternalLive, companyId, ct);
+            var (probe, probeSecurity) = await ExecuteAsync(dataset, effectiveSql, 1, isExternalLive,
+                companyId, nativePlan, ct);
+            if (probeSecurity is not null)
+                return Fail(response, PublicSqlErrorCodes.SecurityNotEnforceable, probeSecurity);
             response.Columns = probe.Columns ?? new List<Column>();
             response.ElapsedMs = probe.ElapsedMs;
             if (!string.IsNullOrWhiteSpace(probe.Error))
@@ -382,8 +475,14 @@ public class PublicSqlQueryService : IPublicSqlQueryService
         }
 
         var stopwatch = Stopwatch.StartNew();
-        var result = await ExecuteAsync(dataset, effectiveSql, response.RowCap, isExternalLive, companyId, ct);
+        var (result, security) = await ExecuteAsync(dataset, effectiveSql, response.RowCap, isExternalLive,
+            companyId, nativePlan, ct);
         stopwatch.Stop();
+
+        // A source that cannot be shown to be enforcing this user's grants is refused, not run. Distinct
+        // from a SQL error: nothing executed, and the fix is an administrator's, not the caller's.
+        if (security is not null)
+            return Fail(response, PublicSqlErrorCodes.SecurityNotEnforceable, security);
 
         response.ElapsedMs = result.ElapsedMs > 0 ? result.ElapsedMs : stopwatch.ElapsedMilliseconds;
 
@@ -425,13 +524,33 @@ public class PublicSqlQueryService : IPublicSqlQueryService
     }
 
     /// <summary>Runs the secured SQL. <c>allowWrite</c> is a literal <c>false</c>, never a variable.</summary>
-    private async Task<SqlQueryResult> ExecuteAsync(Dataset dataset, string sql, int rowCap, bool useExternalSource,
-        string companyId, CancellationToken ct)
+    /// <summary>
+    /// Runs the effective SQL against whichever layer and identity this query calls for.
+    /// </summary>
+    /// <param name="nativePlan">
+    /// Non-null only in Native mode. Routes the query through the unprivileged account with the acting
+    /// user's role, after verifying the source is really enforcing that plan.
+    /// </param>
+    /// <returns>
+    /// The result, plus a non-null security problem when the source could not be shown to be enforcing
+    /// the user's grants — in which case nothing was executed.
+    /// </returns>
+    private async Task<(SqlQueryResult Result, string? SecurityProblem)> ExecuteAsync(Dataset dataset, string sql,
+        int rowCap, bool useExternalSource, string companyId, RlsProvisioningPlan? nativePlan,
+        CancellationToken ct)
     {
-        if (useExternalSource)
-            return await _dbTables.ExecuteQueryAsync(dataset.SourceEntityId ?? "", companyId, sql, rowCap, ct);
+        if (nativePlan is not null)
+        {
+            var (native, verification) = await _nativeExecutor.ExecuteAsync(nativePlan, sql, rowCap, ct);
+            return verification.Ok
+                ? (native ?? new SqlQueryResult(), null)
+                : (new SqlQueryResult(), verification.Problem);
+        }
 
-        return await _duckdb.ExecuteSqlAsync(dataset.Id!, sql, allowWrite: false, maxRows: rowCap, ct);
+        if (useExternalSource)
+            return (await _dbTables.ExecuteQueryAsync(dataset.SourceEntityId ?? "", companyId, sql, rowCap, ct), null);
+
+        return (await _duckdb.ExecuteSqlAsync(dataset.Id!, sql, allowWrite: false, maxRows: rowCap, ct), null);
     }
 
     /// <summary>

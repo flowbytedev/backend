@@ -35,15 +35,24 @@ public class DatasetUserColumn
 }
 
 /// <summary>
-/// Row-level security: restricts the rows a user may see to those where <see cref="ColumnName"/> is one
-/// of <see cref="AllowedValues"/> (a JSON array string, e.g. ["FOOD","BEVERAGE"]).
+/// Row-level security: restricts the rows a user may see, within <see cref="TableName"/>, to those where
+/// <see cref="ColumnName"/> is one of <see cref="AllowedValues"/> (a JSON array string, e.g.
+/// ["FOOD","BEVERAGE"]).
 /// </summary>
-[PrimaryKey(nameof(CompanyId), nameof(UserId), nameof(DatasetId), nameof(ColumnName))]
+[PrimaryKey(nameof(CompanyId), nameof(UserId), nameof(DatasetId), nameof(TableName), nameof(ColumnName))]
 public class UserRlsFilter
 {
     [Required] public string CompanyId { get; set; } = string.Empty;
     [Required] public string UserId { get; set; } = string.Empty;
     [Required] public string DatasetId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The table this filter applies to. <see cref="AllTablesSentinel"/> (empty) means the legacy
+    /// behaviour: every referenced table that happens to have a column of this name. Use
+    /// <see cref="AppliesToAllTables"/> rather than comparing to empty at call sites.
+    /// </summary>
+    [Required] public string TableName { get; set; } = string.Empty;
+
     [Required] public string ColumnName { get; set; } = string.Empty;
 
     /// <summary>JSON array of allowed values, e.g. ["FOOD","BEVERAGE"].</summary>
@@ -51,6 +60,22 @@ public class UserRlsFilter
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ModifiedAt { get; set; }
+
+    /// <summary>
+    /// The <see cref="TableName"/> value meaning "every table having this column". Only ever present on
+    /// rows created before filters were table-scoped; the editor always writes a real table name.
+    /// </summary>
+    public const string AllTablesSentinel = "";
+
+    /// <summary>
+    /// True for a legacy, table-less filter. Such a filter cannot be expressed as a native row policy
+    /// (those name one table), so a provisioner must refuse it rather than approximate it.
+    /// </summary>
+    public bool AppliesToAllTables => string.IsNullOrWhiteSpace(TableName);
+
+    /// <summary>True when this filter governs <paramref name="table"/>.</summary>
+    public bool AppliesTo(string table) =>
+        AppliesToAllTables || string.Equals(TableName, table, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>The allowed values deserialized as a list (empty on malformed/empty JSON).</summary>
     public List<string> GetAllowedValuesList()

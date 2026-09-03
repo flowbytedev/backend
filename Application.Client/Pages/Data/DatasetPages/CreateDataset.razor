@@ -3,6 +3,7 @@
 @using System.Net.Http.Json
 @using Application.Shared.Enums
 @using Application.Shared.Models
+@using Application.Shared.Models.Data
 @inject HttpClient _httpClient
 @inject NavigationManager _navigationManager
 @inject IToastService _toastService
@@ -93,11 +94,12 @@ else
                 {
                     <div class="ds-field">
                         <label class="ds-label" for="ds-src">Source database <span style="color:#ef4444">*</span></label>
-                        <select id="ds-src" class="ds-input" @bind="selectedSourceEntityId">
+                        <select id="ds-src" class="ds-input" value="@selectedSourceEntityId"
+                                @onchange="e => OnSourceChanged(e.Value?.ToString())">
                             <option value="">Select a database…</option>
                             @foreach (var db in sourceDatabases)
                             {
-                                <option value="@db.Id">@db.Name (@db.DatabaseType)</option>
+                                <option value="@db.Id" selected="@(db.Id == selectedSourceEntityId)">@db.Name (@db.DatabaseType)</option>
                             }
                         </select>
                         @if (!sourceDatabases.Any())
@@ -109,6 +111,10 @@ else
                             <span class="ds-hint">Tables come from this database's saved connection; queries run live and read-only.</span>
                         }
                     </div>
+
+                    @* Extracted so the edit page can offer the same decision — it belongs to the
+                       source, and an operator who skipped it at creation needs somewhere to answer. *@
+                    <RlsEnforcementPanel SourceEntityId="@selectedSourceEntityId" />
                 }
 
                 <div class="ds-form-actions">
@@ -162,6 +168,13 @@ else
     private bool isExternal;
     private string selectedSourceEntityId = string.Empty;
     private List<DatabaseEntityOptionDto> sourceDatabases = new();
+
+    /// <summary>
+    /// Records the chosen source. The enforcement question is handled by
+    /// <see cref="RlsEnforcementPanel"/>, which probes whenever this value changes.
+    /// </summary>
+    private void OnSourceChanged(string? entityId) => selectedSourceEntityId = entityId ?? string.Empty;
+
 
     // Live dataset-name uniqueness check (names are unique per company).
     private bool nameChecking;

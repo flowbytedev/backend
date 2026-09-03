@@ -15,16 +15,22 @@ public class DatasetSharingService : IDatasetSharingService
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IEmailNotificationService _emailNotificationService;
 
+    // Pushes these grants into a source that enforces them itself. A no-op for local datasets and for
+    // sources that use query rewriting.
+    private readonly IRlsSyncService _rlsSync;
+
     public DatasetSharingService(
         ApplicationDbContext context,
         IUserService userService,
         UserManager<ApplicationUser> userManager,
-        IEmailNotificationService emailNotificationService)
+        IEmailNotificationService emailNotificationService,
+        IRlsSyncService rlsSync)
     {
         _context = context;
         _userService = userService;
         _userManager = userManager;
         _emailNotificationService = emailNotificationService;
+        _rlsSync = rlsSync;
     }
 
     /// <summary>
@@ -583,8 +589,14 @@ public class DatasetSharingService : IDatasetSharingService
             .Where(r => r.DatasetId == datasetId && r.UserId == userId)
             .ToListAsync();
         dto.Rls = rlsRows
-            .OrderBy(r => r.ColumnName)
-            .Select(r => new RlsFilterItem { ColumnName = r.ColumnName, AllowedValues = r.GetAllowedValuesList() })
+            .OrderBy(r => r.TableName)
+            .ThenBy(r => r.ColumnName)
+            .Select(r => new RlsFilterItem
+            {
+                TableName = r.TableName,
+                ColumnName = r.ColumnName,
+                AllowedValues = r.GetAllowedValuesList()
+            })
             .ToList();
 
         return dto;
@@ -611,6 +623,11 @@ public class DatasetSharingService : IDatasetSharingService
                     .Where(r => r.DatasetId == datasetId && r.UserId == userId).ToListAsync());
                 if (datasetUser != null) _context.DatasetUser.Remove(datasetUser);
                 await _context.SaveChangesAsync();
+
+                // Drop their role at the source too. Done after the local delete so a source we cannot
+                // reach never blocks revoking access here — but logged loudly, because a role left
+                // behind still grants what it grants.
+                await _rlsSync.RemoveUserAsync(companyId, datasetId, userId);
                 return true;
             }
 
@@ -661,10 +678,16 @@ public class DatasetSharingService : IDatasetSharingService
                     _context.DatasetUserColumn.Add(new DatasetUserColumn { CompanyId = companyId, UserId = userId, DatasetId = datasetId, TableName = parts[0], ColumnName = parts[1], CreatedAt = DateTime.UtcNow });
                 }
 
-            // Reconcile RLS (upsert by column; remove columns no longer present).
+            // Reconcile RLS (upsert by table+column; remove pairs no longer present). Keyed on the pair
+            // because the same column name means different things in different tables — "region" in
+            // sales_line is not "region" in customer — so one filter per column per dataset was wrong.
+            // Same "table\ncolumn" composite-key idiom as the column reconcile above.
+            //
+            // An empty TableName is preserved rather than filled in: it is the legacy "all tables"
+            // sentinel, and inventing a table here would silently narrow an existing grant.
             var desiredRls = (request.Rls ?? new List<RlsFilterItem>())
                 .Where(r => !string.IsNullOrWhiteSpace(r.ColumnName))
-                .GroupBy(r => r.ColumnName.Trim(), StringComparer.OrdinalIgnoreCase)
+                .GroupBy(r => $"{(r.TableName ?? string.Empty).Trim()}\n{r.ColumnName.Trim()}", StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(
                     g => g.Key,
                     g => g.Last().AllowedValues.Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v.Trim()).Distinct().ToList(),
@@ -672,17 +695,26 @@ public class DatasetSharingService : IDatasetSharingService
             var existingRls = await _context.UserRlsFilter
                 .Where(r => r.DatasetId == datasetId && r.UserId == userId).ToListAsync();
             foreach (var row in existingRls)
-                if (!desiredRls.ContainsKey(row.ColumnName)) _context.UserRlsFilter.Remove(row);
-            foreach (var (col, values) in desiredRls)
+                if (!desiredRls.ContainsKey($"{row.TableName}\n{row.ColumnName}")) _context.UserRlsFilter.Remove(row);
+            foreach (var (key, values) in desiredRls)
             {
+                var parts = key.Split('\n', 2);
+                var (table, col) = (parts[0], parts[1]);
                 var json = JsonSerializer.Serialize(values);
-                var existing = existingRls.FirstOrDefault(r => string.Equals(r.ColumnName, col, StringComparison.OrdinalIgnoreCase));
+                var existing = existingRls.FirstOrDefault(r =>
+                    string.Equals(r.TableName, table, StringComparison.OrdinalIgnoreCase)
+                    && string.Equals(r.ColumnName, col, StringComparison.OrdinalIgnoreCase));
                 if (existing == null)
-                    _context.UserRlsFilter.Add(new UserRlsFilter { CompanyId = companyId, UserId = userId, DatasetId = datasetId, ColumnName = col, AllowedValues = json, CreatedAt = DateTime.UtcNow });
+                    _context.UserRlsFilter.Add(new UserRlsFilter { CompanyId = companyId, UserId = userId, DatasetId = datasetId, TableName = table, ColumnName = col, AllowedValues = json, CreatedAt = DateTime.UtcNow });
                 else { existing.AllowedValues = json; existing.ModifiedAt = DateTime.UtcNow; }
             }
 
             await _context.SaveChangesAsync();
+
+            // Mirror the new grants into the source when it enforces them itself. Failure is logged, not
+            // surfaced: the grant tables are the record of intent, and the query path verifies before
+            // every query, so a push that did not land makes queries refuse rather than leak.
+            await _rlsSync.SyncUserAsync(companyId, datasetId, userId);
             return true;
         }
         catch (Exception)

@@ -131,6 +131,13 @@ public class UserRlsFilterDto
 {
     public string UserId { get; set; } = string.Empty;
     public string DatasetId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The table this filter applies to. Empty is the legacy "every table having this column" sentinel —
+    /// a consumer describing the filter to a user (or to a model) should say so rather than naming a table.
+    /// </summary>
+    public string TableName { get; set; } = string.Empty;
+
     public string ColumnName { get; set; } = string.Empty;
     public string AllowedValues { get; set; } = "[]";
     public string CompanyId { get; set; } = string.Empty;

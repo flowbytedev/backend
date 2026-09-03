@@ -60,6 +60,15 @@ public interface ISqlTableResolver
 /// <param name="ResolvedTable">
 /// The catalog table this matched, in the catalog's own casing, or null when it matched nothing.
 /// </param>
+/// <param name="Alias">
+/// The alias written after the reference (<c>FROM orders o</c> or <c>FROM orders AS o</c>), or null when
+/// there is none. Needed by the live-source rewriter: replacing the reference with a derived table means
+/// emitting an alias, and emitting a second one alongside the caller's is a syntax error.
+/// </param>
+/// <param name="FactorEnd">
+/// End of the whole table factor in the original SQL — past the alias when there is one, otherwise
+/// <c>Offset + Length</c>. This, not <c>Length</c>, is what a rewrite must replace.
+/// </param>
 public sealed record TableReferenceMatch(
     string Raw,
     string Cleaned,
@@ -68,7 +77,13 @@ public sealed record TableReferenceMatch(
     bool IsFunctionCall,
     int Offset,
     int Length,
-    string? ResolvedTable = null);
+    string? ResolvedTable = null,
+    string? Alias = null,
+    int? FactorEnd = null)
+{
+    /// <summary>End of the table factor, falling back to the reference itself when no alias was seen.</summary>
+    public int FactorEndOrSelf => FactorEnd ?? Offset + Length;
+}
 
 /// <summary>Everything both policies need, gathered in one pass over the SQL and one read of the catalog.</summary>
 public sealed class SqlTableResolution
@@ -277,6 +292,11 @@ public class SqlTableResolver : ISqlTableResolver
                 p = SkipWhitespace(masked, p);
                 if (p >= n) break;
 
+                // Index in `results` of the reference just collected, so the alias found below can be
+                // recorded against it. Stays -1 for a derived table / parenthesised join, which has no
+                // entry of its own — its contents are scanned independently.
+                var collectedIndex = -1;
+
                 if (masked[p] == '(')
                 {
                     // Derived table or a parenthesised join; its contents are scanned independently.
@@ -287,11 +307,13 @@ public class SqlTableResolver : ISqlTableResolver
                     var match = ReadIdentifierChain(masked, original, p);
                     if (match is null) break;
                     results.Add(match);
+                    collectedIndex = results.Count - 1;
                     p = match.Offset + match.Length;
                     if (match.IsFunctionCall) p = SkipBalancedParens(masked, SkipWhitespace(masked, p));
                 }
 
-                // Optional alias, with or without AS.
+                // Optional alias, with or without AS, bare or quoted.
+                string? aliasName = null;
                 var afterAlias = SkipWhitespace(masked, p);
                 if (afterAlias < n && IsWordStart(masked, afterAlias))
                 {
@@ -299,14 +321,40 @@ public class SqlTableResolver : ISqlTableResolver
                     if (string.Equals(next, "AS", StringComparison.OrdinalIgnoreCase))
                     {
                         var afterAs = SkipWhitespace(masked, afterNext);
-                        if (afterAs < n && IsWordStart(masked, afterAs)) ReadWord(masked, afterAs, out afterNext);
+                        if (afterAs < n && IsWordStart(masked, afterAs))
+                        {
+                            // Sliced from the ORIGINAL text, not taken from ReadWord's return: that
+                            // upper-cases for keyword matching, and an alias must keep the caller's
+                            // casing. Quoted identifiers are case-sensitive on ClickHouse and
+                            // PostgreSQL, so re-emitting "sl" as "SL" would stop the caller's own
+                            // column qualifiers binding.
+                            ReadWord(masked, afterAs, out afterNext);
+                            aliasName = original[afterAs..afterNext];
+                        }
+                        else if (afterAs < n && IsQuoteStart(masked, afterAs))
+                        {
+                            aliasName = ReadQuotedIdentifier(masked, original, afterAs, out afterNext);
+                        }
                         p = afterNext;
                     }
                     else if (!ClauseKeywords.Contains(next))
                     {
+                        // Same reason: `next` is upper-cased, the original span is not.
+                        aliasName = original[afterAlias..afterNext];
                         p = afterNext;
                     }
                 }
+                else if (afterAlias < n && IsQuoteStart(masked, afterAlias))
+                {
+                    // A quoted alias with no AS (FROM orders "o"). Consumed explicitly because the bare-word
+                    // branch above cannot see it, and a rewriter that left it in place would emit two
+                    // aliases and produce invalid SQL.
+                    aliasName = ReadQuotedIdentifier(masked, original, afterAlias, out var afterQuoted);
+                    p = afterQuoted;
+                }
+
+                if (collectedIndex >= 0)
+                    results[collectedIndex] = results[collectedIndex] with { Alias = aliasName, FactorEnd = p };
                 // A parenthesised column alias list, e.g. "AS t(a, b)".
                 var afterAliasCols = SkipWhitespace(masked, p);
                 if (afterAliasCols < n && masked[afterAliasCols] == '(')
@@ -396,8 +444,71 @@ public class SqlTableResolver : ISqlTableResolver
         return names;
     }
 
+    /// <summary>
+    /// Every dotted identifier chain in the text, wherever it appears — not only in table position.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately position-blind, which is what makes it useful as a <b>verification</b> pass rather
+    /// than an extraction one. <see cref="ExtractReferences"/> decides what to secure and has to
+    /// understand table positions to do it; this one only has to notice that a name is present at all, so
+    /// it cannot miss a table reference sitting in a construct the position logic does not model. The
+    /// live-source rewriter uses it to prove no route to a base table survived the rewrite.
+    /// </remarks>
+    public static List<TableReferenceMatch> ScanAllIdentifierChains(string masked, string original)
+    {
+        var chains = new List<TableReferenceMatch>();
+        var i = 0;
+
+        while (i < masked.Length)
+        {
+            if (!IsWordStart(masked, i) && !IsQuoteStart(masked, i)) { i++; continue; }
+
+            var chain = ReadIdentifierChain(masked, original, i);
+            if (chain is null) { i++; continue; }
+
+            chains.Add(chain);
+            // Always advance: a zero-length read would otherwise spin here forever.
+            i = chain.Length > 0 ? chain.Offset + chain.Length : i + 1;
+        }
+
+        return chains;
+    }
+
     private static bool IsWordStart(string s, int i) =>
         i < s.Length && (char.IsLetter(s[i]) || s[i] == '_');
+
+    /// <summary>True when a quoted identifier opens at <paramref name="i"/> in any engine's style.</summary>
+    private static bool IsQuoteStart(string s, int i) =>
+        i < s.Length && s[i] is '"' or '[' or '`';
+
+    /// <summary>
+    /// Reads one quoted identifier, returning its unquoted text and the index just past the closing
+    /// delimiter. Doubled delimiters are an escaped delimiter, matching
+    /// <see cref="ReadIdentifierChain"/>. On an unterminated quote the whole span is consumed and null
+    /// returned — the scan has already flagged the input as malformed, and the caller must not treat the
+    /// remainder as meaningful.
+    /// </summary>
+    private static string? ReadQuotedIdentifier(string masked, string original, int start, out int end)
+    {
+        var close = masked[start] == '[' ? ']' : masked[start];
+        var i = start + 1;
+        var sb = new StringBuilder();
+
+        while (i < masked.Length)
+        {
+            if (masked[i] == close)
+            {
+                if (i + 1 < masked.Length && masked[i + 1] == close) { sb.Append(close); i += 2; continue; }
+                end = i + 1;
+                return sb.ToString();
+            }
+            sb.Append(original[i]);
+            i++;
+        }
+
+        end = masked.Length;
+        return null;
+    }
 
     private static string ReadWord(string s, int i, out int after)
     {

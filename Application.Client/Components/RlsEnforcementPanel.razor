@@ -1,0 +1,345 @@
+@using System.Net.Http.Json
+@using Application.Shared.Enums
+@using Application.Shared.Models
+@using Application.Shared.Models.Data
+@inject HttpClient _httpClient
+@inject IToastService _toastService
+
+@*
+    How one external source enforces per-user column masking and row-level security on its LIVE path.
+
+    Shared by the dataset create and edit pages: the decision belongs to the SOURCE, not to the dataset,
+    so several datasets over one connected database share whatever is chosen here — and an operator who
+    skipped the question at creation needs somewhere to answer it later.
+
+    Probing can create and drop a role on the source, so the endpoints behind this require
+    database-administrator permission while creating a dataset does not. A 403 is therefore an ordinary
+    outcome and is reported as "ask an administrator", not as a failure.
+*@
+
+@if (!string.IsNullOrEmpty(SourceEntityId))
+{
+<div class="ds-field">
+    <label class="ds-label">Row &amp; column security</label>
+
+    @if (probing)
+    {
+        <span class="ds-hint">
+            <span class="ds-spinner" style="width:12px;height:12px;border-width:1.5px;margin-right:4px"></span>
+            Checking what this source can enforce…
+        </span>
+    }
+    else if (report is null && needsAdmin)
+    {
+        <span class="ds-hint" style="color:#b45309">
+            Only a database administrator can configure how this source enforces row and column security.
+            Users with column or row restrictions are refused on the live source until it is set up.
+        </span>
+    }
+    else if (report is null)
+    {
+        <span class="ds-hint" style="color:#b45309">
+            Could not check this source. Users with column or row restrictions are refused on the live
+            source until an administrator configures it.
+        </span>
+    }
+    else if (!report.EngineSupportsNativeRls)
+    {
+        @* No choice exists: rewriting is the only enforcement this engine can have. *@
+        <span class="ds-hint">@report.Detail</span>
+    }
+    else if (stored?.Mode == RlsEnforcementMode.Rewrite)
+    {
+        <span class="ds-hint" style="color:#15803d;display:block">
+            Relay rewrites each query to apply the rules.
+            @if (stored.ProvisioningDeclined)
+            {
+                <text>A provisioning user was declined.</text>
+            }
+        </span>
+        @if (report.CurrentCredentialCanProvision && report.NativeProvisioningImplemented)
+        {
+            <span class="ds-hint" style="display:block;margin-top:0.3rem">
+                This source could enforce the rules itself instead, which is stronger — the engine becomes
+                the boundary, so no SQL analysis is trusted.
+            </span>
+        }
+    }
+    else if (stored?.Mode == RlsEnforcementMode.Native && report.NativeProvisioningImplemented)
+    {
+        <span class="ds-hint" style="color:#15803d;display:block">
+            The source enforces these rules itself. Roles and row policies are kept in step with the
+            grants set on the User Access page, and every query re-checks that they are still in place.
+        </span>
+        <div style="margin-top:0.4rem">
+            <button type="button" class="btn btn-outline" disabled="@saving" @onclick="ChooseRewrite">
+                Switch to query rewriting
+            </button>
+        </div>
+    }
+    else if (stored?.Mode == RlsEnforcementMode.Native)
+    {
+        @* The engine has the feature but this app has no provisioner for it, so Native would refuse. *@
+        <span class="ds-hint" style="color:#b45309;display:block;margin-bottom:0.4rem">
+            This source is set to enforce the rules itself, but that is not implemented for
+            @report.Engine yet &mdash; so restricted users are refused until it is. Switch to query
+            rewriting to use this dataset now.
+        </span>
+        <button type="button" class="btn btn-outline" disabled="@saving" @onclick="ChooseRewrite">
+            Use query rewriting instead
+        </button>
+    }
+    else if (report.CurrentCredentialCanProvision)
+    {
+        @* Capable, but the choice is the operator's: it creates roles and policies in their database. *@
+        <span class="ds-hint" style="color:#15803d;display:block;margin-bottom:0.4rem">@report.Detail</span>
+        @if (report.NativeProvisioningImplemented)
+        {
+            <span class="ds-hint" style="display:block;margin-bottom:0.4rem">
+                Letting the source enforce the rules is the stronger option &mdash; the engine becomes the
+                boundary, so no SQL analysis is trusted. It creates a role per user, row policies, and one
+                unprivileged account for running queries inside that database.
+            </span>
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap">
+                <button type="button" class="btn btn-default" disabled="@saving" @onclick="ChooseNative">
+                    Let the source enforce it (recommended)
+                </button>
+                <button type="button" class="btn btn-outline" disabled="@saving" @onclick="ChooseRewrite">
+                    Rewrite queries instead
+                </button>
+            </div>
+        }
+        else
+        {
+            <span class="ds-hint" style="display:block;margin-bottom:0.4rem">
+                Source-side enforcement is not implemented for @report.Engine yet, so choose query
+                rewriting to use this dataset.
+            </span>
+            <button type="button" class="btn btn-default" disabled="@saving" @onclick="ChooseRewrite">
+                Rewrite queries
+            </button>
+        }
+    }
+    else
+    {
+        @* The engine could enforce it, but no credential we hold can create the objects. *@
+        <span class="ds-hint" style="color:#b45309;display:block;margin-bottom:0.4rem">@report.Detail</span>
+        <span class="ds-hint" style="display:block;margin-bottom:0.4rem">
+            Supply a user that can create roles and policies in this database, or have Relay rewrite each
+            query instead &mdash; weaker, because it relies on analysing the SQL.
+        </span>
+        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap">
+            <input class="ds-input" style="flex:0 0 30%" placeholder="username" @bind="username" disabled="@saving" />
+            <input class="ds-input" style="flex:0 0 30%" type="password" placeholder="password" @bind="password" disabled="@saving" />
+            <button type="button" class="btn btn-default" disabled="@saving" @onclick="SaveCredential">
+                @if (saving)
+                {
+                    <span class="ds-spinner" style="width:13px;height:13px;border-width:1.5px"></span>
+                    <span>Checking…</span>
+                }
+                else
+                {
+                    <span>Use this user</span>
+                }
+            </button>
+            <button type="button" class="btn btn-outline" disabled="@saving" @onclick="ChooseRewrite">
+                Skip &mdash; rewrite queries instead
+            </button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <span class="ds-hint" style="color:#b45309;display:block;margin-top:0.4rem">@message</span>
+    }
+</div>
+}
+
+@code {
+    /// <summary>The connected-database entity backing the dataset. Empty renders nothing.</summary>
+    [Parameter] public string? SourceEntityId { get; set; }
+
+    private string? probedEntityId;
+    private RlsCapabilityReport? report;
+    private RlsProvisioningModeDto? stored;
+    private bool probing;
+    private bool saving;
+    private bool needsAdmin;
+    private string username = string.Empty;
+    private string password = string.Empty;
+    private string? message;
+
+    /// <summary>
+    /// Re-probes whenever the source changes. Keyed on the last entity actually probed rather than on a
+    /// first-render flag, so the create page (where the source changes as the operator picks) and the edit
+    /// page (where it arrives once, after the dataset loads) both behave.
+    /// </summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrEmpty(SourceEntityId))
+        {
+            probedEntityId = null;
+            report = null;
+            stored = null;
+            return;
+        }
+
+        if (SourceEntityId == probedEntityId) return;
+
+        probedEntityId = SourceEntityId;
+        report = null;
+        stored = null;
+        message = null;
+        needsAdmin = false;
+        username = string.Empty;
+        password = string.Empty;
+
+        await Probe();
+    }
+
+    private async Task Probe()
+    {
+        probing = true;
+        StateHasChanged();
+        try
+        {
+            var response = await _httpClient.PostAsync(
+                $"api/rls-provisioning/{Uri.EscapeDataString(SourceEntityId!)}/probe", null);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var payload = await response.Content.ReadFromJsonAsync<ProbeResult>();
+                report = payload?.Report;
+                stored = payload?.Stored;
+            }
+            else
+            {
+                // Left null: the query path treats an unrecorded decision as "refuse", which is exactly
+                // what the message above tells the operator will happen.
+                report = null;
+                needsAdmin = response.StatusCode == System.Net.HttpStatusCode.Forbidden;
+            }
+        }
+        catch
+        {
+            report = null;
+        }
+        finally
+        {
+            probing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Saves a provisioning credential, then re-probes. The re-probe decides, not the save — a credential
+    /// that stores fine may still lack the rights.
+    /// </summary>
+    private async Task SaveCredential()
+    {
+        if (string.IsNullOrWhiteSpace(username))
+        {
+            message = "Enter a username.";
+            return;
+        }
+
+        saving = true;
+        message = null;
+        try
+        {
+            // PUT: the endpoint upserts the single credential per entity.
+            var response = await _httpClient.PutAsJsonAsync(
+                $"api/database-admin/databases/{Uri.EscapeDataString(SourceEntityId!)}/credential",
+                new DatabaseAdminCredentialRequest { Username = username, Secret = password });
+
+            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                message = "Saving a provisioning credential needs database-administrator permission. "
+                          + "Skip for now, or ask an administrator to set it up.";
+                return;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                message = "That credential could not be saved.";
+                return;
+            }
+
+            await Probe();
+
+            if (report?.CurrentCredentialCanProvision == true)
+            {
+                password = string.Empty;
+                _toastService.ShowSuccess("That user can provision row and column security on this source.");
+            }
+            else
+            {
+                message = report?.Detail
+                          ?? "That user still cannot create the objects needed. Try another, or skip.";
+            }
+        }
+        catch
+        {
+            message = "That credential could not be saved.";
+        }
+        finally
+        {
+            saving = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task ChooseRewrite() => SaveDecision(RlsEnforcementMode.Rewrite, declined: true);
+
+    /// <summary>
+    /// Kept an explicit action rather than inferred from the probe: it leads to creating roles and
+    /// policies inside a production database.
+    /// </summary>
+    private Task ChooseNative() => SaveDecision(RlsEnforcementMode.Native, declined: false);
+
+    private async Task SaveDecision(RlsEnforcementMode mode, bool declined)
+    {
+        saving = true;
+        message = null;
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync(
+                $"api/rls-provisioning/{Uri.EscapeDataString(SourceEntityId!)}/decision",
+                new RlsModeDecisionRequest { Mode = mode, Declined = declined });
+
+            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+            {
+                message = "Changing this needs database-administrator permission.";
+                return;
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                stored = await response.Content.ReadFromJsonAsync<RlsProvisioningModeDto>();
+                _toastService.ShowSuccess(mode == RlsEnforcementMode.Rewrite
+                    ? "Relay will rewrite queries to enforce row and column security."
+                    : "This source is set to enforce row and column security itself.");
+            }
+            else
+            {
+                message = "That choice could not be saved.";
+            }
+        }
+        catch
+        {
+            message = "That choice could not be saved.";
+        }
+        finally
+        {
+            saving = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>Mirrors the probe endpoint's response shape.</summary>
+    private class ProbeResult
+    {
+        public RlsCapabilityReport? Report { get; set; }
+        public RlsProvisioningModeDto? Stored { get; set; }
+    }
+}

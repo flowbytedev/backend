@@ -335,6 +335,7 @@ public class PublicDatasetApiService : IPublicDatasetApiService
             {
                 UserId = r.UserId,
                 DatasetId = r.DatasetId,
+                TableName = r.TableName,
                 ColumnName = r.ColumnName,
                 AllowedValues = r.AllowedValues,
                 CompanyId = r.CompanyId

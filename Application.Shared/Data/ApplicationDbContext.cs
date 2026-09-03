@@ -91,6 +91,15 @@ namespace Application.Shared.Data
         public DbSet<UserTablePin> UserTablePin { get; set; }
         public DbSet<UserDefaultDataset> UserDefaultDataset { get; set; }
 
+        // How each external source enforces the two grants above on its live path (source-enforced vs
+        // SQL rewriting). Keyed by source entity, not dataset — see RlsProvisioningMode.
+        public DbSet<Application.Shared.Models.Data.RlsProvisioningMode> RlsProvisioningMode { get; set; }
+
+        // The unprivileged per-source account that end-user queries run as in Native mode. Separate from
+        // the provisioning credential: privileges are a union, so a restricted role on a privileged
+        // connection restricts nothing.
+        public DbSet<Application.Shared.Models.Data.RlsQueryCredential> RlsQueryCredential { get; set; }
+
         public DbSet<DataTableComment> DataTableComment { get; set; }
 
         public DbSet<SalesData> SalesData { get; set; }

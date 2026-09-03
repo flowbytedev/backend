@@ -182,13 +182,39 @@ else
 
                         <div class="ds-field">
                             <label class="ds-label">Row-Level Security</label>
-                            <span class="ds-hint" style="display:block;margin-bottom:0.4rem">Restrict which rows the user sees: for a column, list the values they're allowed. Matched across the dataset's tables.</span>
+                            <span class="ds-hint" style="display:block;margin-bottom:0.4rem">Restrict which rows the user sees: pick a table, then a column, then list the values they're allowed. A filter applies only to the table you choose &mdash; the same column name can mean different things in different tables.</span>
                             <div style="display:flex;flex-direction:column;gap:0.4rem">
                                 @foreach (var row in rlsRows)
                                 {
                                     var r = row;
                                     <div style="display:flex;gap:0.5rem;align-items:center">
-                                        <input class="ds-input" style="flex:0 0 34%;font-family:ui-monospace,Consolas,monospace" placeholder="column name" @bind="r.Column" />
+                                        <select class="ds-input" style="flex:0 0 24%" value="@r.Table" @onchange="e => OnRlsTableChanged(r, e.Value?.ToString())">
+                                            <option value="">— table —</option>
+                                            @if (r.AppliesToAllTables)
+                                            {
+                                                @* Legacy row: keep "all tables" selectable so saving does not silently narrow it. *@
+                                                <option value="@RlsRow.AllTables" selected>any table with this column (legacy)</option>
+                                            }
+                                            @foreach (var t in datasetTables)
+                                            {
+                                                <option value="@t" selected="@(string.Equals(t, r.Table, StringComparison.OrdinalIgnoreCase))">@t</option>
+                                            }
+                                        </select>
+                                        @if (!string.IsNullOrEmpty(r.Table) && !r.AppliesToAllTables
+                                             && columnsByTable.TryGetValue(r.Table, out var rlsCols) && rlsCols.Count > 0)
+                                        {
+                                            <select class="ds-input" style="flex:0 0 22%;font-family:ui-monospace,Consolas,monospace" @bind="r.Column">
+                                                <option value="">— column —</option>
+                                                @foreach (var c in rlsCols)
+                                                {
+                                                    <option value="@c">@c</option>
+                                                }
+                                            </select>
+                                        }
+                                        else
+                                        {
+                                            <input class="ds-input" style="flex:0 0 22%;font-family:ui-monospace,Consolas,monospace" placeholder="column name" @bind="r.Column" />
+                                        }
                                         <input class="ds-input" style="flex:1" placeholder="allowed values, comma-separated (e.g. FOOD, BEVERAGE)" @bind="r.ValuesCsv" />
                                         <button type="button" class="btn-icon btn-icon-delete" title="Remove filter" @onclick="() => rlsRows.Remove(r)">
                                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
@@ -200,6 +226,149 @@ else
                                 <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
                                 Add filter
                             </button>
+                        </div>
+
+                        @* What this access actually produced. Intent and reality are shown separately:
+                           when something looks wrong, the useful question is which of the two is off. *@
+                        <div class="ds-field">
+                            <label class="ds-label">What is enforced</label>
+                            @if (inspection is null)
+                            {
+                                <button type="button" class="btn btn-outline" disabled="@inspecting"
+                                        @onclick="LoadInspection">
+                                    @if (inspecting)
+                                    {
+                                        <span class="ds-spinner" style="width:13px;height:13px;border-width:1.5px"></span>
+                                        <span>Checking...</span>
+                                    }
+                                    else
+                                    {
+                                        <span>Show enforcement details</span>
+                                    }
+                                </button>
+                                @if (!string.IsNullOrEmpty(inspectError))
+                                {
+                                    <span class="ds-hint" style="color:#b45309;display:block;margin-top:0.4rem">@inspectError</span>
+                                }
+                            }
+                            else if (!inspection.AppliesToLivePath)
+                            {
+                                <span class="ds-hint">
+                                    This is a local dataset. Its grants are applied by rewriting each query
+                                    against the dataset's own storage, so there is nothing provisioned
+                                    elsewhere to inspect.
+                                </span>
+                            }
+                            else
+                            {
+                                <div class="ds-hint" style="display:block;margin-bottom:0.5rem">
+                                    <strong>Mode:</strong>
+                                    @(inspection.Mode switch
+                                    {
+                                        RlsEnforcementMode.Native => $"the {inspection.Engine} source enforces this itself",
+                                        RlsEnforcementMode.Rewrite => "Relay rewrites each query",
+                                        _ => "not configured — no enforcement is set up, so restricted users are refused"
+                                    })
+                                </div>
+
+                                @if (inspection.Mode == RlsEnforcementMode.Native)
+                                {
+                                    @if (inspection.VerificationOk)
+                                    {
+                                        <div class="ds-hint" style="color:#15803d;display:block;margin-bottom:0.5rem">
+                                            Verified in force at the source right now.
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <div class="ds-hint" style="color:#b91c1c;display:block;margin-bottom:0.5rem">
+                                            Not currently enforceable &mdash; queries are refused.
+                                            @inspection.VerificationProblem
+                                        </div>
+                                    }
+                                }
+
+                                @if (!string.IsNullOrEmpty(inspection.SourceReadError))
+                                {
+                                    <div class="ds-hint" style="color:#b45309;display:block;margin-bottom:0.5rem">
+                                        The source could not be read, so the objects below are unknown:
+                                        @inspection.SourceReadError
+                                    </div>
+                                }
+
+                                @* Per table: the columns this user may read, and each row filter. *@
+                                @foreach (var t in inspection.Tables)
+                                {
+                                    <div style="border:1px solid #e4e4e7;border-radius:6px;padding:0.5rem;margin-bottom:0.4rem">
+                                        <div style="font-family:ui-monospace,Consolas,monospace;font-size:0.8125rem;font-weight:600">@t.TableName</div>
+                                        <div class="ds-hint" style="display:block">
+                                            Columns:
+                                            @(t.GrantedColumns is null
+                                                ? "all"
+                                                : t.GrantedColumns.Count == 0
+                                                    ? "none - this table is unreadable"
+                                                    : string.Join(", ", t.GrantedColumns))
+                                        </div>
+                                        @if (t.Filters.Count == 0)
+                                        {
+                                            <div class="ds-hint" style="display:block">Rows: all</div>
+                                        }
+                                        @foreach (var f in t.Filters)
+                                        {
+                                            <div class="ds-hint" style="display:block">
+                                                Rows: @f.ColumnName in
+                                                @(f.AllowedValues.Count == 0
+                                                    ? "(no values - no rows visible)"
+                                                    : string.Join(", ", f.AllowedValues))
+                                                @if (f.LegacyAllTables)
+                                                {
+                                                    <span style="color:#b45309">
+                                                        &mdash; legacy filter with no table; not enforceable at
+                                                        the source, re-pick a table above
+                                                    </span>
+                                                }
+                                                else if (f.PresentAtSource == false)
+                                                {
+                                                    <span style="color:#b91c1c">&mdash; MISSING at the source</span>
+                                                }
+                                                else if (f.PresentAtSource == true)
+                                                {
+                                                    <span style="color:#15803d">&mdash; policy present</span>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+
+                                @if (inspection.Mode == RlsEnforcementMode.Native)
+                                {
+                                    <details style="margin-top:0.3rem">
+                                        <summary class="ds-hint" style="cursor:pointer">Objects at the source</summary>
+                                        <div class="ds-hint" style="display:block;margin-top:0.3rem;font-family:ui-monospace,Consolas,monospace;font-size:0.75rem">
+                                            <div>role: @inspection.RoleName @(inspection.RoleExistsAtSource == false ? "(MISSING)" : "")</div>
+                                            <div>query account: @inspection.QueryAccountName</div>
+                                            @if (inspection.QueryAccountDirectGrants.Count > 0)
+                                            {
+                                                <div style="color:#b91c1c">
+                                                    query account holds direct grants, which voids every
+                                                    restriction: @string.Join("; ", inspection.QueryAccountDirectGrants)
+                                                </div>
+                                            }
+                                            @foreach (var pol in inspection.SourcePolicies)
+                                            {
+                                                <div>
+                                                    policy @pol.Name on @pol.Database.@pol.Table:
+                                                    @pol.Condition
+                                                    @(pol.IsRestrictive == false ? " (PERMISSIVE - widens, not narrows)" : "")
+                                                </div>
+                                            }
+                                        </div>
+                                    </details>
+                                }
+
+                                <button type="button" class="btn btn-outline" style="margin-top:0.4rem"
+                                        disabled="@inspecting" @onclick="LoadInspection">Refresh</button>
+                            }
                         </div>
 
                         <div class="ds-form-actions" style="display:flex;gap:0.5rem;margin-top:0.5rem">
@@ -282,8 +451,35 @@ else
 
     private class RlsRow
     {
+        /// <summary>
+        /// Sentinel for a legacy filter that names no table. Not a real table name, and deliberately not
+        /// the empty string, so "not chosen yet" and "applies to every table" stay distinguishable in the
+        /// dropdown. Mapped back to empty on save, which is what the API means by "all tables".
+        /// </summary>
+        public const string AllTables = "__all__";
+
+        public string Table { get; set; } = string.Empty;
         public string Column { get; set; } = string.Empty;
         public string ValuesCsv { get; set; } = string.Empty;
+
+        public bool AppliesToAllTables => Table == AllTables;
+
+        /// <summary>The table as the API expects it: empty for the legacy "all tables" filter.</summary>
+        public string ApiTableName => AppliesToAllTables ? string.Empty : (Table ?? string.Empty).Trim();
+    }
+
+    /// <summary>
+    /// Switches a filter's table, loading that table's columns so the column dropdown can be offered.
+    /// Clears the column, because a column chosen for the old table usually does not exist in the new one
+    /// — and silently keeping it would save a filter that matches nothing.
+    /// </summary>
+    private async Task OnRlsTableChanged(RlsRow row, string? table)
+    {
+        row.Table = table ?? string.Empty;
+        row.Column = string.Empty;
+
+        if (!string.IsNullOrEmpty(row.Table) && !row.AppliesToAllTables)
+            await EnsureColumnsLoaded(row.Table);
     }
 
     protected override async Task OnInitializedAsync()
@@ -379,10 +575,51 @@ else
         catch { datasetTables = new(); }
     }
 
+    private RlsInspectionDto? inspection;
+    private bool inspecting;
+    private string? inspectError;
+
+    /// <summary>
+    /// Reads back what this user's access actually produced. Not loaded with the page: on a Native source
+    /// it queries the source's own system tables, which is too much work to do on every user click.
+    /// </summary>
+    private async Task LoadInspection()
+    {
+        if (selectedUser is null || string.IsNullOrEmpty(selectedDatasetId)) return;
+
+        inspecting = true;
+        inspectError = null;
+        try
+        {
+            SetHeaders();
+            var url = $"api/rls-provisioning/inspect?datasetId={Uri.EscapeDataString(selectedDatasetId)}"
+                      + $"&userId={Uri.EscapeDataString(selectedUser.Id)}";
+            var response = await _httpClient.GetAsync(url);
+
+            if (response.IsSuccessStatusCode)
+                inspection = await response.Content.ReadFromJsonAsync<RlsInspectionDto>();
+            else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+                inspectError = "You do not have permission to view enforcement details.";
+            else
+                inspectError = "Enforcement details could not be loaded.";
+        }
+        catch
+        {
+            inspectError = "Enforcement details could not be loaded.";
+        }
+        finally
+        {
+            inspecting = false;
+            StateHasChanged();
+        }
+    }
+
     private async Task LoadAccess()
     {
         if (selectedUser == null || string.IsNullOrEmpty(selectedDatasetId)) return;
         loadingAccess = true;
+        inspection = null;
+        inspectError = null;
         StateHasChanged();
 
         // Reset editor state.
@@ -416,7 +653,13 @@ else
                 }
 
                 rlsRows = access.Rls
-                    .Select(r => new RlsRow { Column = r.ColumnName, ValuesCsv = string.Join(", ", r.AllowedValues) })
+                    .Select(r => new RlsRow
+                    {
+                        // A stored filter with no table is legacy "all tables", not "unset".
+                        Table = string.IsNullOrWhiteSpace(r.TableName) ? RlsRow.AllTables : r.TableName,
+                        Column = r.ColumnName,
+                        ValuesCsv = string.Join(", ", r.AllowedValues)
+                    })
                     .ToList();
             }
         }
@@ -527,9 +770,12 @@ else
             Tables = shareAllTables ? null : selectedTables.ToList(),
             Columns = columnMap,
             Rls = rlsRows
-                .Where(r => !string.IsNullOrWhiteSpace(r.Column))
+                // A row with no table chosen is incomplete, not an "all tables" filter — dropping it is
+                // safer than saving a filter whose scope the operator never picked.
+                .Where(r => !string.IsNullOrWhiteSpace(r.Column) && !string.IsNullOrEmpty(r.Table))
                 .Select(r => new RlsFilterItem
                 {
+                    TableName = r.ApiTableName,
                     ColumnName = r.Column.Trim(),
                     AllowedValues = (r.ValuesCsv ?? string.Empty)
                         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
