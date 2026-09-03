@@ -194,7 +194,8 @@ public partial class PipelineApiClient
         {
             // Describe, not ex.Message: a TLS failure says only "see inner exception", and this is the
             // request it happens to first — see the note on Describe.
-            return (null, default, $"Could not reach {tokenUri.Host}: {Describe(ex)}");
+            return (null, default,
+                $"Could not reach {tokenUri.Host}: {Describe(ex)}" + CertificateHint(c, ex));
         }
     }
 

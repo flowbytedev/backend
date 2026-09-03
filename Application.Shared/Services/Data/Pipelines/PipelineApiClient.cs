@@ -1,6 +1,7 @@
 ﻿using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Authentication;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -326,7 +327,9 @@ public partial class PipelineApiClient(
         catch (HttpRequestException ex)
         {
             return ApiResponse.Fail(
-                $"The API could not be reached: {Describe(ex)}", PipelineErrorType.ApiError, 0, safeUrl);
+                $"The API could not be reached: {Describe(ex)}"
+                + CertificateHint(request.Credential.Credential, ex),
+                PipelineErrorType.ApiError, 0, safeUrl);
         }
     }
 
@@ -365,6 +368,46 @@ public partial class PipelineApiClient(
         }
 
         return parts.Count == 0 ? exception.GetType().Name : string.Join(" → ", parts);
+    }
+
+    /// <summary>
+    /// What to add to a failure message when the cause was the server's certificate.
+    /// <para>
+    /// The two cases have to read differently, and that is the whole point of this method. Without it a
+    /// certificate failure produces identical text whether or not the credential is set to accept one, so
+    /// the message cannot distinguish "turn the setting on" from "the setting is on and did not help" — and
+    /// working out which costs a round trip through a deploy and another failed run.
+    /// </para>
+    /// <para>
+    /// The second case is worth stating as strangeness rather than advice: with the flag on, the handler
+    /// accepts any certificate, so a certificate error means the request did not go through the client the
+    /// flag selects. A stale saved value, or a host that is failing the handshake for some other reason.
+    /// </para>
+    /// </summary>
+    internal static string CertificateHint(ApiCredential credential, Exception exception)
+    {
+        if (!IsCertificateFailure(exception)) return string.Empty;
+
+        return credential.AllowInvalidCertificate
+            ? $" '{credential.Name}' is already set to accept an invalid certificate, so this is not the "
+              + "certificate check refusing it — verify the setting saved, and that the app and the "
+              + "scheduler are both running the build that has it."
+            : $" If this is an internal endpoint whose certificate this server does not trust, install the "
+              + $"issuing certificate here, or turn on \"Accept an invalid TLS certificate\" on the "
+              + $"'{credential.Name}' credential.";
+    }
+
+    /// <summary>
+    /// Whether anything in the chain is a TLS handshake failure. Type-based rather than a search for the
+    /// word "certificate": the outermost message never contains it, and the wording of the inner ones is
+    /// the platform's to change.
+    /// </summary>
+    private static bool IsCertificateFailure(Exception exception)
+    {
+        for (Exception? ex = exception; ex is not null; ex = ex.InnerException)
+            if (ex is AuthenticationException) return true;
+
+        return false;
     }
 
     /// <summary>
