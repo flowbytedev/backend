@@ -544,6 +544,7 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
                 NodeId = s.NodeId,
                 Status = s.Status,
                 RowsOut = s.RowsOut,
+                RowsTotal = s.RowsIn,
                 DurationMs = s.DurationMs,
                 Error = s.Error,
                 StepIndex = s.StepIndex

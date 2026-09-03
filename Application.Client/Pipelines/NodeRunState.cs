@@ -14,11 +14,26 @@ public sealed record NodeRunState(
     long? RowsOut,
     string? Error,
     /// <summary>Offset from the run's start, used only by the waterfall to position a bar.</summary>
-    int StepIndex)
+    int StepIndex,
+    /// <summary>Rows the step expects in total, when it knows. Null for a step that cannot.</summary>
+    long? RowsTotal = null)
 {
     public bool IsTerminal => Status is PipelineStepStatus.Success
                                      or PipelineStepStatus.Failed
                                      or PipelineStepStatus.Skipped;
+
+    /// <summary>
+    /// How far through this step is, 0-100, or null when there is nothing honest to draw.
+    /// <para>
+    /// Only while <b>running</b>: a finished step's bar is noise, and one that failed part-way through
+    /// would show a bar frozen at 60% next to an error, which reads as "still going". Clamped, because the
+    /// total is the upstream step's row count and a filter in between can make the real total smaller.
+    /// </para>
+    /// </summary>
+    public int? Percent =>
+        Status == PipelineStepStatus.Running && RowsTotal is > 0 && RowsOut is >= 0
+            ? (int)Math.Min(100, RowsOut.Value * 100 / RowsTotal.Value)
+            : null;
 
     /// <summary>Folds a run's step ticks into one state per step.</summary>
     public static Dictionary<string, NodeRunState> FromTicks(IEnumerable<PipelineStepTickDto>? ticks)
@@ -33,7 +48,7 @@ public sealed record NodeRunState(
                 continue;
 
             result[tick.NodeId] = new NodeRunState(
-                tick.Status, tick.DurationMs, tick.RowsOut, tick.Error, tick.StepIndex);
+                tick.Status, tick.DurationMs, tick.RowsOut, tick.Error, tick.StepIndex, tick.RowsTotal);
         }
 
         return result;

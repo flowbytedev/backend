@@ -81,10 +81,23 @@ public static class NodeIcons
     };
 
     /// <summary>Row counts, abbreviated so a node's metric row never wraps.</summary>
-    public static string Rows(long rows) => rows switch
+    public static string Rows(long rows) => $"{Abbreviate(rows)} rows";
+
+    /// <summary>
+    /// A running count against a known total — <c>4.5k / 12k rows</c>.
+    /// <para>
+    /// Both sides go through the same abbreviation, and the unit is said once at the end. Formatting the
+    /// two differently ("4.5k rows / 12,000") invites the reader to compare numbers written on different
+    /// scales, which is the one thing a fraction exists to make easy.
+    /// </para>
+    /// </summary>
+    public static string RowsOf(long rows, long total) =>
+        $"{Abbreviate(rows)} / {Abbreviate(total)} rows";
+
+    private static string Abbreviate(long rows) => rows switch
     {
-        < 1000 => $"{rows} rows",
-        < 1_000_000 => $"{rows / 1000.0:0.#}k rows",
-        _ => $"{rows / 1_000_000.0:0.##}M rows"
+        < 1000 => rows.ToString(),
+        < 1_000_000 => $"{rows / 1000.0:0.#}k",
+        _ => $"{rows / 1_000_000.0:0.##}M"
     };
 }

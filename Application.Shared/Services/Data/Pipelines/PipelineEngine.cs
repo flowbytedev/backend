@@ -529,7 +529,8 @@ public partial class PipelineEngine(
         {
             return node.Type switch
             {
-                PipelineNodeTypes.DestinationApi => await ExecuteApiDestinationAsync(ctx, node, Resolve, ct),
+                PipelineNodeTypes.DestinationApi =>
+                    await ExecuteApiDestinationAsync(ctx, node, Resolve, outcome, ct),
                 PipelineNodeTypes.DestinationEmail => await ExecuteEmailDestinationAsync(ctx, node, Resolve, ct),
                 _ => await ExecuteDestinationAsync(ctx, node, Resolve, ct)
             };
@@ -676,7 +677,8 @@ public partial class PipelineEngine(
     /// </para>
     /// </summary>
     private async Task<NodeOutcome> ExecuteApiDestinationAsync(
-        ExecutionContext ctx, PipelineNodeDef node, Func<string?, string> resolve, CancellationToken ct)
+        ExecutionContext ctx, PipelineNodeDef node, Func<string?, string> resolve,
+        ExecutionOutcome outcome, CancellationToken ct)
     {
         var config = node.Config;
 
@@ -707,8 +709,27 @@ public partial class PipelineEngine(
             ? shape
             : PipelineApiWriteShapes.Row;
 
+        // What the upstream step produced, which is what this one is about to send. Best-effort: it is the
+        // denominator for a percentage and nothing depends on it being exact, so an unknown upstream count
+        // degrades to a plain rows-sent count rather than failing the step.
+        var totalRows = outcome.Results.GetValueOrDefault(upstream)?.RowsOut;
+
+        // Published on the running step so the canvas can draw a proportion rather than just a rising
+        // number. Written here rather than in BeginStepAsync because only this step type knows a total
+        // up front, and on the engine's own thread rather than the counter's — the counter fires from a
+        // pool thread and needs its own context, this does not.
+        if (ctx.Run is not null && totalRows is > 0)
+        {
+            var runId = ctx.Run.Id;
+
+            await db.PipelineRunStep
+                .Where(s => s.RunId == runId && s.NodeId == node.Id)
+                .ExecuteUpdateAsync(u => u.SetProperty(s => s.RowsIn, totalRows), ct);
+        }
+
         ctx.Log.WriteLine(
-            $"      sending to {credential}:{url} as {contentType} ("
+            $"      sending {(totalRows is > 0 ? $"{totalRows.Value:N0} row(s) " : string.Empty)}"
+            + $"to {credential}:{url} as {contentType} ("
             + (effectiveShape == PipelineApiWriteShapes.Row
                 ? "one request per row"
                 : $"{batchSize:N0} rows per request")
@@ -734,7 +755,13 @@ public partial class PipelineEngine(
             Envelope = PipelineTokenResolver.Substitute(
                 Str(config, "envelope"), PipelineTokenContexts.Json, Lookup(ctx)),
             StopOnError = config?["stopOnError"] is not JsonValue v || !v.TryGetValue<bool>(out var stop) || stop,
-            Progress = ctx.Log
+            Progress = ctx.Log,
+
+            // The same counter a source gets. Without it this step is the one place a run can sit on a
+            // spinner for minutes with nothing to show, and an API write is exactly the step where someone
+            // watching wants to know how far through it is — because the part already sent cannot be undone.
+            RowsSent = LiveRowCounter(ctx, node.Id),
+            TotalRows = totalRows
         }, ct);
 
         if (!result.Success)

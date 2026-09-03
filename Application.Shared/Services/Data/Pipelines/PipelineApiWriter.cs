@@ -76,6 +76,24 @@ public sealed class ApiWriteRequest
     public bool StopOnError { get; init; } = true;
 
     public IJobProgress? Progress { get; init; }
+
+    /// <summary>
+    /// Rows accepted so far, reported as the write proceeds. The same sink a source's row counter uses, so
+    /// this step counts up on the canvas while it runs instead of sitting on a spinner.
+    /// <para>
+    /// It reports only what the far end has <b>accepted</b>, never what has been buffered. On a destination
+    /// with no rollback that distinction is the whole value of the number: a count that ran ahead of the
+    /// requests would say rows had been delivered that a later failure would prove were not.
+    /// </para>
+    /// </summary>
+    public IProgress<long>? RowsSent { get; init; }
+
+    /// <summary>
+    /// How many rows this write expects to send, when the engine knows — which turns the count into a
+    /// percentage and a progress bar. Null when the upstream row count is unavailable, and the reporting
+    /// falls back to a plain count rather than guessing a denominator.
+    /// </summary>
+    public long? TotalRows { get; init; }
 }
 
 public sealed class ApiWriteResult
@@ -98,6 +116,12 @@ public class PipelineApiWriter(
     IPipelineApiClient client,
     IPipelineStore store) : IPipelineApiWriter
 {
+    /// <summary>
+    /// How often a progress line is written while sending. Two seconds is frequent enough that a stalled
+    /// endpoint is visibly stalled, and rare enough that a fast write does not bury its own summary.
+    /// </summary>
+    private static readonly TimeSpan ProgressInterval = TimeSpan.FromSeconds(2);
+
     public async Task<ApiWriteResult> WriteAsync(ApiWriteRequest request, CancellationToken ct = default)
     {
         var credential = await client.ResolveAsync(
@@ -211,6 +235,36 @@ public class PipelineApiWriter(
 
         var buffer = new List<JsonObject>(batchSize);
 
+        var lastLine = DateTime.UtcNow;
+
+        // Reported by elapsed time rather than every N requests, which is what this used to do. A request
+        // count cannot be tuned to both ends: at 500 rows a batch, "every 20 requests" is one line per
+        // 10,000 rows — silence for the whole of a small write, and a wall of text for a large one. Time is
+        // the axis the person watching actually cares about. Same reasoning as the engine's row counter.
+        void WriteProgressLine()
+        {
+            if (DateTime.UtcNow - lastLine < ProgressInterval) return;
+            lastLine = DateTime.UtcNow;
+
+            if (request.TotalRows is > 0)
+            {
+                // Clamped: TotalRows is the upstream step's count, and a filter or a switch between there
+                // and here can make the real total smaller. Better a bar that sticks at 100% for a moment
+                // than one that reads 140%.
+                var percent = (int)Math.Min(100, rowsSent * 100 / request.TotalRows.Value);
+
+                request.Progress?.SetProgress(percent);
+                request.Progress?.WriteLine(
+                    $"      sent {rowsSent:N0} of {request.TotalRows.Value:N0} row(s) ({percent}%) "
+                    + $"in {requests:N0} request(s)");
+            }
+            else
+            {
+                request.Progress?.WriteLine(
+                    $"      sent {rowsSent:N0} row(s) in {requests:N0} request(s)");
+            }
+        }
+
         async Task<bool> FlushAsync()
         {
             if (buffer.Count == 0) return true;
@@ -233,6 +287,12 @@ public class PipelineApiWriter(
             {
                 rowsSent += buffer.Count;
                 buffer.Clear();
+
+                // Unthrottled on purpose: the engine's counter has its own time throttle and coalesces
+                // writes, so throttling here as well would only make the canvas lag behind the log.
+                request.RowsSent?.Report(rowsSent);
+                WriteProgressLine();
+
                 return true;
             }
 
@@ -255,9 +315,6 @@ public class PipelineApiWriter(
             if (buffer.Count < batchSize) continue;
 
             if (!await FlushAsync()) break;
-
-            if (requests % 20 == 0)
-                request.Progress?.WriteLine($"      sent {rowsSent:N0} rows in {requests:N0} requests");
         }
 
         // Anything left after the loop, unless we are already bailing out.

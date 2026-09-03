@@ -203,6 +203,25 @@
     display: flex; align-items: center; gap: 6px;
     font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted);
 }
+/* Rendered only while a step is running against a known total — see NodeRunState.Percent. Deliberately a
+   2px rule rather than a chunky bar: the node is 13px-title small, and anything taller competes with the
+   step's own name for attention. The width transition matches the ~1.5s poll so the fill glides between
+   samples instead of stepping. */
+.pl-node-progress {
+    margin-top: 4px; height: 2px; border-radius: 1px; overflow: hidden;
+    background: var(--border);
+}
+.pl-node-progress-fill {
+    height: 100%; border-radius: 1px;
+    background: var(--pl-node-accent, var(--accent));
+    transition: width 1.5s linear;
+}
+/* No animation for a reader who has asked for none: a creeping bar is exactly the motion that setting
+   is about. The width still updates, it just jumps. */
+@media (prefers-reduced-motion: reduce) {
+    .pl-node-progress-fill { transition: none; }
+}
+
 .pl-node-badges { position: absolute; top: -8px; right: 8px; display: inline-flex; gap: 4px; }
 
 /* Category accents, matching PipelineNodeCategories. */
@@ -273,6 +292,7 @@
 /* ---------- level of detail: JS writes one class + --pl-k, CSS does the rest, zero re-renders ---------- */
 .pl-canvas.is-far .pl-node-sub,
 .pl-canvas.is-far .pl-node-meta,
+.pl-canvas.is-far .pl-node-progress,
 .pl-canvas.is-far .pl-node-badges,
 .pl-canvas.is-far .pl-port-label,
 .pl-canvas.is-far .pl-edge-label,
@@ -280,6 +300,8 @@
 .pl-canvas.is-far .pl-edge-insert { display: none; }
 .pl-canvas.is-far .pl-grid { background-image: none; }
 .pl-canvas.is-far .pl-port { width: 5px; height: 5px; border-width: 1px; }
+/* The bar survives one zoom level longer than the text it summarises: at mid zoom "4,500 / 12,000" is
+   unreadable but a 2px fill still tells you how far along the step is. */
 .pl-canvas.is-mid .pl-node-meta, .pl-canvas.is-mid .pl-edge-label { display: none; }
 /* Counter-scale the title so a zoomed-out graph stays readable. */
 .pl-canvas.is-far .pl-node-title {

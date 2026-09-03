@@ -92,9 +92,23 @@
             }
             @if (RunState.RowsOut is > 0)
             {
-                <span>@NodeIcons.Rows(RunState.RowsOut.Value)</span>
+                @* While running against a known total the count reads as a fraction: "4.5k / 12k rows" says
+                   how much is left, where a bare "4.5k rows" only says something is happening. *@
+                <span>
+                    @(RunState.Percent is not null
+                          ? NodeIcons.RowsOf(RunState.RowsOut.Value, RunState.RowsTotal!.Value)
+                          : NodeIcons.Rows(RunState.RowsOut.Value))
+                </span>
             }
         </div>
+
+        @if (RunState.Percent is { } percent)
+        {
+            <div class="pl-node-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                 aria-valuenow="@percent" aria-label="Rows sent">
+                <div class="pl-node-progress-fill" style="width:@(percent)%;"></div>
+            </div>
+        }
     }
 
     @if (SelfLoops)
@@ -163,7 +177,7 @@
             Revision, Box.X, Box.Y, Box.Width, Box.Height, Box.Pinned,
             Selected, Dimmed, Matched, SelfLoops, ReadOnly,
             ConnectedInPorts is null ? "" : string.Join(',', ConnectedInPorts),
-            RunState?.Status, RunState?.DurationMs, RunState?.RowsOut);
+            RunState?.Status, RunState?.DurationMs, RunState?.RowsOut, RunState?.RowsTotal);
 
         if (next == _stamp) return false;
         _stamp = next;
@@ -331,7 +345,11 @@
             {
                 PipelineStepStatus.Success => $"succeeded in {NodeIcons.Duration(RunState.DurationMs)}",
                 PipelineStepStatus.Failed => $"failed: {RunState.Error}",
-                PipelineStepStatus.Running => "running",
+                // The bar is the one thing on this node a screen reader cannot see at all, so the
+                // percentage has to be spoken here or it does not exist for that reader.
+                PipelineStepStatus.Running => RunState.Percent is { } pct
+                    ? $"running, {pct}% complete"
+                    : "running",
                 PipelineStepStatus.Skipped => "skipped",
                 _ => RunState.Status
             });

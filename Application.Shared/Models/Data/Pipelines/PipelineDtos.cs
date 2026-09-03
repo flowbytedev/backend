@@ -195,6 +195,14 @@ public class PipelineStepTickDto
     [JsonPropertyName("n")] public string NodeId { get; set; } = string.Empty;
     [JsonPropertyName("s")] public string Status { get; set; } = string.Empty;
     [JsonPropertyName("r")] public long? RowsOut { get; set; }
+
+    /// <summary>
+    /// Rows this step expects to handle in total, when it knows in advance — which turns the climbing
+    /// <see cref="RowsOut"/> into a proportion the canvas can draw as a bar. Null for every step that
+    /// cannot know: a source has no idea how many rows an endpoint will return until it has them.
+    /// </summary>
+    [JsonPropertyName("t")] public long? RowsTotal { get; set; }
+
     [JsonPropertyName("ms")] public int DurationMs { get; set; }
     [JsonPropertyName("e")] public string? Error { get; set; }
     [JsonPropertyName("seq")] public int StepIndex { get; set; }
