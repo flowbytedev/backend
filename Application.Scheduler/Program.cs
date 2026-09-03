@@ -120,15 +120,10 @@ builder.Services.AddScoped<Application.Shared.Services.Data.IIngestionService,
 builder.Services.AddScoped<Application.Shared.Services.Data.IngestionJob>();
 builder.Services.AddScoped<IngestionRegistrarJob>();
 
-// The API source and destination. One named HttpClient for both, with automatic redirects DISABLED on
-// purpose: .NET drops the Authorization header when it follows a redirect to another origin, but it keeps
-// custom headers, so an X-Api-Key credential would be handed to whatever host a remote server named in a
-// Location response. PipelineApiClient follows same-origin redirects itself and refuses the rest.
-builder.Services.AddHttpClient(Application.Shared.Services.Data.Pipelines.PipelineApiClient.HttpClientName)
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-    {
-        AllowAutoRedirect = false
-    });
+// The API source and destination. The same call the web host makes, and it has to be: a scheduled run
+// executes in THIS process, so a credential that works from "Run now" and not at 3am is the failure mode
+// of these two hosts disagreeing. See PipelineApiHttpClients.
+Application.Shared.Services.Data.Pipelines.PipelineApiHttpClients.AddPipelineApiHttpClients(builder.Services);
 
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineApiClient, Application.Shared.Services.Data.Pipelines.PipelineApiClient>();
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineApiReader, Application.Shared.Services.Data.Pipelines.PipelineApiReader>();

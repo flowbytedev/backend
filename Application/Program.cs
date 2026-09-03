@@ -249,15 +249,9 @@ builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineE
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IExternalTableWriter,
     Application.Shared.Services.Data.Pipelines.ExternalTableWriter>();
 
-// The API source and destination. One named HttpClient for both, with automatic redirects DISABLED on
-// purpose: .NET drops the Authorization header when it follows a redirect to another origin, but it keeps
-// custom headers, so an X-Api-Key credential would be handed to whatever host a remote server named in a
-// Location response. PipelineApiClient follows same-origin redirects itself and refuses the rest.
-builder.Services.AddHttpClient(Application.Shared.Services.Data.Pipelines.PipelineApiClient.HttpClientName)
-    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-    {
-        AllowAutoRedirect = false
-    });
+// The API source and destination. Both clients come from Application.Shared so this host and the scheduler
+// cannot drift apart — see PipelineApiHttpClients for why that drift was worth designing out.
+Application.Shared.Services.Data.Pipelines.PipelineApiHttpClients.AddPipelineApiHttpClients(builder.Services);
 
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineApiClient, Application.Shared.Services.Data.Pipelines.PipelineApiClient>();
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineApiReader, Application.Shared.Services.Data.Pipelines.PipelineApiReader>();
@@ -475,6 +469,17 @@ var publicApiOptions = new PublicApiOptions();
 builder.Configuration.Bind("PublicApi", publicApiOptions);
 builder.Services.AddSingleton(publicApiOptions);
 builder.Services.AddScoped<Application.Shared.Services.Data.IPublicSqlQueryService, Application.Shared.Services.Data.PublicSqlQueryService>();
+// How each external source enforces per-user column/row grants on its live path, and the probe that
+// works out which options a source actually has.
+builder.Services.AddScoped<Application.Shared.Services.Data.IRlsModeService, Application.Shared.Services.Data.RlsModeService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.IRlsCapabilityProbe, Application.Shared.Services.Data.RlsCapabilityProbe>();
+// Native enforcement: the plan shared by both modes, the ClickHouse provisioner that writes it into the
+// source, and the executor that verifies it and runs queries as the unprivileged account.
+builder.Services.AddScoped<Application.Shared.Services.Data.IRlsPlanBuilder, Application.Shared.Services.Data.RlsPlanBuilder>();
+builder.Services.AddScoped<Application.Shared.Services.Data.ClickHouseRlsProvisioner>();
+builder.Services.AddScoped<Application.Shared.Services.Data.IRlsProvisioner>(sp => sp.GetRequiredService<Application.Shared.Services.Data.ClickHouseRlsProvisioner>());
+builder.Services.AddScoped<Application.Shared.Services.Data.INativeRlsExecutor, Application.Shared.Services.Data.NativeRlsExecutor>();
+builder.Services.AddScoped<Application.Shared.Services.Data.IRlsSyncService, Application.Shared.Services.Data.RlsSyncService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.IPublicApiUserAuthorizationService, Application.Shared.Services.Data.PublicApiUserAuthorizationService>();
 
 // Rate limiting, scoped to the public SQL endpoint only (nothing else in the app is affected).

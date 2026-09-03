@@ -3,6 +3,8 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Security.Authentication;
 using System.Text;
+using Microsoft.Extensions.Http;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Application.Shared.Data;
@@ -107,6 +109,7 @@ public partial class PipelineApiClient(
     ApplicationDbContext db,
     ICredentialProtector protector,
     IHttpClientFactory httpClientFactory,
+    IOptionsMonitor<HttpClientFactoryOptions> clientOptions,
     PipelineOptions options) : IPipelineApiClient
 {
     /// <summary>
@@ -137,6 +140,34 @@ public partial class PipelineApiClient(
     /// </summary>
     internal static string ClientNameFor(ApiCredential credential) =>
         credential.AllowInvalidCertificate ? InsecureHttpClientName : HttpClientName;
+
+    /// <summary>
+    /// Why the client this credential needs has to be checked for rather than trusted to exist.
+    /// <para>
+    /// <c>CreateClient</c> does not fail on a name nobody registered. It hands back a <b>default</b>
+    /// client — one that validates certificates — so a host running a build from before
+    /// <see cref="InsecureHttpClientName"/> existed ignores the credential's setting and reports an
+    /// ordinary certificate error. Of all the ways this could go wrong that is the worst: the message
+    /// sends someone hunting through certificate stores for a setting that was already on.
+    /// </para>
+    /// <para>
+    /// So it is refused instead, and the message names the cause. Returns null when there is nothing wrong,
+    /// which for every credential that validates normally is immediately.
+    /// </para>
+    /// </summary>
+    private string? InsecureClientUnavailable(ApiCredential credential)
+    {
+        if (!credential.AllowInvalidCertificate) return null;
+
+        // An unregistered name yields options with no handler actions at all. A registered one always has
+        // at least the ConfigurePrimaryHttpMessageHandler action from PipelineApiHttpClients.
+        if (clientOptions.Get(InsecureHttpClientName).HttpMessageHandlerBuilderActions.Count > 0) return null;
+
+        return $"'{credential.Name}' is set to accept an invalid TLS certificate, but this process has no "
+               + $"'{InsecureHttpClientName}' HTTP client, so the request would validate the certificate "
+               + "anyway rather than honour the setting. Whichever host ran this — the web app or the "
+               + "scheduler — is running a build from before that setting existed. Rebuild and restart it.";
+    }
 
     private const int MaxRedirects = 3;
 
@@ -250,6 +281,13 @@ public partial class PipelineApiClient(
 
         try
         {
+            // Before the request, not after it fails: honouring the setting is the point, and a validated
+            // request to an endpoint the operator said not to validate is not a safer outcome, just a
+            // confusing one.
+            var unavailable = InsecureClientUnavailable(request.Credential.Credential);
+            if (unavailable is not null)
+                return ApiResponse.Fail(unavailable, PipelineErrorType.Invalid, 0, safeUrl);
+
             var client = httpClientFactory.CreateClient(ClientNameFor(request.Credential.Credential));
 
             using var message = new HttpRequestMessage(

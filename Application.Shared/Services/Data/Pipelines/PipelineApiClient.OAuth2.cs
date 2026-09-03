@@ -156,6 +156,11 @@ public partial class PipelineApiClient
 
         try
         {
+            // The token request is usually the first thing to touch a host like this, so it is also the
+            // first place the missing client would be mistaken for a certificate problem.
+            var unavailable = InsecureClientUnavailable(c);
+            if (unavailable is not null) return (null, default, unavailable);
+
             var http = httpClientFactory.CreateClient(ClientNameFor(c));
 
             using var message = new HttpRequestMessage(HttpMethod.Post, tokenUri);
