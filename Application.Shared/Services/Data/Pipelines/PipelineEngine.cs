@@ -727,6 +727,12 @@ public partial class PipelineEngine(
             BatchSize = batchSize,
             ContentType = PipelineApiContentTypes.ResolveWritable(Str(config, "contentType")),
             BodyProperty = resolve(Str(config, "bodyProperty")),
+
+            // Not `resolve`: this field is the one place in the step where a substituted value lands inside
+            // JSON the author wrote, so a quote in a captured value would end the string early and hand the
+            // rest of the template to the data. Everything else here is a header, a URL or a property name.
+            Envelope = PipelineTokenResolver.Substitute(
+                Str(config, "envelope"), PipelineTokenContexts.Json, Lookup(ctx)),
             StopOnError = config?["stopOnError"] is not JsonValue v || !v.TryGetValue<bool>(out var stop) || stop,
             Progress = ctx.Log
         }, ct);

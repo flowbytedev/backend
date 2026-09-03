@@ -1,3 +1,5 @@
+using System.Text.Encodings.Web;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Application.Shared.Models.Data.Pipelines;
 
@@ -142,9 +144,23 @@ public static class PipelineTokenResolver
             PipelineTokenContexts.Sql => PipelineWatermarkWindow.Literal(value),
             PipelineTokenContexts.Url => Uri.EscapeDataString(value),
             PipelineTokenContexts.Path => SafePathSegment(value),
+            PipelineTokenContexts.Json => JsonStringContent(value),
             _ => value
         };
     }
+
+    /// <summary>
+    /// A value safe to drop between the quotes of a JSON string the author wrote. Escapes what JSON
+    /// requires — quote, backslash, control characters — and nothing else.
+    /// <para>
+    /// The relaxed encoder rather than the default one: the default also escapes <c>&lt;</c>, <c>&amp;</c>
+    /// and <c>+</c> to <c>\uXXXX</c> for safety in HTML, which this is not — the finished string is an HTTP
+    /// request body. Either decodes to the same value, but the substituted template is parsed again before
+    /// it is sent, and a parse error reads far better when the text still looks like what was typed.
+    /// </para>
+    /// </summary>
+    internal static string JsonStringContent(string value) =>
+        JsonEncodedText.Encode(value, JavaScriptEncoder.UnsafeRelaxedJsonEscaping).Value;
 
     /// <summary>
     /// A value safe to drop into a path or file name: no separators, no traversal, no wildcards.

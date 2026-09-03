@@ -1,4 +1,5 @@
-﻿using System.Text;
+﻿using System.Globalization;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace Application.Shared.Services.Data.Pipelines;
@@ -47,8 +48,8 @@ public static class PipelineTokens
     /// <summary>The <c>run.*</c> keys this build provides, for the editor's token helper.</summary>
     public static readonly string[] RunKeys =
     [
-        "run.id", "run.pipelineId", "run.pipelineName", "run.date", "run.startedAt", "run.year",
-        "run.month", "run.day"
+        "run.id", "run.pipelineId", "run.pipelineName", "run.date", "run.startedAt", "run.timestamp",
+        "run.year", "run.month", "run.day"
     ];
 
     /// <summary>
@@ -149,6 +150,15 @@ public static class PipelineTokens
             ["run.pipelineName"] = pipelineName ?? string.Empty,
             ["run.date"] = startedAtUtc.ToString("yyyy-MM-dd"),
             ["run.startedAt"] = startedAtUtc.ToString("yyyy-MM-dd HH:mm:ss"),
+
+            // The machine-readable twin of run.startedAt. run.startedAt is spaced and unzoned because it is
+            // read by people — in an email subject or a log line — and an API that wants a timestamp will
+            // reject it. This one is RFC 3339 UTC, which is what a JSON body almost always means by "a time".
+            // Both name the same instant: the run's start, not the moment of the request, so every batch of
+            // one run carries the same value and a retry does not invent a new one.
+            ["run.timestamp"] = startedAtUtc.ToString(
+                "yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture),
+
             ["run.year"] = startedAtUtc.ToString("yyyy"),
             ["run.month"] = startedAtUtc.ToString("MM"),
             ["run.day"] = startedAtUtc.ToString("dd")

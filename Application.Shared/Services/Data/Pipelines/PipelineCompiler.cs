@@ -1,4 +1,5 @@
-﻿using System.Text.Json.Nodes;
+﻿using System.Text.Json;
+using System.Text.Json.Nodes;
 using Application.Shared.Models.Data.Pipelines;
 
 namespace Application.Shared.Services.Data.Pipelines;
@@ -557,6 +558,34 @@ public static class PipelineCompiler
                         PipelineIssueSeverity.Warning));
                 }
 
+                // The envelope. Each check below is enforced again by the writer at run time — it has to be,
+                // since graph_json is a text column — but an envelope is typed by hand, and a missing brace
+                // should not be discovered by a run that has already delivered half its batches.
+                var envelope = Str(config, "envelope");
+
+                if (!string.IsNullOrWhiteSpace(envelope))
+                {
+                    if (!PipelineApiContentTypes.SupportsBatch(contentType))
+                    {
+                        issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldInvalid,
+                            $"'{node.Label ?? node.Id}' has extra body fields, which are JSON, but sends a " +
+                            "form-encoded body. A form body is flat and cannot carry them."));
+                    }
+                    else if (string.IsNullOrWhiteSpace(Str(config, "bodyProperty")))
+                    {
+                        issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldRequired,
+                            $"'{node.Label ?? node.Id}' has extra body fields but nothing in 'Wrap the " +
+                            "batch in'. That names the property inside the object where the rows go."));
+                    }
+
+                    if (!IsJsonObjectTemplate(envelope!))
+                    {
+                        issues.Add(new(node.Id, PipelineIssueCodes.NodeFieldInvalid,
+                            $"The extra body fields on '{node.Label ?? node.Id}' are not a JSON object. " +
+                            "It has to look like { \"publishTime\": \"{{ run.timestamp }}\" }."));
+                    }
+                }
+
                 break;
             }
 
@@ -822,6 +851,33 @@ public static class PipelineCompiler
         return parts[1]
             .Split('|', StringSplitOptions.RemoveEmptyEntries)
             .Any(allowed => string.Equals(actualText, allowed, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Whether an envelope template is a well-formed JSON object once its tokens are gone.
+    /// <para>
+    /// Every token is replaced with <c>0</c> before parsing, which is the only substitution that works in
+    /// both positions a token is legitimately used: inside a string, <c>"{{ x }}"</c> becomes <c>"0"</c>,
+    /// and as a bare value — the way a number or a boolean has to be written — <c>{{ x }}</c> becomes
+    /// <c>0</c>. Parsing the raw text instead would reject every numeric field, and skipping the check
+    /// would leave an unclosed brace to be found at run time.
+    /// </para>
+    /// <para>
+    /// This says nothing about what the tokens will expand to. A captured value is escaped as JSON string
+    /// content when it is substituted, so one inside a string is always safe; one used bare can still
+    /// produce invalid JSON, and the writer reports that before sending anything.
+    /// </para>
+    /// </summary>
+    private static bool IsJsonObjectTemplate(string template)
+    {
+        try
+        {
+            return JsonNode.Parse(PipelineTokens.Resolve(template, _ => "0")) is JsonObject;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 
     private static string? Str(JsonObject? config, string key)

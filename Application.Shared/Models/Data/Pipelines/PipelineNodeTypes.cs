@@ -108,7 +108,15 @@ public static class PipelineTokenContexts
     /// <summary>The value lands in a file path or name. Stripped of separators and traversal.</summary>
     public const string Path = "path";
 
-    public static readonly string[] All = [Plain, Sql, Url, Path];
+    /// <summary>
+    /// The value lands inside a JSON string the author wrote — <c>"publishTime": "{{ params.at }}"</c>.
+    /// Escaped as JSON string <b>content</b>, without the surrounding quotes, because the author already
+    /// typed those. A quote or a backslash in a captured value would otherwise end the string early and
+    /// turn the rest of the template into whatever the data says.
+    /// </summary>
+    public const string Json = "json";
+
+    public static readonly string[] All = [Plain, Sql, Url, Path, Json];
 }
 
 /// <summary>What a <c>transform.capture</c> step does when its input has no rows.</summary>

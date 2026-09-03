@@ -626,6 +626,18 @@ public static class PipelineNodeCatalog
                         Placeholder: "records",
                         Help: "JSON: sends a named property holding the array. Form: prefixes every field, so \"record\" sends record[sku]=... Leave empty for neither."),
 
+                    // The rows are the only thing this step can build; anything ELSE the endpoint wants in
+                    // the body — a publish time, a control number, a source system — is not in them and has
+                    // no column to come from. So it is authored as JSON rather than collected as key/value
+                    // rows: an envelope field is frequently a number, a boolean or a nested object, and a
+                    // key/value grid can only produce strings. Tokens inside it are escaped as JSON string
+                    // content, so a value with a quote in it cannot break out of the template.
+                    new("envelope", "Extra body fields", PipelineFieldKinds.TextArea,
+                        TokenContext: PipelineTokenContexts.Json,
+                        VisibleWhen: $"contentType={PipelineApiContentTypes.Json}",
+                        Placeholder: "{ \"publishTime\": \"{{ run.timestamp }}\", \"controlId\": 1 }",
+                        Help: "A JSON object sent around the rows. The rows are placed at \"Wrap the batch in\", which is required when this is used - without a name there is nowhere in the object to put them. Use {{ run.timestamp }} for an RFC 3339 time, or {{ params.* }} / {{ vars.* }} for a value from the trigger or an earlier step."),
+
                     new("stopOnError", "Stop at the first failed request", PipelineFieldKinds.Checkbox,
                         SupportsTokens: false,
                         Help: "On by default. Rows already accepted stay accepted either way - there is no rollback over HTTP.")

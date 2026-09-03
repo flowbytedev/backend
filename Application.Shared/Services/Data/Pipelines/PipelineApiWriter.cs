@@ -1,5 +1,6 @@
 ﻿using System.Data.Common;
 using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Application.Shared.Models.Data;
 using Application.Shared.Models.Data.Pipelines;
@@ -56,6 +57,17 @@ public sealed class ApiWriteRequest
     /// sends the array itself.
     /// </summary>
     public string? BodyProperty { get; init; }
+
+    /// <summary>
+    /// A JSON object sent around the rows, with <see cref="BodyProperty"/> naming where inside it they go —
+    /// <c>{"publishTime": "…", "value": [...]}</c>. Already token-substituted by the engine.
+    /// <para>
+    /// This exists because the rows cannot express the whole body. An endpoint that wants a publish time or
+    /// a control number wants one <em>per request</em>, and no column carries it: putting it in the rows
+    /// would repeat it on every record, which is a different document.
+    /// </para>
+    /// </summary>
+    public string? Envelope { get; init; }
 
     /// <summary>
     /// Stop at the first failed request. On by default: continuing means deliberately sending more rows to
@@ -115,16 +127,68 @@ public class PipelineApiWriter(
             ? 1
             : Math.Max(1, request.BatchSize);
 
+        // Parsed once, before a single row is read, and returned as a failure rather than thrown. A
+        // malformed envelope is a config error, and discovering it at request 40 of 100 would leave 39
+        // batches delivered under a body that was never going to be right.
+        JsonObject? envelope = null;
+
+        if (!string.IsNullOrWhiteSpace(request.Envelope))
+        {
+            var (parsed, error) = ParseEnvelope(request.Envelope!, request.BodyProperty);
+            if (error is not null) return ApiWriteResult.Fail(error, PipelineErrorType.Invalid);
+
+            envelope = parsed;
+        }
+
         return await store.ReadRelationAsync(
             request.SourceDatasetId, request.SourceRelation,
             async (reader, columns, token) =>
-                await PumpAsync(request, credential, reader, columns, batchSize, token),
+                await PumpAsync(request, credential, envelope, reader, columns, batchSize, token),
             ct);
+    }
+
+    /// <summary>
+    /// The envelope template as a <see cref="JsonObject"/>, or a message naming what is wrong with it.
+    /// <para>
+    /// A missing <paramref name="bodyProperty"/> is refused rather than defaulted, and it is the one case
+    /// here that could not go either way: an object has no natural place for an array, so inventing a name
+    /// would send a body the endpoint accepts and quietly ignores — the worst of the failures available.
+    /// </para>
+    /// </summary>
+    internal static (JsonObject? Envelope, string? Error) ParseEnvelope(string text, string? bodyProperty)
+    {
+        if (string.IsNullOrWhiteSpace(bodyProperty))
+        {
+            return (null, "\"Extra body fields\" also needs \"Wrap the batch in\" - it names the property "
+                          + "inside that object where the rows go.");
+        }
+
+        JsonNode? node;
+
+        try
+        {
+            node = JsonNode.Parse(text);
+        }
+        catch (JsonException ex)
+        {
+            // Named as a config problem rather than reported as a parser position, because by far the most
+            // common cause is a token that expanded into an unquoted value.
+            return (null, $"\"Extra body fields\" is not valid JSON: {ex.Message}");
+        }
+
+        if (node is not JsonObject obj)
+        {
+            return (null, "\"Extra body fields\" has to be a JSON object - { \"publishTime\": \"...\" } - "
+                          + "since the rows are added to it as a property.");
+        }
+
+        return (obj, null);
     }
 
     private async Task<ApiWriteResult> PumpAsync(
         ApiWriteRequest request,
         ResolvedApiCredential credential,
+        JsonObject? envelope,
         DbDataReader reader,
         List<PipelineColumn> columns,
         int batchSize,
@@ -144,7 +208,7 @@ public class PipelineApiWriter(
         {
             if (buffer.Count == 0) return true;
 
-            var body = BuildBody(request, buffer);
+            var body = BuildBody(request, envelope, buffer);
 
             var response = await client.SendAsync(new ApiRequest
             {
@@ -221,22 +285,45 @@ public class PipelineApiWriter(
         };
     }
 
-    private static string BuildBody(ApiWriteRequest request, List<JsonObject> buffer)
+    private static string BuildBody(ApiWriteRequest request, JsonObject? envelope, List<JsonObject> buffer)
     {
-        // Form encoding is single-row by construction — see the batchSize note in WriteAsync.
+        // Form encoding is single-row by construction — see the batchSize note in WriteAsync. It carries no
+        // envelope either: a flat key=value body cannot hold one, and the compiler blocks the combination.
         if (request.ContentType == PipelineApiContentTypes.Form)
             return FormEncode(buffer[0], request.BodyProperty);
 
+        // What this step was going to send: an array for a batch, the object itself for one-per-row. The
+        // envelope wraps whichever of those it is rather than always an array, because a step set to one
+        // request per row means one record, and {"value": [one]} is a different document.
+        JsonNode payload;
+
         if (request.Shape == PipelineApiWriteShapes.Row)
-            return buffer[0].ToJsonString();
+        {
+            payload = buffer[0].DeepClone();
+        }
+        else
+        {
+            var array = new JsonArray();
+            foreach (var row in buffer) array.Add(row.DeepClone());
+            payload = array;
+        }
 
-        var array = new JsonArray();
-        foreach (var row in buffer) array.Add(row.DeepClone());
+        if (envelope is not null)
+        {
+            // Cloned per request: a JsonNode has exactly one parent, so assigning the payload into the
+            // shared template would detach it again on the next request. The clone copies the template — a
+            // handful of scalars — never the rows.
+            var body = (JsonObject)envelope.DeepClone();
+            body[request.BodyProperty!] = payload;
+            return body.ToJsonString();
+        }
 
-        if (string.IsNullOrWhiteSpace(request.BodyProperty))
-            return array.ToJsonString();
+        // No envelope: unchanged behaviour. In particular one-per-row still sends the bare object even when
+        // bodyProperty is set, because wrapping it now would rewrite the body of every step already doing it.
+        if (request.Shape == PipelineApiWriteShapes.Row || string.IsNullOrWhiteSpace(request.BodyProperty))
+            return payload.ToJsonString();
 
-        return new JsonObject { [request.BodyProperty!] = array }.ToJsonString();
+        return new JsonObject { [request.BodyProperty!] = payload }.ToJsonString();
     }
 
     /// <summary>
