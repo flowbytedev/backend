@@ -117,6 +117,26 @@ public partial class PipelineApiClient(
     /// </summary>
     public const string HttpClientName = "pipeline-api";
 
+    /// <summary>
+    /// The same client with TLS certificate validation turned off, for credentials that set
+    /// <see cref="ApiCredential.AllowInvalidCertificate"/>.
+    /// <para>
+    /// A second named client rather than a callback on the shared one, because TLS policy lives on the
+    /// handler and the factory pools one handler per name. Building a handler per request would leak
+    /// sockets; setting the callback on the shared handler would quietly stop validating certificates for
+    /// every other credential in the process.
+    /// </para>
+    /// </summary>
+    public const string InsecureHttpClientName = "pipeline-api-insecure";
+
+    /// <summary>
+    /// Which of the two clients a credential's requests go through. One expression, used by the data request
+    /// and the OAuth2 token request alike: a host whose certificate the data path cannot verify almost never
+    /// has one the token path can.
+    /// </summary>
+    internal static string ClientNameFor(ApiCredential credential) =>
+        credential.AllowInvalidCertificate ? InsecureHttpClientName : HttpClientName;
+
     private const int MaxRedirects = 3;
 
     public async Task<ResolvedApiCredential?> ResolveAsync(
@@ -229,7 +249,7 @@ public partial class PipelineApiClient(
 
         try
         {
-            var client = httpClientFactory.CreateClient(HttpClientName);
+            var client = httpClientFactory.CreateClient(ClientNameFor(request.Credential.Credential));
 
             using var message = new HttpRequestMessage(
                 new HttpMethod(request.Method.ToUpperInvariant()), uri);
@@ -306,8 +326,45 @@ public partial class PipelineApiClient(
         catch (HttpRequestException ex)
         {
             return ApiResponse.Fail(
-                $"The API could not be reached: {ex.Message}", PipelineErrorType.ApiError, 0, safeUrl);
+                $"The API could not be reached: {Describe(ex)}", PipelineErrorType.ApiError, 0, safeUrl);
         }
+    }
+
+    /// <summary>
+    /// An exception as its whole chain of messages, outermost first.
+    /// <para>
+    /// <c>ex.Message</c> alone is not enough for the failure that matters most here. A TLS problem arrives
+    /// as "The SSL connection could not be established, see inner exception." — a message whose entire
+    /// content is a pointer to a message we were not showing. The run log said a connection had failed and
+    /// never said the certificate was untrusted, expired, or issued to another host, and that difference is
+    /// the whole diagnosis: a trust store, a renewal, or a wrong URL.
+    /// </para>
+    /// </summary>
+    internal static string Describe(Exception exception)
+    {
+        const string pointer = "see inner exception";
+
+        var parts = new List<string>();
+
+        for (Exception? ex = exception; ex is not null; ex = ex.InnerException)
+        {
+            var text = ex.Message.Trim();
+
+            // Drop the pointer clause: what it points at is the next link in this chain.
+            var at = text.IndexOf(pointer, StringComparison.OrdinalIgnoreCase);
+            if (at >= 0) text = text[..at].TrimEnd(' ', ',', '.', ':');
+
+            if (text.Length == 0) continue;
+
+            // Skip a link that says nothing new. A socket failure wraps its own message with the host
+            // appended — "No such host is known. (api.example.com:443)" over "No such host is known." —
+            // and repeating it makes the line longer without making it clearer.
+            if (parts.Any(p => p.Contains(text, StringComparison.Ordinal))) continue;
+
+            parts.Add(text);
+        }
+
+        return parts.Count == 0 ? exception.GetType().Name : string.Join(" → ", parts);
     }
 
     /// <summary>

@@ -156,7 +156,7 @@ public partial class PipelineApiClient
 
         try
         {
-            var http = httpClientFactory.CreateClient(HttpClientName);
+            var http = httpClientFactory.CreateClient(ClientNameFor(c));
 
             using var message = new HttpRequestMessage(HttpMethod.Post, tokenUri);
             message.Content = new StringContent(body, Encoding.UTF8);
@@ -192,7 +192,9 @@ public partial class PipelineApiClient
         }
         catch (Exception ex)
         {
-            return (null, default, $"Could not reach {tokenUri.Host}: {ex.Message}");
+            // Describe, not ex.Message: a TLS failure says only "see inner exception", and this is the
+            // request it happens to first — see the note on Describe.
+            return (null, default, $"Could not reach {tokenUri.Host}: {Describe(ex)}");
         }
     }
 

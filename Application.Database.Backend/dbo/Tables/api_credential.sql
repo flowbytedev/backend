@@ -31,6 +31,11 @@ CREATE TABLE [dbo].[api_credential] (
     -- Whether destination.api may SEND data with this credential. Off unless an operator says so: a read
     -- token that happens to have write scope must not become a write path because someone added a node.
     [allow_write]      BIT             DEFAULT ((0)) NOT NULL,
+    -- Whether to send to this host without validating its TLS certificate. Off unless an operator says so:
+    -- it turns off the check that the host is who it claims to be, so the secret travels to somewhere that
+    -- cannot be verified. For internal endpoints whose certificate nothing trusts. Added after the fact
+    -- with a default, so every existing row reads as validating, exactly as before.
+    [allow_invalid_certificate] BIT     DEFAULT ((0)) NOT NULL,
     [is_enabled]       BIT             DEFAULT ((1)) NOT NULL,
     [timeout_seconds]  INT             NULL,
     [company_id]       NVARCHAR (10)   NULL,

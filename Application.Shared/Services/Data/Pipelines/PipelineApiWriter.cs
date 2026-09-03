@@ -119,6 +119,13 @@ public class PipelineApiWriter(
                 + "\"May send data\" on the credential if this endpoint is meant to be written to.",
                 PipelineErrorType.NotWritable);
 
+        // Said out loud on every run that uses it, and it matters more on this side than on a source: what
+        // travels to an unverified host here is the company's own data, not just a request for someone
+        // else's. Not a refusal — an operator turned this on deliberately — but never silent.
+        if (credential.Credential.AllowInvalidCertificate)
+            request.Progress?.WriteLine(
+                $"      warning: '{credential.Name}' does not validate the server's TLS certificate");
+
         // Form encoding cannot express an array, so it is one row per request whatever the shape says. The
         // compiler rejects that combination at save time; this is the run-time backstop, because a graph can
         // be edited into an invalid state and a silently mis-encoded body is worse than a slow one.

@@ -123,6 +123,13 @@ public class PipelineSourceLoader(
                 $"The API credential '{credential.Name}' is disabled.",
                 PipelineErrorType.SourceUnavailable);
 
+        // Said out loud on every run that uses it. A setting that turns off certificate validation should
+        // not be discoverable only by opening the credential — a run log is what someone reads when they
+        // are working out why data arrived from somewhere unexpected.
+        if (credential.Credential.AllowInvalidCertificate)
+            request.Progress?.WriteLine(
+                $"      warning: '{credential.Name}' does not validate the server's TLS certificate");
+
         var pagination = Str(config, "pagination") ?? PipelineApiPagination.None;
 
         var fetch = await apiReader.FetchToFileAsync(new ApiFetchRequest

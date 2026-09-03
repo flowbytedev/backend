@@ -112,6 +112,25 @@ public class ApiCredential : BaseModel
     /// </summary>
     public bool AllowWrite { get; set; }
 
+    /// <summary>
+    /// Send to this credential's host even when its TLS certificate does not validate — self-signed,
+    /// expired, an untrusted root, or issued to a different name than the host.
+    /// <para>
+    /// Off by default and never inferred, for the same reason as <see cref="AllowWrite"/>. What it turns off
+    /// is the check that the host is who it claims to be, so a request made through it can be read and
+    /// rewritten by anything on the path, secret included. It exists because internal test endpoints are
+    /// routinely issued certificates nothing trusts, and the better fix — installing the issuing
+    /// certificate in the server's trust store — is not always available to the pipeline's author.
+    /// </para>
+    /// <para>
+    /// The blast radius is deliberately this row. The flag selects a different HTTP client for requests made
+    /// with this credential only, and its steps are already confined to the <see cref="BaseUrl"/> host. It
+    /// covers the OAuth2 token request too: that is usually the first thing to fail against such a host,
+    /// and it is the request carrying the client secret.
+    /// </para>
+    /// </summary>
+    public bool AllowInvalidCertificate { get; set; }
+
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>Per-request timeout. Null falls back to <c>Pipelines:ApiTimeoutSeconds</c>.</summary>

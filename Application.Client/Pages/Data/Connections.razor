@@ -108,6 +108,16 @@ else
                                             {
                                                 <span class="badge badge-warning">no secret</span>
                                             }
+                                            @* Shown in the list, not only in the form: a credential that
+                                               stopped verifying its host months ago should be visible
+                                               without opening it. *@
+                                            @if (row.AllowInvalidCertificate)
+                                            {
+                                                <span class="badge badge-warning"
+                                                      title="TLS certificate validation is off for this credential">
+                                                    unverified TLS
+                                                </span>
+                                            }
                                         </td>
                                         <td>
                                             @if (row.AllowWrite)
@@ -411,6 +421,20 @@ else
 
                         <div class="field field-check">
                             <label>
+                                <input type="checkbox" @bind="_editApi.AllowInvalidCertificate" />
+                                Accept an invalid TLS certificate
+                            </label>
+                            <div class="field-help">
+                                For an internal endpoint whose certificate this server does not trust —
+                                self-signed, expired, or issued to a different name. It turns off the check
+                                that the host is who it claims to be, so requests through this credential,
+                                including its secret, can be read and altered by anything on the path.
+                                Prefer installing the issuing certificate on the server where that is possible.
+                            </div>
+                        </div>
+
+                        <div class="field field-check">
+                            <label>
                                 <input type="checkbox" @bind="_editApi.IsEnabled" />
                                 Enabled
                             </label>
@@ -595,6 +619,7 @@ else
             TokenFieldsJson = row.TokenFieldsJson,
             ExtraHeadersJson = row.ExtraHeadersJson,
             AllowWrite = row.AllowWrite,
+            AllowInvalidCertificate = row.AllowInvalidCertificate,
             IsEnabled = row.IsEnabled,
             TimeoutSeconds = row.TimeoutSeconds,
             HasSecret = row.HasSecret
@@ -630,6 +655,7 @@ else
             TokenFieldsJson = TokenFieldsAsJson(),
             _editApi.ExtraHeadersJson,
             _editApi.AllowWrite,
+            _editApi.AllowInvalidCertificate,
             _editApi.IsEnabled,
             _editApi.TimeoutSeconds
         };
@@ -891,6 +917,7 @@ else
         public string? TokenFieldsJson { get; set; }
         public string? ExtraHeadersJson { get; set; }
         public bool AllowWrite { get; set; }
+        public bool AllowInvalidCertificate { get; set; }
         public bool IsEnabled { get; set; }
         public int? TimeoutSeconds { get; set; }
         public bool HasSecret { get; set; }

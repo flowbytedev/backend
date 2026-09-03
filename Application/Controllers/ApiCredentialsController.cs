@@ -188,6 +188,7 @@ public class ApiCredentialsController(
             ? null
             : request.ExtraHeadersJson!.Trim();
         row.AllowWrite = request.AllowWrite;
+        row.AllowInvalidCertificate = request.AllowInvalidCertificate;
         row.IsEnabled = request.IsEnabled;
         row.TimeoutSeconds = request.TimeoutSeconds;
         row.ModifiedBy = userId;
@@ -302,6 +303,7 @@ public class ApiCredentialsController(
         TokenFieldsJson = row.TokenFieldsJson,
         ExtraHeadersJson = row.ExtraHeadersJson,
         AllowWrite = row.AllowWrite,
+        AllowInvalidCertificate = row.AllowInvalidCertificate,
         IsEnabled = row.IsEnabled,
         TimeoutSeconds = row.TimeoutSeconds,
         HasSecret = !string.IsNullOrEmpty(row.SecretEncrypted),
@@ -353,6 +355,7 @@ public sealed class ApiCredentialDto
     public string? TokenFieldsJson { get; set; }
     public string? ExtraHeadersJson { get; set; }
     public bool AllowWrite { get; set; }
+    public bool AllowInvalidCertificate { get; set; }
     public bool IsEnabled { get; set; }
     public int? TimeoutSeconds { get; set; }
 
@@ -383,6 +386,7 @@ public sealed class ApiCredentialSaveRequest
     public string? TokenFieldsJson { get; set; }
     public string? ExtraHeadersJson { get; set; }
     public bool AllowWrite { get; set; }
+    public bool AllowInvalidCertificate { get; set; }
     public bool IsEnabled { get; set; } = true;
     public int? TimeoutSeconds { get; set; }
 }
