@@ -40,6 +40,11 @@ public class CompanySettingsController : ControllerBase
             // enabled there rather than as an indeterminate control.
             FreshnessChecksEnabled = settings.FreshnessChecksEnabled ?? true,
             FreshnessAlertRecipients = settings.FreshnessAlertRecipients ?? string.Empty,
+            // Sent raw, not resolved: an empty box has to mean "the default", so the page can show what
+            // that default currently is as a placeholder rather than as a value the operator then owns.
+            PipelineWorkingDirectory = settings.PipelineWorkingDirectory ?? string.Empty,
+            PipelineWorkingDirectoryEffective =
+                PipelineWorkspacePath.Resolve(settings.PipelineWorkingDirectory),
         });
     }
 
@@ -66,14 +71,28 @@ public class CompanySettingsController : ControllerBase
         if (AlertRecipients.FirstInvalid(body.FreshnessAlertRecipients) is { } badAddress)
             return BadRequest($"'{badAddress}' does not look like an email address.");
 
+        // Same again for the pipeline working folder. Existence is deliberately not required here — the
+        // scheduler that writes there may be a different machine — so this only rejects a path that could
+        // never work anywhere. See PipelineWorkspacePath.Validate.
+        if (PipelineWorkspacePath.Validate(body.PipelineWorkingDirectory) is { } badFolder)
+            return BadRequest(badFolder);
+
         var userId = Request.Headers["UserId"].FirstOrDefault();
         await _settings.SaveAsync(companyId, body, userId, cancellationToken);
 
         var saved = await _settings.GetAsync(companyId, cancellationToken);
+
+        // Every field, not just the two this used to return. The client echoes the response back into its
+        // own state, so omitting a field here made a saved value look cleared until the page was reloaded.
         return Ok(new CompanySettingsDto
         {
             DebugLoggingEnabled = saved.DebugLoggingEnabled,
             ExportDateFormat = ExportDateFormats.Resolve(saved.ExportDateFormat),
+            FreshnessChecksEnabled = saved.FreshnessChecksEnabled ?? true,
+            FreshnessAlertRecipients = saved.FreshnessAlertRecipients ?? string.Empty,
+            PipelineWorkingDirectory = saved.PipelineWorkingDirectory ?? string.Empty,
+            PipelineWorkingDirectoryEffective =
+                PipelineWorkspacePath.Resolve(saved.PipelineWorkingDirectory),
         });
     }
 }

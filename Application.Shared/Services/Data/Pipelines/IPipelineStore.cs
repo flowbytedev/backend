@@ -1,4 +1,4 @@
-﻿using Application.Shared.Models.Data;
+using Application.Shared.Models.Data;
 using Application.Shared.Models.Data.Pipelines;
 
 namespace Application.Shared.Services.Data.Pipelines;
@@ -91,6 +91,26 @@ public interface IPipelineStore
         string datasetId, string sql, int? timeoutSeconds = null, CancellationToken ct = default);
 
     Task<int> DropRelationsAsync(string datasetId, string prefix, CancellationToken ct = default);
+
+    /// <summary>
+    /// Opens and holds a read-write handle on a dataset's file until the returned object is disposed.
+    /// Nothing is run on it — it exists purely to pin the file's access mode.
+    /// <para>
+    /// This is the one place the "connection per operation" rule is deliberately suspended, and only for a
+    /// run's own scratch database, which nothing else ever opens. It exists because of a measured DuckDB
+    /// behaviour: connections to one file share a single database instance <em>whose access mode is fixed
+    /// by whichever handle opened it first</em>. Read-write handles happily coexist — several steps can
+    /// materialize into one scratch file at once — but if a READ_ONLY handle gets there first, every
+    /// concurrent write fails with "Cannot execute statement ... attached in read-only mode". Steps
+    /// running in parallel mix the two constantly (one materializes while another streams its rows out),
+    /// so holding a read-write handle for the length of the run is what makes the ordering irrelevant.
+    /// </para>
+    /// <para>
+    /// Must be disposed before the scratch database is deleted, or the file is still open when the delete
+    /// runs.
+    /// </para>
+    /// </summary>
+    Task<IAsyncDisposable> HoldWriteHandleAsync(string datasetId, CancellationToken ct = default);
 
     /// <summary>
     /// Copies a relation straight out to a file with DuckDB's own <c>COPY … TO</c>, for the email export.

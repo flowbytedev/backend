@@ -36,4 +36,16 @@ public class CompanySettings : BaseModel
     /// and the API still serves them; it just sends no mail.
     /// </summary>
     public string? FreshnessAlertRecipients { get; set; }
+
+    /// <summary>
+    /// Folder this company's pipeline runs stage their files in — the CSV a database source streams into,
+    /// the JSON an API source pages into, the copy a blob source downloads. Null means never chosen, which
+    /// reads as the OS temp folder; see <see cref="PipelineWorkspacePath"/>.
+    /// <para>
+    /// Per company rather than per deployment because the volume that can absorb a nightly extract is a
+    /// property of the data, not of the machine — and the machine-wide fallback (a service account's temp
+    /// folder, usually on the system drive) is the one place these files should not go.
+    /// </para>
+    /// </summary>
+    public string? PipelineWorkingDirectory { get; set; }
 }

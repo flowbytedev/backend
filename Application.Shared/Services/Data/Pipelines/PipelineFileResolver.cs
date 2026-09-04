@@ -1,4 +1,5 @@
 using Azure.Storage.Blobs;
+using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Application.Shared.Models.Data.Pipelines;
 
@@ -37,6 +38,13 @@ public sealed class PipelineFileRequest
 
     /// <summary>The file a manual run attached, already written to disk by the controller.</summary>
     public string? UploadedPath { get; init; }
+
+    /// <summary>
+    /// Folder a downloaded copy is written into — only a blob source needs one, since a folder source is
+    /// read where it already is. Supplied by the run so a blob download lands on the same volume as every
+    /// other staging file rather than on the system drive.
+    /// </summary>
+    public required string WorkingDirectory { get; init; }
 }
 
 /// <summary>
@@ -187,8 +195,8 @@ public class PipelineFileResolver(PipelineOptions options, AzureBlobOption blobO
 
         // Downloaded to local disk rather than read in place: DuckDB's azure extension is not installed
         // here, and a whole-file download is honest about what is happening anyway.
-        var temp = Path.Combine(Path.GetTempPath(),
-            $"pipe_blob_{Guid.NewGuid():N}{Path.GetExtension(request.BlobPath) ?? string.Empty}");
+        var temp = PipelineWorkspacePath.FileIn(
+            request.WorkingDirectory, "pl_blob", Path.GetExtension(request.BlobPath) ?? string.Empty);
 
         try
         {

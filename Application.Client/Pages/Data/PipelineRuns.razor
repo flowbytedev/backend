@@ -1,4 +1,4 @@
-﻿@page "/data/pipelines/{Id}/runs"
+@page "/data/pipelines/{Id}/runs"
 @page "/data/pipelines/{Id}/runs/{RunId}"
 @using System.Net.Http.Json
 @using Application.Client.Pipelines
@@ -690,6 +690,7 @@ else if (_run is not null)
         PipelineStepStatus.Success => "is-ok",
         PipelineStepStatus.Failed => "is-failed",
         PipelineStepStatus.Skipped => "is-skipped",
+        PipelineStepStatus.Canceled => "is-skipped",
         _ => string.Empty
     };
 
@@ -708,6 +709,7 @@ else if (_run is not null)
         PipelineStepStatus.Failed => "badge-danger",
         PipelineStepStatus.Running => "badge-accent",
         PipelineStepStatus.Skipped => "badge-neutral",
+        PipelineStepStatus.Canceled => "badge-warning",
         _ => "badge-neutral"
     };
 

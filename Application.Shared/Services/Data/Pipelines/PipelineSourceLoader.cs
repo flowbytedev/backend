@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text;
 using System.Text.Json.Nodes;
 using Application.Shared.Data;
@@ -50,6 +50,12 @@ public sealed class SourceLoadRequest
 
     /// <summary>A file attached to a manual run, for an upload source.</summary>
     public string? UploadedFilePath { get; init; }
+
+    /// <summary>
+    /// Folder to stage files in on the way into DuckDB. Supplied by the engine, which resolved it once
+    /// from the company's settings, so every step of one run writes to the same place.
+    /// </summary>
+    public required string WorkingDirectory { get; init; }
 
     public IJobProgress? Progress { get; init; }
 
@@ -159,6 +165,7 @@ public class PipelineSourceLoader(
             RowLimit = request.RowLimit,
             MaxPages = request.RowLimit is not null ? 1 : options.ResolveApiMaxPages(),
 
+            WorkingDirectory = request.WorkingDirectory,
             Progress = request.Progress
         }, ct);
 
@@ -215,7 +222,8 @@ public class PipelineSourceLoader(
             Pick = Str(config, "pick"),
             Container = request.ResolveTokens(Str(config, "container")),
             BlobPath = request.ResolveTokens(Str(config, "blobPath")),
-            UploadedPath = request.UploadedFilePath
+            UploadedPath = request.UploadedFilePath,
+            WorkingDirectory = request.WorkingDirectory
         }, ct);
 
         if (!resolved.Success)
@@ -535,7 +543,7 @@ public class PipelineSourceLoader(
                 "That database connection is no longer configured, or this company cannot use it.",
                 PipelineErrorType.SourceUnavailable);
 
-        var temp = Path.Combine(Path.GetTempPath(), $"pipe_src_{Guid.NewGuid():N}.csv");
+        var temp = PipelineWorkspacePath.FileIn(request.WorkingDirectory, "pl_src", ".csv");
 
         try
         {

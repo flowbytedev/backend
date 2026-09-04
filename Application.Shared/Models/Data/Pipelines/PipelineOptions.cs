@@ -32,6 +32,17 @@ public class PipelineOptions
     /// </summary>
     public int SourceFetchConcurrency { get; set; } = 3;
 
+    /// <summary>
+    /// Deployment ceiling on how many steps of one run may execute at once, whatever a graph asks for.
+    /// <para>
+    /// Low by default on purpose. Concurrency here buys wall-clock on the network-bound half of a run —
+    /// the fetch and the external write — and every parallel step costs a database connection, a staging
+    /// file and its share of the machine. Eight is well past the point where a single ETL run is the
+    /// bottleneck; beyond it the sources being read are.
+    /// </para>
+    /// </summary>
+    public int MaxParallelSteps { get; set; } = 8;
+
     /// <summary>Rows per batch when writing out to an external database.</summary>
     public int ExternalWriteBatchSize { get; set; } = 10000;
 
@@ -111,6 +122,13 @@ public class PipelineOptions
     public int ResolvePreviewRows() => Math.Clamp(PreviewRows, 1, 1000);
     public int ResolveStepPreviewRows() => Math.Clamp(StepPreviewRows, 0, 200);
     public int ResolveSourceFetchConcurrency() => Math.Clamp(SourceFetchConcurrency, 1, 8);
+
+    /// <summary>
+    /// How many steps a run may execute at once: what the graph asked for, never above the deployment's
+    /// ceiling and never below one.
+    /// </summary>
+    public int ResolveMaxParallelSteps(int requested) =>
+        Math.Clamp(requested, 1, Math.Clamp(MaxParallelSteps, 1, 32));
     public int ResolveMaxNodes() => Math.Clamp(MaxNodes, 1, 500);
     public int ResolveApiTimeoutSeconds() => Math.Clamp(ApiTimeoutSeconds, 1, 3600);
     public int ResolveApiRetryAttempts() => Math.Clamp(ApiRetryAttempts, 1, 10);

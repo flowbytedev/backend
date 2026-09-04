@@ -4,6 +4,7 @@
 @using Application.Shared.Enums
 @using Application.Shared.Models
 @using Application.Shared.Models.Data
+@using Application.Client.Components
 @inject HttpClient _httpClient
 @inject NavigationManager _navigationManager
 @inject IToastService _toastService
@@ -94,23 +95,71 @@ else
                 {
                     <div class="ds-field">
                         <label class="ds-label" for="ds-src">Source database <span style="color:#ef4444">*</span></label>
-                        <select id="ds-src" class="ds-input" value="@selectedSourceEntityId"
+                        <select id="ds-src" class="ds-input" value="@sourceChoice"
                                 @onchange="e => OnSourceChanged(e.Value?.ToString())">
                             <option value="">Select a database…</option>
                             @foreach (var db in sourceDatabases)
                             {
-                                <option value="@db.Id" selected="@(db.Id == selectedSourceEntityId)">@db.Name (@db.DatabaseType)</option>
+                                <option value="@db.Id" selected="@(db.Id == sourceChoice)">@db.Name (@db.DatabaseType)</option>
+                            }
+                            @if (canCreateDatabase)
+                            {
+                                <option value="@NewDatabaseChoice" selected="@(sourceChoice == NewDatabaseChoice)">
+                                    + Connect a new database…
+                                </option>
                             }
                         </select>
-                        @if (!sourceDatabases.Any())
+
+                        @if (isCreatingDatabase)
                         {
-                            <span class="ds-hint" style="color:#b45309">No connected databases found. Add a Database entity with a saved connection first.</span>
+                            <span class="ds-hint">
+                                The database is registered when you create the dataset, and appears from then
+                                on in this list and to pipeline steps.
+                            </span>
+                        }
+                        else if (!sourceDatabases.Any())
+                        {
+                            <span class="ds-hint" style="color:#b45309">
+                                No connected databases yet.
+                                @if (canCreateDatabase)
+                                {
+                                    <span>Choose "Connect a new database" above to add one here.</span>
+                                }
+                                else
+                                {
+                                    <span>Ask a data admin to add one on the Connections page first.</span>
+                                }
+                            </span>
                         }
                         else
                         {
                             <span class="ds-hint">Tables come from this database's saved connection; queries run live and read-only.</span>
                         }
                     </div>
+
+                    @* The same fields the Connections page uses. A dataset is very often the reason somebody
+                       is connecting a database at all, and sending them to another page to come back was the
+                       most common way of abandoning this form half-finished. *@
+                    @if (isCreatingDatabase)
+                    {
+                        <div class="ds-newdb">
+                            <p class="ds-section-title" style="margin-top:0">New database connection</p>
+
+                            <div class="ds-field">
+                                <label class="ds-label" for="ds-db-name">Name <span style="color:#ef4444">*</span></label>
+                                <input id="ds-db-name" class="ds-input" @bind="newDatabaseName"
+                                       @bind:event="oninput" placeholder="e.g., Warehouse" />
+                                <span class="ds-hint">How this database is listed everywhere else in the app.</span>
+                            </div>
+
+                            <DatabaseConnectionFields Form="newDatabaseConnection" />
+
+                            <span class="ds-hint" style="display:block;margin-top:0.6rem">
+                                Read access, stored encrypted. Writing into this database from a pipeline
+                                needs a separate login, added later under Data &rsaquo; Connections.
+                            </span>
+                        </div>
+                    }
 
                     @* Extracted so the edit page can offer the same decision — it belongs to the
                        source, and an operator who skipped it at creation needs somewhere to answer. *@
@@ -154,6 +203,12 @@ else
 }
 
 <style>
+    .ds-newdb {
+        border: 1px solid #e4e4e7; border-radius: 10px; padding: 0.9rem 1rem;
+        margin-bottom: 1rem; background: #fafafa;
+    }
+    [data-theme="dark"] .ds-newdb { background: #14161c; border-color: #2b303b; }
+
     /* Dark mode: override hardcoded light inline colors */
     [data-theme="dark"] [style*="color:#ef4444"]{color:#f87171!important}
     [data-theme="dark"] [style*="color:#b45309"]{color:#fcd34d!important}
@@ -169,11 +224,38 @@ else
     private string selectedSourceEntityId = string.Empty;
     private List<DatabaseEntityOptionDto> sourceDatabases = new();
 
+    /// <summary>The sentinel the source dropdown uses for "I want to connect one that isn't listed".</summary>
+    private const string NewDatabaseChoice = "__new__";
+
+    /// <summary>What the dropdown shows — an entity id, empty, or <see cref="NewDatabaseChoice"/>.</summary>
+    private string sourceChoice = string.Empty;
+
+    private bool isCreatingDatabase => sourceChoice == NewDatabaseChoice;
+
+    /// <summary>Registering a database is a DATA_ADMIN action, so the option is hidden from anyone else
+    /// rather than offered and then refused by the server.</summary>
+    private bool canCreateDatabase;
+
+    private string newDatabaseName = string.Empty;
+    private DatabaseConnectionRequest newDatabaseConnection = new()
+    {
+        DatabaseType = DataSourceType.SQLServer,
+        Port = DatabaseConnectionFields.DefaultPort(DataSourceType.SQLServer)
+    };
+
     /// <summary>
     /// Records the chosen source. The enforcement question is handled by
     /// <see cref="RlsEnforcementPanel"/>, which probes whenever this value changes.
+    /// <para>
+    /// While "connect a new database" is selected there is no source entity yet, so the RLS panel is
+    /// given an empty id and asks nothing — the question only becomes answerable once the database exists.
+    /// </para>
     /// </summary>
-    private void OnSourceChanged(string? entityId) => selectedSourceEntityId = entityId ?? string.Empty;
+    private void OnSourceChanged(string? choice)
+    {
+        sourceChoice = choice ?? string.Empty;
+        selectedSourceEntityId = sourceChoice == NewDatabaseChoice ? string.Empty : sourceChoice;
+    }
 
 
     // Live dataset-name uniqueness check (names are unique per company).
@@ -224,6 +306,7 @@ else
         var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
         var user = authState.User;
         canEdit = user.HasCompanyRole(companyId, "EDIT_DATA");
+        canCreateDatabase = user.HasCompanyRole(companyId, "DATA_ADMIN");
 
         _httpClient.DefaultRequestHeaders.Remove("X-Company-Id");
         _httpClient.DefaultRequestHeaders.Add("X-Company-Id", companyId);
@@ -259,18 +342,35 @@ else
             _toastService.ShowWarning(nameError);
             return;
         }
-        if (isExternal && string.IsNullOrWhiteSpace(selectedSourceEntityId))
+        if (isExternal && !isCreatingDatabase && string.IsNullOrWhiteSpace(selectedSourceEntityId))
         {
             _toastService.ShowWarning("Select a source database for the external dataset.");
             return;
         }
-
-        datasetModel.SourceType = isExternal ? DatasetSourceType.External : DatasetSourceType.Local;
-        datasetModel.SourceEntityId = isExternal ? selectedSourceEntityId : null;
+        if (isExternal && isCreatingDatabase && string.IsNullOrWhiteSpace(newDatabaseName))
+        {
+            _toastService.ShowWarning("Give the new database a name.");
+            return;
+        }
 
         isSubmitting = true;
         try
         {
+            // The database first, and only if it succeeds do we go on to the dataset. The other order
+            // would leave a dataset pointing at a source that does not exist, which is worse than an
+            // unused database entity — and the server undoes a half-made database on its own.
+            if (isExternal && isCreatingDatabase)
+            {
+                var createdId = await CreateSourceDatabase();
+                if (createdId is null) return;   // the finally below clears isSubmitting
+
+                selectedSourceEntityId = createdId;
+                sourceChoice = createdId;
+            }
+
+            datasetModel.SourceType = isExternal ? DatasetSourceType.External : DatasetSourceType.Local;
+            datasetModel.SourceEntityId = isExternal ? selectedSourceEntityId : null;
+
             var response = await _httpClient.PostAsJsonAsync("api/datasets", datasetModel);
             if (response.IsSuccessStatusCode)
             {
@@ -291,6 +391,52 @@ else
         {
             isSubmitting = false;
         }
+    }
+
+    /// <summary>
+    /// Registers the new database and its connection, returning the entity id — or null, having already
+    /// said why, when the server refused.
+    /// </summary>
+    private async Task<string?> CreateSourceDatabase()
+    {
+        try
+        {
+            var response = await _httpClient.PostAsJsonAsync("api/database-connections", new
+            {
+                Name = newDatabaseName.Trim(),
+                Description = (string?)null,
+                Connection = newDatabaseConnection
+            });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _toastService.ShowError(
+                    $"Couldn't connect the database: {await response.Content.ReadAsStringAsync()}");
+                return null;
+            }
+
+            var created = await response.Content.ReadFromJsonAsync<CreatedDatabase>();
+
+            if (string.IsNullOrWhiteSpace(created?.EntityId))
+            {
+                _toastService.ShowError("The database was created but the server returned no id.");
+                return null;
+            }
+
+            _toastService.ShowSuccess($"Connected {newDatabaseName.Trim()}.");
+            return created.EntityId;
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Couldn't connect the database: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>Only the field this form needs back from the create call.</summary>
+    private sealed class CreatedDatabase
+    {
+        public string? EntityId { get; set; }
     }
 
     private void Cancel() => _navigationManager.NavigateTo($"/data/datasets?c={companyId}");

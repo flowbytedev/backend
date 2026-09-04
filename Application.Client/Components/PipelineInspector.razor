@@ -1,4 +1,4 @@
-﻿@*
+@*
     The step settings panel.
 
     EVERY field is rendered from the catalogue's PipelineFieldSpec. There is no per-step-type form anywhere in
@@ -95,6 +95,26 @@
                               @onclick="ToggleFailOnEmpty"></span>
                         <span class="switch-label">Fail if a source returns no rows</span>
                     </label>
+
+                    <div class="field">
+                        <label class="field-label">Steps at once</label>
+                        <input class="input" type="number" min="1" max="16"
+                               value="@Settings.MaxParallelSteps"
+                               @onchange="e => SetMaxParallel(e.Value?.ToString())" />
+                        <div class="field-help">
+                            A ceiling, not an instruction. Steps only ever overlap when you put them in the
+                            same parallel group, under a step's <strong>Advanced</strong> section &mdash;
+                            raising this on its own changes nothing.
+                            @if (ParallelGroups.Count == 0)
+                            {
+                                <span>No step is in a group yet, so this pipeline runs one step at a time.</span>
+                            }
+                            else
+                            {
+                                <span>Groups in this pipeline: @string.Join(", ", ParallelGroups).</span>
+                            }
+                        </div>
+                    </div>
                 </div>
             </details>
 
@@ -393,6 +413,36 @@
                     </div>
 
                     <div class="field">
+                        <label class="field-label">Parallel group</label>
+                        <input class="input" list="pl-parallel-groups" maxlength="40"
+                               placeholder="runs on its own"
+                               value="@Node.ParallelGroup"
+                               @onchange="e => SetParallelGroup(e.Value?.ToString())" />
+                        <datalist id="pl-parallel-groups">
+                            @foreach (var group in ParallelGroups)
+                            {
+                                <option value="@group"></option>
+                            }
+                        </datalist>
+                        <div class="field-help">
+                            Steps sharing a group name run at the same time, once each of them has its
+                            input. Leave it empty and this step runs on its own &mdash; which is what you
+                            want when it reads from or writes to a table another step is also using.
+                            @if (GroupPeers is { Count: > 0 })
+                            {
+                                <span>May run alongside: @string.Join(", ", GroupPeers).</span>
+                            }
+                            else if (!string.IsNullOrWhiteSpace(Node.ParallelGroup))
+                            {
+                                <span>
+                                    Nothing else is in '@Node.ParallelGroup' yet, so this step still runs
+                                    on its own.
+                                </span>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="field">
                         <label class="field-label">Retry attempts</label>
                         <input class="input" type="number" min="1" max="10"
                                value="@(Node.Retry?.MaxAttempts ?? 1)"
@@ -647,6 +697,52 @@
     private async Task ToggleFailOnEmpty()
     {
         Settings.FailOnEmptySource = !Settings.FailOnEmptySource;
+        await OnSettingsChanged.InvokeAsync();
+    }
+
+    // ---------------- parallel groups ----------------
+
+    /// <summary>Every group named anywhere in this graph, so both controls can offer what already exists.</summary>
+    private List<string> ParallelGroups => Graph.Nodes
+        .Select(n => n.ParallelGroup?.Trim())
+        .Where(g => !string.IsNullOrEmpty(g))
+        .Select(g => g!)
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(g => g, StringComparer.OrdinalIgnoreCase)
+        .ToList();
+
+    /// <summary>
+    /// The other steps in this step's group. Shown because "which steps may run with this one" is the
+    /// question the setting exists to answer, and a group name on its own does not answer it.
+    /// </summary>
+    private List<string>? GroupPeers
+    {
+        get
+        {
+            var group = Node?.ParallelGroup?.Trim();
+            if (string.IsNullOrEmpty(group)) return null;
+
+            return Graph.Nodes
+                .Where(n => n.Id != Node!.Id
+                            && string.Equals(n.ParallelGroup?.Trim(), group, StringComparison.OrdinalIgnoreCase))
+                .Select(n => n.Label ?? n.Id)
+                .ToList();
+        }
+    }
+
+    private async Task SetParallelGroup(string? value)
+    {
+        var group = value?.Trim();
+
+        // Empty is stored as null, never as "": the compiler and the scheduler both read "no group" as
+        // absent, and an empty string would quietly become a group that every blank step shares.
+        Node!.ParallelGroup = string.IsNullOrEmpty(group) ? null : group;
+        await Notify($"{Node.Id}:parallelGroup");
+    }
+
+    private async Task SetMaxParallel(string? value)
+    {
+        Settings.MaxParallelSteps = int.TryParse(value, out var parsed) ? Math.Clamp(parsed, 1, 16) : 1;
         await OnSettingsChanged.InvokeAsync();
     }
 

@@ -1,4 +1,4 @@
-﻿using Application.Shared.Models.Data.Pipelines;
+using Application.Shared.Models.Data.Pipelines;
 using Microsoft.AspNetCore.Components;
 
 namespace Application.Client.Pipelines;
@@ -68,6 +68,9 @@ public static class NodeIcons
         PipelineStepStatus.Failed => ("is-failed", "✕"),
         PipelineStepStatus.Running => ("is-running", "●"),
         PipelineStepStatus.Skipped => ("is-skipped", "⊘"),
+        // Shares the skipped styling: both mean "this produced nothing", and a cancel is not a fault to
+        // draw in red. The glyph is what tells them apart.
+        PipelineStepStatus.Canceled => ("is-skipped", "⊗"),
         PipelineStepStatus.Pending => ("is-pending", "·"),
         _ => (string.Empty, string.Empty)
     };

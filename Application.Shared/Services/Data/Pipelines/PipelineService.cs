@@ -1,14 +1,20 @@
-﻿using Application.Shared.Models;
+using Application.Shared.Models;
 using System.Text.Json;
 using Application.Shared.Data;
 using Application.Shared.Models.Data.Pipelines;
+using Hangfire;
 using Microsoft.EntityFrameworkCore;
 
 namespace Application.Shared.Services.Data.Pipelines;
 
 /// <summary>
-/// CRUD and run bookkeeping for pipelines. Deliberately Hangfire-free — enqueueing is the caller's job (the
-/// controller) and executing is the engine's, so this stays usable from both hosts and from a plain test.
+/// CRUD and run bookkeeping for pipelines. Enqueueing is the caller's job (the controller) and executing is
+/// the engine's, so this stays usable from both hosts and from a plain test.
+/// <para>
+/// The one Hangfire dependency is cancelling, and it is optional: <see cref="CancelRunAsync"/> deletes the
+/// run's job so a queued run cannot start after somebody cancelled it. A host with no job storage still
+/// cancels correctly — it just relies entirely on the engine noticing the status change.
+/// </para>
 /// </summary>
 public interface IPipelineService
 {
@@ -78,7 +84,13 @@ public sealed record PipelineRunCreation(bool Success, string? RunId, string? Er
     public static PipelineRunCreation Failed(string error) => new(false, null, error);
 }
 
-public class PipelineService(ApplicationDbContext db, PipelineOptions options) : IPipelineService
+public class PipelineService(
+    ApplicationDbContext db,
+    PipelineOptions options,
+    // Optional: a host with no Hangfire storage configured still cancels, because the engine polls the run
+    // row. This covers the moment polling cannot — a run still sitting in the queue, which no engine is
+    // watching yet and which would otherwise start after it was cancelled.
+    IBackgroundJobClient? jobs = null) : IPipelineService
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
@@ -368,9 +380,46 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
                 .SetProperty(r => r.Status, PipelineRunStatus.Canceled)
                 .SetProperty(r => r.Error, "Cancelled.")
                 .SetProperty(r => r.ErrorType, PipelineErrorType.Canceled)
+                // Written now so a queued run that never starts still reads as finished. A run that is
+                // executing overwrites this with the real time when the engine stops.
                 .SetProperty(r => r.FinishedAt, DateTime.UtcNow), ct);
 
-        return updated > 0;
+        if (updated == 0) return false;
+
+        await DeleteJobAsync(runId, ct);
+        return true;
+    }
+
+    /// <summary>
+    /// Removes the run's Hangfire job, best-effort.
+    /// <para>
+    /// The second half of cancelling, and it covers what the engine's own polling cannot: a run still in
+    /// the queue has no engine watching the row, so without this it would be picked up and executed
+    /// minutes after somebody cancelled it — and the engine would then refuse it as already terminal,
+    /// leaving a job that ran for nothing. For a run already executing this is belt and braces: deleting
+    /// the job also trips Hangfire's own cancellation token on the worker.
+    /// </para>
+    /// </summary>
+    private async Task DeleteJobAsync(string runId, CancellationToken ct)
+    {
+        if (jobs is null) return;
+
+        var jobId = await db.PipelineRun.AsNoTracking()
+            .Where(r => r.Id == runId)
+            .Select(r => r.JobId)
+            .FirstOrDefaultAsync(ct);
+
+        if (string.IsNullOrWhiteSpace(jobId)) return;
+
+        try
+        {
+            jobs.Delete(jobId);
+        }
+        catch
+        {
+            // Never fail a cancel over the job store. The status change is the part that matters — the
+            // engine reads it, and a job whose run is terminal exits immediately anyway.
+        }
     }
 
     public async Task<List<PipelineRunDto>> GetRunsAsync(

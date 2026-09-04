@@ -12,6 +12,10 @@ CREATE TABLE [dbo].[company_settings] (
     -- ';'-separated emails for stale-step alerts. NULL/empty falls back to
     -- Pipelines:FreshnessAlertRecipients; empty everywhere means verdicts are recorded but no mail is sent.
     [freshness_alert_recipients] NVARCHAR (1000) NULL,
+    -- Folder this company's pipeline runs stage files in (source CSVs, API JSON, blob downloads).
+    -- NULL means "not chosen yet" and falls back to the OS temp folder, which is what every one of
+    -- those call sites used before this column existed - so existing rows need no backfill.
+    [pipeline_working_directory]  NVARCHAR (400)  NULL,
     [created_on]            DATETIME2 (7)  NULL,
     [modified_on]           DATETIME2 (7)  NULL,
     [created_by]            NVARCHAR (MAX) NULL,

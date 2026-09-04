@@ -24,4 +24,21 @@ public class CompanySettingsDto
     /// empty string clears the list, so there is still a way to say "nobody".
     /// </summary>
     public string? FreshnessAlertRecipients { get; set; }
+
+    /// <summary>
+    /// Folder pipeline runs stage their files in. On a PUT, null means "leave unchanged"; an empty string
+    /// clears it back to the OS temp folder, so there is still a way to say "use the default".
+    /// </summary>
+    public string? PipelineWorkingDirectory { get; set; }
+
+    /// <summary>
+    /// The folder that is actually in use, with the fallback already applied. Read-only: the server fills
+    /// it on every response and ignores it on a PUT.
+    /// <para>
+    /// Sent because the browser cannot work it out. The fallback is the <em>server's</em> temp folder, and
+    /// "where is my data being staged right now?" is the whole reason somebody opens this setting — a UI
+    /// that could only say "the default" would not answer it.
+    /// </para>
+    /// </summary>
+    public string? PipelineWorkingDirectoryEffective { get; set; }
 }

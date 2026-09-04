@@ -1,0 +1,141 @@
+@*
+    The connection details for a Database entity — engine, host, port, database, credentials.
+
+    Fields only: no Save button, no service calls, no entity id. Three places need this form and each owns
+    its own save (the connections page saves against an existing entity, the dataset form saves against one
+    it has only just created), so the component that would have to satisfy all of them is the one that does
+    the least. The caller binds a DatabaseConnectionRequest and does what it likes with it.
+
+    The secret is write-only throughout the app: the server never returns one, so a blank password box means
+    "keep what is stored" whenever HasSavedSecret is true, and never "clear it".
+*@
+@using Application.Shared.Enums
+@using Application.Shared.Models
+
+<div class="dbc-grid">
+    <div class="dbc-field dbc-span-2">
+        <label class="dbc-label">Engine</label>
+        <select class="dbc-input" @bind="Form.DatabaseType" @bind:after="OnEngineChanged" disabled="@Disabled">
+            @foreach (var engine in Enum.GetValues<DataSourceType>())
+            {
+                <option value="@engine">@EngineLabel(engine)</option>
+            }
+        </select>
+    </div>
+
+    @if (Form.DatabaseType == DataSourceType.DuckDB)
+    {
+        <div class="dbc-field dbc-span-4">
+            <label class="dbc-label">File path</label>
+            <input class="dbc-input" @bind="Form.FilePath" disabled="@Disabled"
+                   placeholder="C:/data/warehouse.duckdb" />
+        </div>
+    }
+    else
+    {
+        <div class="dbc-field dbc-span-3">
+            <label class="dbc-label">Host</label>
+            <input class="dbc-input" @bind="Form.Host" disabled="@Disabled"
+                   placeholder="db.example.com or IP" />
+        </div>
+        <div class="dbc-field dbc-span-1">
+            <label class="dbc-label">Port</label>
+            <input class="dbc-input" @bind="Form.Port" type="number" min="0" disabled="@Disabled" />
+        </div>
+        <div class="dbc-field dbc-span-3">
+            <label class="dbc-label">Database</label>
+            <input class="dbc-input" @bind="Form.DatabaseName" disabled="@Disabled"
+                   placeholder="catalog / database name" />
+        </div>
+        <div class="dbc-field dbc-span-3">
+            <label class="dbc-label">Username</label>
+            <input class="dbc-input" @bind="Form.Username" autocomplete="off" disabled="@Disabled" />
+        </div>
+        <div class="dbc-field dbc-span-3">
+            <label class="dbc-label">Password</label>
+            <input class="dbc-input" @bind="Form.Secret" type="password" autocomplete="new-password"
+                   disabled="@Disabled"
+                   placeholder="@(HasSavedSecret ? "Leave blank to keep current" : "Enter password")" />
+        </div>
+        <div class="dbc-field dbc-span-3 dbc-checkline">
+            <label class="dbc-check">
+                <input type="checkbox" @bind="Form.UseSsl" disabled="@Disabled" />
+                Use SSL / encrypt connection
+            </label>
+        </div>
+    }
+</div>
+
+@code {
+    /// <summary>The model being edited. Owned by the caller — this component only writes into it.</summary>
+    [Parameter, EditorRequired] public DatabaseConnectionRequest Form { get; set; } = new();
+
+    /// <summary>True when a secret is already stored, which changes only the password placeholder.</summary>
+    [Parameter] public bool HasSavedSecret { get; set; }
+
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>Raised after any change that the caller may want to react to (enabling a Save button).</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private async Task OnEngineChanged()
+    {
+        // Reset the port to the engine's default when switching engines. Left alone, changing SQL Server to
+        // PostgreSQL keeps 1433 and the connection fails for a reason nothing on screen explains.
+        Form.Port = DefaultPort(Form.DatabaseType);
+        await OnChanged.InvokeAsync();
+    }
+
+    public static string EngineLabel(DataSourceType type) => type switch
+    {
+        DataSourceType.SQLServer => "Microsoft SQL Server",
+        DataSourceType.PostgreSQL => "PostgreSQL",
+        DataSourceType.MySQL => "MySQL",
+        DataSourceType.ClickHouse => "ClickHouse",
+        DataSourceType.DuckDB => "DuckDB",
+        _ => type.ToString()
+    };
+
+    public static int DefaultPort(DataSourceType type) => type switch
+    {
+        DataSourceType.SQLServer => 1433,
+        DataSourceType.PostgreSQL => 5432,
+        DataSourceType.MySQL => 3306,
+        DataSourceType.ClickHouse => 8123,
+        _ => 0
+    };
+}
+
+<style>
+    .dbc-grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0.85rem; }
+    .dbc-field { display: flex; flex-direction: column; gap: 0.3rem; min-width: 0; }
+    .dbc-span-1 { grid-column: span 1 / span 1; }
+    .dbc-span-2 { grid-column: span 2 / span 2; }
+    .dbc-span-3 { grid-column: span 3 / span 3; }
+    .dbc-span-4 { grid-column: span 4 / span 4; }
+
+    @@media (max-width: 720px) {
+        .dbc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .dbc-span-1, .dbc-span-2, .dbc-span-3, .dbc-span-4 { grid-column: span 2 / span 2; }
+    }
+
+    .dbc-label { font-size: 0.8125rem; font-weight: 500; color: #3f3f46; }
+    .dbc-input {
+        font-size: 0.8125rem; padding: 0.45rem 0.55rem; border: 1px solid #e4e4e7;
+        border-radius: 7px; background: #fff; color: #18181b; width: 100%;
+    }
+    .dbc-input:focus { outline: none; border-color: #18181b; box-shadow: 0 0 0 2px rgba(24,24,27,0.08); }
+    .dbc-input:disabled { background: #fafafa; opacity: 0.7; cursor: not-allowed; }
+    .dbc-input::placeholder { color: #a1a1aa; }
+    .dbc-checkline { justify-content: flex-end; }
+    .dbc-check {
+        display: inline-flex; align-items: center; gap: 0.45rem;
+        font-size: 0.8125rem; color: #3f3f46; padding-bottom: 0.45rem; cursor: pointer;
+    }
+
+    [data-theme="dark"] .dbc-label, [data-theme="dark"] .dbc-check { color: #c5cad4; }
+    [data-theme="dark"] .dbc-input { background: #12141a; border-color: #2b303b; color: #f3f4f6; }
+    [data-theme="dark"] .dbc-input:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(129,140,248,0.2); }
+    [data-theme="dark"] .dbc-input:disabled { background: #16181e; }
+    [data-theme="dark"] .dbc-input::placeholder { color: #6b7280; }
+</style>

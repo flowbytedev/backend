@@ -97,6 +97,21 @@ public sealed class PipelineSettings
     public bool FailOnEmptySource { get; set; }
 
     /// <summary>
+    /// How many steps may run at the same time.
+    /// <para>
+    /// A ceiling, not an instruction. Steps run concurrently only when they are put in the same
+    /// <see cref="PipelineNodeDef.ParallelGroup"/>, so a graph that names no groups runs exactly as it
+    /// always has however high this is set. Raising it never makes two steps overlap that the author did
+    /// not say could overlap.
+    /// </para>
+    /// <para>
+    /// Capped by the deployment's own limit, so a graph author cannot ask a scheduler for more
+    /// concurrency than the operator allowed.
+    /// </para>
+    /// </summary>
+    public int MaxParallelSteps { get; set; } = 4;
+
+    /// <summary>
     /// Freshness policy applied to every node that does not set its own. A pipeline-wide default because
     /// the alternative is annotating twenty-five nodes to say the same thing, which nobody does — and an
     /// unannotated node is an unchecked one.
@@ -168,6 +183,24 @@ public sealed class PipelineNodeDef
     /// contain <c>{{ run.* }}</c> tokens, which are substituted at run time.
     /// </summary>
     public JsonObject? Config { get; set; }
+
+    /// <summary>
+    /// Names the set of steps this one may run alongside. Steps sharing a group name run concurrently
+    /// once their inputs are ready; a step with no group runs on its own, which is the default and the
+    /// behaviour every existing pipeline has.
+    /// <para>
+    /// Opt-in, and by <em>group</em> rather than by a simple "parallel" flag, because the reason two
+    /// steps cannot overlap is usually that they touch the same table — and that is a fact about a
+    /// particular pair, not about a step. A flag could only say "A may run with anything"; a group says
+    /// "A may run with B", which is the thing an author actually knows. Two steps that must not overlap
+    /// simply go in different groups, or in none.
+    /// </para>
+    /// <para>
+    /// It never overrides the graph: a group is only ever consulted among steps that are <em>already</em>
+    /// ready to run, so a step still waits for everything it reads from.
+    /// </para>
+    /// </summary>
+    public string? ParallelGroup { get; set; }
 
     public PipelineRetryDef? Retry { get; set; }
 

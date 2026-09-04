@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using Application.Shared.Models.Data;
 using Application.Shared.Models.Data.Pipelines;
 using Application.Shared.Services.Data.Pipelines;
@@ -13,11 +13,17 @@ namespace Application.Shared.Services.Data;
 public partial class DuckdbService
 {
     /// <summary>
-    /// Alias a source dataset is attached under during a copy. Fixed rather than generated because it only
-    /// ever exists inside a single method call, and a stable name keeps the generated SQL readable on the
-    /// step row.
+    /// A fresh alias to attach a source dataset under for one copy.
+    /// <para>
+    /// Generated per call, not fixed, because <b>ATTACH is database-wide rather than per connection</b>:
+    /// two connections to the same file share one DuckDB instance, so a catalog attached on one is visible
+    /// to the other and a second ATTACH under the same name is rejected outright ("Unique file handle
+    /// conflict"). With steps able to run in parallel, a constant alias is a collision waiting for the two
+    /// copies to overlap — which, being a race, would pass every test and fail in production.
+    /// </para>
+    /// <para>The prefix keeps it recognisable in the SQL shown on a step row.</para>
     /// </summary>
-    private const string AttachAlias = "_pipe_src";
+    private static string NewAttachAlias() => $"_pipe_src_{Guid.NewGuid():N}";
 
     /// <summary>
     /// How many times to retry taking a DuckDB file handle. A pipeline routinely wants a file the web app
@@ -68,12 +74,13 @@ public partial class DuckdbService
                 $"The source dataset's database was not found at '{sourcePath}'.",
                 PipelineErrorType.SourceUnavailable);
 
+        var alias = NewAttachAlias();
         var attachSql =
             $"CREATE OR REPLACE TABLE {Q(relation)} AS " +
-            $"SELECT {projection} FROM {AttachAlias}.main.{Q(sourceTable)}{filter}{limit}";
+            $"SELECT {projection} FROM {alias}.main.{Q(sourceTable)}{filter}{limit}";
 
         return await RunMaterializeAsync(datasetId, relation, attachSql, timeoutSeconds, ct,
-            attachSourcePath: sourcePath);
+            attachSourcePath: sourcePath, attachAlias: alias);
     }
 
     public async Task<PipelineRelationResult> MaterializeFromFileAsync(
@@ -180,7 +187,7 @@ public partial class DuckdbService
     /// <summary>Shared body: open, optionally attach, run one CTAS, then report rows and columns.</summary>
     private async Task<PipelineRelationResult> RunMaterializeAsync(
         string datasetId, string relation, string sql, int? timeoutSeconds, CancellationToken ct,
-        string? attachSourcePath = null, bool needsExcel = false,
+        string? attachSourcePath = null, string? attachAlias = null, bool needsExcel = false,
         Func<DuckDBConnection, CancellationToken, Task<(long Rejected, string? RejectRelation)>>? afterMaterialize = null)
     {
         var path = ResolveDbPath(datasetId);
@@ -197,7 +204,8 @@ public partial class DuckdbService
             if (needsExcel) await EnsureExcelExtensionAsync(connection, cts.Token);
 
             if (attachSourcePath is not null)
-                await ExecAsync(connection, $"ATTACH '{Esc(attachSourcePath)}' AS {AttachAlias} (READ_ONLY)", cts.Token);
+                await ExecAsync(connection,
+                    $"ATTACH '{Esc(attachSourcePath)}' AS {attachAlias} (READ_ONLY)", cts.Token);
 
             try
             {
@@ -209,7 +217,7 @@ public partial class DuckdbService
                 // than at connection dispose.
                 if (attachSourcePath is not null)
                 {
-                    try { await ExecAsync(connection, $"DETACH {AttachAlias}", cts.Token); }
+                    try { await ExecAsync(connection, $"DETACH {attachAlias}", cts.Token); }
                     catch { /* the connection is going away anyway */ }
                 }
             }
@@ -317,6 +325,51 @@ public partial class DuckdbService
         _ => value
     };
 
+    /// <summary>
+    /// Whether a table exists in the database this connection is open on, ignoring anything attached.
+    /// <para>
+    /// <c>information_schema</c> is not catalog-qualifiable — there is no
+    /// <c>catalog.information_schema.tables</c> — so the catalog has to be a filter, and
+    /// <c>current_database()</c> is the one that cannot go stale if the alias scheme changes.
+    /// </para>
+    /// </summary>
+    private static async Task<bool> TableExistsInThisCatalogAsync(
+        DuckDBConnection connection, string tableName, CancellationToken ct)
+    {
+        using var cmd = connection.CreateCommand();
+        cmd.CommandText =
+            "SELECT COUNT(*) FROM information_schema.tables " +
+            "WHERE table_catalog = current_database() " +
+            $"AND table_name = '{Esc(tableName)}'";
+
+        var value = await cmd.ExecuteScalarAsync(ct);
+        return value is not null && Convert.ToInt64(value) > 0;
+    }
+
+    // ------------------------------------------------------------------- anchor
+
+    public async Task<IAsyncDisposable> HoldWriteHandleAsync(
+        string datasetId, CancellationToken ct = default)
+    {
+        var path = ResolveDbPath(datasetId);
+        var connection = await OpenWithRetryAsync(path, readOnly: false, ct);
+        return new HeldHandle(connection);
+    }
+
+    /// <summary>
+    /// A read-write connection kept open for as long as the caller holds this. Nothing is ever executed on
+    /// it; it exists only so the database instance stays open in read-write mode.
+    /// </summary>
+    private sealed class HeldHandle(DuckDBConnection connection) : IAsyncDisposable
+    {
+        public async ValueTask DisposeAsync()
+        {
+            try { await connection.CloseAsync(); }
+            catch { /* closing a handle that is already gone is not a failure */ }
+            finally { await connection.DisposeAsync(); }
+        }
+    }
+
     private static async Task<List<PipelineColumn>> DescribeOnAsync(
         DuckDBConnection connection, string relation, CancellationToken ct)
     {
@@ -375,23 +428,25 @@ public partial class DuckdbService
             }
             else
             {
-                await ExecAsync(connection, $"ATTACH '{Esc(sourcePath!)}' AS {AttachAlias} (READ_ONLY)", ct);
+                var alias = NewAttachAlias();
+                await ExecAsync(connection, $"ATTACH '{Esc(sourcePath!)}' AS {alias} (READ_ONLY)", ct);
                 try
                 {
                     await ExecAsync(connection,
-                        $"CREATE OR REPLACE TABLE {Q(staging)} AS SELECT * FROM {AttachAlias}.main.{Q(sourceRelation)}", ct);
+                        $"CREATE OR REPLACE TABLE {Q(staging)} AS SELECT * FROM {alias}.main.{Q(sourceRelation)}", ct);
                 }
                 finally
                 {
-                    try { await ExecAsync(connection, $"DETACH {AttachAlias}", ct); }
+                    try { await ExecAsync(connection, $"DETACH {alias}", ct); }
                     catch { /* best effort */ }
                 }
             }
 
-            // 2. From here on there is no attached catalog, which matters: TableExistsAsync queries
-            //    information_schema without a catalog filter, so with something attached it could match a
-            //    same-named table in the wrong database. Detaching first removes that hazard entirely.
-            var exists = await TableExistsAsync(connection, targetTable, ct);
+            // 2. Asked of THIS catalog explicitly. information_schema spans every attached database, and
+            //    an attach is instance-wide rather than per connection — so with steps running in parallel
+            //    another step's attached source can be visible here, and an unqualified name check would
+            //    answer about the wrong database. Detaching above is no longer enough on its own.
+            var exists = await TableExistsInThisCatalogAsync(connection, targetTable, ct);
 
             if (!exists)
             {
@@ -486,9 +541,13 @@ public partial class DuckdbService
                 // match a user relation named "xpipe…" and drop it. Getting the ESCAPE clause and the two
                 // layers of literal escaping right is possible but easy to get subtly wrong; a function
                 // with no wildcard semantics cannot be got wrong at all.
+                // table_catalog = current_database() for the same reason the existence check needs it:
+                // an attached catalog has a 'main' schema too, and its tables would otherwise be listed
+                // here and then dropped by unqualified name against this database.
                 cmd.CommandText =
                     "SELECT table_name FROM information_schema.tables " +
-                    $"WHERE table_schema = 'main' AND starts_with(table_name, '{Esc(prefix)}')";
+                    "WHERE table_catalog = current_database() AND table_schema = 'main' " +
+                    $"AND starts_with(table_name, '{Esc(prefix)}')";
                 using var reader = await cmd.ExecuteReaderAsync(ct);
                 while (await reader.ReadAsync(ct)) names.Add(reader.GetString(0));
             }

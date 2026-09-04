@@ -1,7 +1,8 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Application.Shared.Models.Data.Pipelines;
 
@@ -59,6 +60,13 @@ public sealed class ApiFetchRequest
 
     public int MaxPages { get; init; } = 1000;
 
+    /// <summary>
+    /// Folder the NDJSON staging file and the normalised JSON are written into. An API source can page a
+    /// very large endpoint, so this is a full copy of the response on disk — it belongs on the volume the
+    /// company chose, not in the service account's temp folder.
+    /// </summary>
+    public required string WorkingDirectory { get; init; }
+
     public IJobProgress? Progress { get; init; }
 }
 
@@ -81,7 +89,7 @@ public class PipelineApiReader(IPipelineApiClient client) : IPipelineApiReader
     public async Task<ApiFetchResult> FetchToFileAsync(ApiFetchRequest request, CancellationToken ct = default)
     {
         // Pass one: stream every row to NDJSON exactly as it arrives, recording the union of keys.
-        var stagePath = Path.Combine(Path.GetTempPath(), $"pl_api_{Guid.NewGuid():N}.ndjson");
+        var stagePath = PipelineWorkspacePath.FileIn(request.WorkingDirectory, "pl_api", ".ndjson");
         var columns = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
@@ -214,7 +222,7 @@ public class PipelineApiReader(IPipelineApiClient client) : IPipelineApiReader
 
             // Pass two: normalize. Every row gets every column, so a response that omits null fields — very
             // common — cannot produce a relation whose columns depend on which page happened to be sampled.
-            var finalPath = Path.Combine(Path.GetTempPath(), $"pl_api_{Guid.NewGuid():N}.json");
+            var finalPath = PipelineWorkspacePath.FileIn(request.WorkingDirectory, "pl_api", ".json");
             await NormalizeAsync(stagePath, finalPath, columns, ct);
 
             return new ApiFetchResult

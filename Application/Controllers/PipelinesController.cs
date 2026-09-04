@@ -1,4 +1,4 @@
-﻿using Application.Shared.Authorization;
+using Application.Shared.Authorization;
 using Application.Shared.Models.Data.Pipelines;
 using Application.Shared.Services.Data.Pipelines;
 using Hangfire;
@@ -315,8 +315,13 @@ public class PipelinesController(
     }
 
     /// <summary>
-    /// Requests cancellation. Cooperative — the engine stops at the next step boundary, because killing a
-    /// run in the middle of a write is how a table ends up half-loaded.
+    /// Requests cancellation.
+    /// <para>
+    /// Still cooperative — nothing is killed mid-write, because that is how a table ends up half-loaded —
+    /// but it no longer waits for a step boundary. The status change is the signal: the engine polls the
+    /// run row every few seconds and cancels the token the current step is running under, and the run's
+    /// Hangfire job is deleted so a run still in the queue cannot start afterwards.
+    /// </para>
     /// </summary>
     [HttpPost("runs/{runId}/cancel")]
     public async Task<ActionResult> Cancel(string runId)

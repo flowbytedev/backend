@@ -41,6 +41,17 @@ public interface ICompanySettingsService
     /// </para>
     /// </summary>
     Task<CompanyFreshnessSettings> GetFreshnessAsync(string companyId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Cached read for a pipeline run: the folder this company's source steps stage their files in,
+    /// already resolved to a concrete path (falls back to the OS temp folder).
+    /// <para>
+    /// Resolved rather than raw, so no caller has to remember the fallback — a source step that forgot it
+    /// would write to whatever <c>Path.Combine</c> made of a null, and that is a bug you find in
+    /// production at 3am. The folder itself is created by the run, not here.
+    /// </para>
+    /// </summary>
+    Task<string> GetPipelineWorkingDirectoryAsync(string companyId, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -65,6 +76,7 @@ public class CompanySettingsService : ICompanySettingsService
     private static string DebugCacheKey(string companyId) => $"company-settings:debug:{companyId}";
     private static string ExportFormatCacheKey(string companyId) => $"company-settings:export-date-format:{companyId}";
     private static string FreshnessCacheKey(string companyId) => $"company-settings:freshness:{companyId}";
+    private static string WorkingDirectoryCacheKey(string companyId) => $"company-settings:pipeline-workdir:{companyId}";
 
     public async Task<CompanySettings> GetAsync(string companyId, CancellationToken ct = default)
     {
@@ -79,6 +91,10 @@ public class CompanySettingsService : ICompanySettingsService
             // resolves against the deployment default, and inventing a value here would hide that.
             FreshnessChecksEnabled = null,
             FreshnessAlertRecipients = null,
+            // Same reasoning: null is "never chosen", which PipelineWorkspacePath resolves to the OS
+            // temp folder. Storing the resolved path here would freeze one machine's temp folder into a
+            // row the scheduler on another machine then reads.
+            PipelineWorkingDirectory = null,
         };
     }
 
@@ -101,6 +117,11 @@ public class CompanySettingsService : ICompanySettingsService
             ? row?.FreshnessAlertRecipients
             : AlertRecipients.Normalize(settings.FreshnessAlertRecipients);
 
+        // And again for the working folder: null leaves it alone, "" clears it back to the default.
+        var workingDirectory = settings.PipelineWorkingDirectory == null
+            ? row?.PipelineWorkingDirectory
+            : PipelineWorkspacePath.Normalize(settings.PipelineWorkingDirectory);
+
         if (row == null)
         {
             row = new CompanySettings
@@ -110,6 +131,7 @@ public class CompanySettingsService : ICompanySettingsService
                 ExportDateFormat = format,
                 FreshnessChecksEnabled = freshnessEnabled,
                 FreshnessAlertRecipients = recipients,
+                PipelineWorkingDirectory = workingDirectory,
                 CreatedBy = userId,
                 CreatedOn = now,
                 ModifiedBy = userId,
@@ -123,6 +145,7 @@ public class CompanySettingsService : ICompanySettingsService
             row.ExportDateFormat = format;
             row.FreshnessChecksEnabled = freshnessEnabled;
             row.FreshnessAlertRecipients = recipients;
+            row.PipelineWorkingDirectory = workingDirectory;
             row.ModifiedBy = userId;
             row.ModifiedOn = now;
         }
@@ -135,6 +158,8 @@ public class CompanySettingsService : ICompanySettingsService
         _cache.Set(ExportFormatCacheKey(companyId), ExportDateFormats.Resolve(row.ExportDateFormat), CacheTtl);
         _cache.Set(FreshnessCacheKey(companyId),
             new CompanyFreshnessSettings(row.FreshnessChecksEnabled, row.FreshnessAlertRecipients), CacheTtl);
+        _cache.Set(WorkingDirectoryCacheKey(companyId),
+            PipelineWorkspacePath.Resolve(row.PipelineWorkingDirectory), CacheTtl);
     }
 
     public Task SetDebugLoggingAsync(string companyId, bool enabled, string? userId, CancellationToken ct = default)
@@ -192,5 +217,23 @@ public class CompanySettingsService : ICompanySettingsService
 
         _cache.Set(FreshnessCacheKey(companyId), settings, CacheTtl);
         return settings;
+    }
+
+    public async Task<string> GetPipelineWorkingDirectoryAsync(
+        string companyId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(companyId)) return PipelineWorkspacePath.Default;
+
+        if (_cache.TryGetValue(WorkingDirectoryCacheKey(companyId), out string? cached) && cached != null)
+            return cached;
+
+        var stored = await _db.CompanySettings.AsNoTracking()
+            .Where(s => s.CompanyId == companyId)
+            .Select(s => s.PipelineWorkingDirectory)
+            .FirstOrDefaultAsync(ct);
+
+        var directory = PipelineWorkspacePath.Resolve(stored);
+        _cache.Set(WorkingDirectoryCacheKey(companyId), directory, CacheTtl);
+        return directory;
     }
 }

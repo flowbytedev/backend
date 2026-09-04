@@ -351,6 +351,7 @@
                     ? $"running, {pct}% complete"
                     : "running",
                 PipelineStepStatus.Skipped => "skipped",
+                PipelineStepStatus.Canceled => "cancelled part-way",
                 _ => RunState.Status
             });
 

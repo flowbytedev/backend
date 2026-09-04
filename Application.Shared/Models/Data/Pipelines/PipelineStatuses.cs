@@ -31,6 +31,20 @@ public static class PipelineStepStatus
     /// not a second bug to investigate, and the run inspector should not present it as one.
     /// </summary>
     public const string Skipped = "Skipped";
+
+    /// <summary>
+    /// Was running when the operator cancelled the run, and was stopped part-way.
+    /// <para>
+    /// Its own state rather than Failed, because the two need different reactions: a Failed step is
+    /// something to investigate, a Canceled one is something somebody asked for. Without it a cancelled
+    /// run leaves its in-flight step showing Running forever, which is precisely the thing that makes a
+    /// cancel look like it did nothing.
+    /// </para>
+    /// </summary>
+    public const string Canceled = "Canceled";
+
+    /// <summary>Nothing will change this step's status again.</summary>
+    public static bool IsTerminal(string? status) => status is Success or Failed or Skipped or Canceled;
 }
 
 /// <summary>How a run was started. Stored on the run so history explains itself without a join.</summary>

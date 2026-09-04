@@ -1,4 +1,4 @@
-﻿@*
+@*
     The credentials a pipeline needs but must never store itself.
 
     Both kinds on one page because they answer the same question — "what is this pipeline allowed to reach?"
@@ -9,6 +9,8 @@
 @page "/data/connections"
 @using System.Net.Http.Json
 @using Application.Shared.Authorization
+@using Application.Shared.Enums
+@using Application.Shared.Models
 @using Application.Shared.Models.Data
 @inject HttpClient _httpClient
 @inject IToastService _toastService
@@ -37,12 +39,18 @@ else
             <div class="page-header">
                 <h1 class="page-title">Connections</h1>
                 <p class="page-subtitle">
-                    Credentials that pipeline steps use by name. Kept here rather than on the step, so a token
-                    is never stored in a pipeline's document or shown in its YAML.
+                    Everything the data module is allowed to reach: the databases datasets and pipelines
+                    read from, and the credentials pipeline steps use by name. Kept here rather than on the
+                    step, so a token is never stored in a pipeline's document or shown in its YAML.
                 </p>
             </div>
 
             <div class="tabs">
+                <button class="tab @(_tab == Tab.Databases ? "is-active" : "")"
+                        @onclick="() => _tab = Tab.Databases">
+                    Databases
+                    <span class="tab-count">@_databases.Count(d => d.Configured)</span>
+                </button>
                 <button class="tab @(_tab == Tab.Api ? "is-active" : "")" @onclick="() => _tab = Tab.Api">
                     API credentials
                     <span class="tab-count">@_apis.Count</span>
@@ -59,6 +67,89 @@ else
                     <div class="skeleton" style="height:18px;margin-bottom:8px;"></div>
                     <div class="skeleton" style="height:18px;width:70%;"></div>
                 </div></div>
+            }
+            else if (_tab == Tab.Databases)
+            {
+                <div class="action-bar">
+                    <span class="action-bar-spacer"></span>
+                    <button class="btn btn-primary" @onclick="StartCreateDatabase">New database</button>
+                </div>
+
+                @if (_databases.Count == 0)
+                {
+                    <div class="card"><div class="empty">
+                        <div class="empty-title">No databases yet</div>
+                        <div class="empty-text">
+                            Add one to back a dataset with an external database, or to read from it in a
+                            pipeline.
+                        </div>
+                    </div></div>
+                }
+                else
+                {
+                    <div class="card">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Engine</th>
+                                    <th>Server</th>
+                                    <th>Login</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var row in _databases)
+                                {
+                                    <tr @key="row.EntityId">
+                                        <td>
+                                            <div class="cell-strong">@row.EntityName</div>
+                                            @if (!string.IsNullOrWhiteSpace(row.Description))
+                                            {
+                                                <div class="cell-sub">@row.Description</div>
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (row.Configured)
+                                            {
+                                                <span>@DatabaseConnectionFields.EngineLabel(row.DatabaseType)</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge badge-warning">no connection</span>
+                                            }
+                                        </td>
+                                        <td class="cell-mono">
+                                            @if (!row.Configured)
+                                            {
+                                                <span>—</span>
+                                            }
+                                            else if (row.DatabaseType == DataSourceType.DuckDB)
+                                            {
+                                                <span>@row.FilePath</span>
+                                            }
+                                            else
+                                            {
+                                                <span>@row.Host@(row.Port > 0 ? $":{row.Port}" : "")/@row.DatabaseName</span>
+                                            }
+                                        </td>
+                                        <td class="cell-mono">@(row.Configured ? row.Username ?? "—" : "—")</td>
+                                        <td class="table-actions">
+                                            <button class="btn btn-ghost btn-sm" @onclick="() => StartEditDatabase(row)">
+                                                @(row.Configured ? "Edit" : "Add connection")
+                                            </button>
+                                            @if (row.Configured)
+                                            {
+                                                <button class="btn btn-ghost btn-sm"
+                                                        @onclick="() => TestDatabase(row)">Test</button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
             }
             else if (_tab == Tab.Api)
             {
@@ -230,6 +321,72 @@ else
             }
         </div>
     </div>
+
+    @* ---------------- database connection editor ---------------- *@
+    @if (_editDatabase is not null)
+    {
+        <div class="sc">
+            <div class="fb-modal-backdrop" @onclick="CancelDatabaseEdit">
+                <div class="fb-modal" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+                    <div class="fb-modal-head">
+                        <h2 class="fb-modal-title">
+                            @(_editDatabaseIsNew ? "New database" : $"Edit {_editDatabase.EntityName}")
+                        </h2>
+                    </div>
+                    <div class="fb-modal-body">
+                        @if (_editDatabaseIsNew)
+                        {
+                            <div class="field">
+                                <label class="field-label">Name</label>
+                                <input class="input" @bind="_editDatabase.EntityName" @bind:event="oninput"
+                                       placeholder="Warehouse" />
+                                <div class="field-help">
+                                    How this database is listed when picking a dataset source or wiring a
+                                    pipeline step. It also becomes an entity in the dependency map.
+                                </div>
+                            </div>
+
+                            <div class="field">
+                                <label class="field-label">Description</label>
+                                <input class="input" @bind="_editDatabase.Description" @bind:event="oninput" />
+                            </div>
+                        }
+
+                        <DatabaseConnectionFields Form="_databaseForm"
+                                                  HasSavedSecret="_editDatabase.HasSecret" />
+
+                        <div class="field-help" style="margin-top:0.75rem;">
+                            Read access. A pipeline that needs to <em>write</em> into this database uses a
+                            separate login, under <strong>Database write access</strong>.
+                        </div>
+
+                        @if (_error is not null)
+                        {
+                            <div class="form-error">@_error</div>
+                        }
+                        @if (_databaseTestMessage is not null)
+                        {
+                            <div class="field-help" style="margin-top:0.5rem;">@_databaseTestMessage</div>
+                        }
+                    </div>
+                    <div class="fb-modal-foot">
+                        @if (!_editDatabaseIsNew && _editDatabase.Configured)
+                        {
+                            <button class="btn btn-ghost" disabled="@_saving"
+                                    @onclick="DeleteDatabaseConnection">Remove connection</button>
+                            <button class="btn btn-ghost" disabled="@_saving"
+                                    @onclick="() => TestDatabase(_editDatabase!)">Test</button>
+                        }
+                        <span class="action-bar-spacer"></span>
+                        <button class="btn btn-ghost" @onclick="CancelDatabaseEdit">Cancel</button>
+                        <button class="btn btn-primary" disabled="@_saving" @onclick="SaveDatabase">
+                            @(_saving ? "Saving…" : "Save")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
 
     @* ---------------- API credential editor ---------------- *@
     @if (_editApi is not null)
@@ -512,19 +669,36 @@ else
 }
 
 @code {
-    private enum Tab { Api, Write }
+    private enum Tab { Databases, Api, Write }
 
     [SupplyParameterFromQuery(Name = "c")] public string? c { get; set; }
+
+    /// <summary>
+    /// Deep link from a database entity's page: open this database's connection straight away, so
+    /// "Edit on the Connections page" lands on the right row rather than on a list to search.
+    /// </summary>
+    [SupplyParameterFromQuery(Name = "db")] public string? db { get; set; }
 
     private string _companyId = string.Empty;
     private bool _canView;
     private bool _loading = true;
     private bool _saving;
     private string? _error;
-    private Tab _tab = Tab.Api;
+    private Tab _tab = Tab.Databases;
 
+    private List<DatabaseRowModel> _databases = new();
     private List<ApiCredentialModel> _apis = new();
     private List<WriteCredentialModel> _writes = new();
+
+    private DatabaseRowModel? _editDatabase;
+    private bool _editDatabaseIsNew;
+    private string? _databaseTestMessage;
+
+    /// <summary>
+    /// The connection being edited. Separate from the row model for the same reason the secret is: the row
+    /// came from the server and is what the table renders, and cancelling must leave it untouched.
+    /// </summary>
+    private DatabaseConnectionRequest _databaseForm = new();
 
     private ApiCredentialModel? _editApi;
     private bool _editApiIsNew;
@@ -557,11 +731,29 @@ else
         }
 
         await Load();
+
+        // Honoured after the first load, so the row it names exists to open.
+        if (!string.IsNullOrWhiteSpace(db))
+        {
+            var target = _databases.FirstOrDefault(d => d.EntityId == db);
+            if (target is not null) StartEditDatabase(target);
+        }
     }
 
     private async Task Load()
     {
         _loading = true;
+
+        try
+        {
+            _databases = await _httpClient.GetFromJsonAsync<List<DatabaseRowModel>>("api/database-connections")
+                         ?? new();
+        }
+        catch (Exception ex)
+        {
+            _databases = new();
+            _toastService.ShowError($"Could not load databases: {ex.Message}");
+        }
 
         try
         {
@@ -587,6 +779,183 @@ else
         }
 
         _loading = false;
+    }
+
+    // ---------------- databases ----------------
+
+    private void StartCreateDatabase()
+    {
+        _editDatabase = new DatabaseRowModel { DatabaseType = DataSourceType.SQLServer };
+        _databaseForm = new DatabaseConnectionRequest
+        {
+            DatabaseType = DataSourceType.SQLServer,
+            Port = DatabaseConnectionFields.DefaultPort(DataSourceType.SQLServer)
+        };
+        _editDatabaseIsNew = true;
+        _databaseTestMessage = null;
+        _error = null;
+    }
+
+    private void StartEditDatabase(DatabaseRowModel row)
+    {
+        // A copy, so cancelling leaves the table untouched.
+        _editDatabase = new DatabaseRowModel
+        {
+            EntityId = row.EntityId,
+            EntityName = row.EntityName,
+            Description = row.Description,
+            Configured = row.Configured,
+            DatabaseType = row.DatabaseType,
+            Host = row.Host,
+            Port = row.Port,
+            DatabaseName = row.DatabaseName,
+            Username = row.Username,
+            FilePath = row.FilePath,
+            UseSsl = row.UseSsl,
+            HasSecret = row.HasSecret
+        };
+
+        _databaseForm = new DatabaseConnectionRequest
+        {
+            DatabaseType = row.Configured ? row.DatabaseType : DataSourceType.SQLServer,
+            Host = row.Host,
+            Port = row.Configured ? row.Port : DatabaseConnectionFields.DefaultPort(DataSourceType.SQLServer),
+            DatabaseName = row.DatabaseName,
+            Username = row.Username,
+            FilePath = row.FilePath,
+            UseSsl = row.UseSsl,
+            // Never prefilled: the server does not return it, and an empty box means "keep it".
+            Secret = null
+        };
+
+        _editDatabaseIsNew = false;
+        _databaseTestMessage = null;
+        _error = null;
+        _tab = Tab.Databases;
+    }
+
+    private void CancelDatabaseEdit()
+    {
+        _editDatabase = null;
+        _databaseTestMessage = null;
+        _error = null;
+    }
+
+    private async Task SaveDatabase()
+    {
+        if (_editDatabase is null) return;
+
+        if (_editDatabaseIsNew && string.IsNullOrWhiteSpace(_editDatabase.EntityName))
+        {
+            _error = "Give this database a name.";
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+        _databaseTestMessage = null;
+
+        try
+        {
+            HttpResponseMessage response;
+
+            if (_editDatabaseIsNew)
+            {
+                response = await _httpClient.PostAsJsonAsync("api/database-connections", new
+                {
+                    Name = _editDatabase.EntityName,
+                    _editDatabase.Description,
+                    Connection = _databaseForm
+                });
+            }
+            else
+            {
+                response = await _httpClient.PutAsJsonAsync(
+                    $"api/database-connections/{_editDatabase.EntityId}", _databaseForm);
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = await response.Content.ReadAsStringAsync();
+                _saving = false;
+                return;
+            }
+
+            _toastService.ShowSuccess($"Saved {_editDatabase.EntityName}.");
+            _editDatabase = null;
+            _databaseForm = new DatabaseConnectionRequest();
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+
+        _saving = false;
+    }
+
+    private async Task TestDatabase(DatabaseRowModel row)
+    {
+        _databaseTestMessage = "Testing…";
+        StateHasChanged();
+
+        try
+        {
+            var response = await _httpClient.PostAsync(
+                $"api/database-connections/{row.EntityId}/test", null);
+
+            var result = await response.Content.ReadFromJsonAsync<DatabaseConnectionTestResult>();
+
+            // Reported against what is STORED, not against what is on screen: an unsaved edit has not
+            // reached the server, and saying "connection succeeded" about the old details would be a lie.
+            var message = result?.Ok == true
+                ? "The stored connection works."
+                : $"The stored connection failed: {result?.Error ?? "unknown error"}";
+
+            if (_editDatabase is not null) _databaseTestMessage = message;
+            else if (result?.Ok == true) _toastService.ShowSuccess(message);
+            else _toastService.ShowError(message);
+        }
+        catch (Exception ex)
+        {
+            if (_editDatabase is not null) _databaseTestMessage = ex.Message;
+            else _toastService.ShowError(ex.Message);
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task DeleteDatabaseConnection()
+    {
+        if (_editDatabase is null) return;
+
+        _saving = true;
+        _error = null;
+
+        try
+        {
+            var response = await _httpClient.DeleteAsync(
+                $"api/database-connections/{_editDatabase.EntityId}");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _error = await response.Content.ReadAsStringAsync();
+                _saving = false;
+                return;
+            }
+
+            // The entity itself is left alone. Removing the connection is undoing a configuration; removing
+            // the database from the dependency map is a different decision, made on its own page.
+            _toastService.ShowSuccess($"Removed the connection to {_editDatabase.EntityName}.");
+            _editDatabase = null;
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+
+        _saving = false;
     }
 
     // ---------------- API credentials ----------------
@@ -920,6 +1289,23 @@ else
         public bool AllowInvalidCertificate { get; set; }
         public bool IsEnabled { get; set; }
         public int? TimeoutSeconds { get; set; }
+        public bool HasSecret { get; set; }
+    }
+
+    /// <summary>Mirrors the server's DatabaseConnectionRowDto. Never carries the secret.</summary>
+    private sealed class DatabaseRowModel
+    {
+        public string? EntityId { get; set; }
+        public string? EntityName { get; set; }
+        public string? Description { get; set; }
+        public bool Configured { get; set; }
+        public DataSourceType DatabaseType { get; set; }
+        public string? Host { get; set; }
+        public int Port { get; set; }
+        public string? DatabaseName { get; set; }
+        public string? Username { get; set; }
+        public string? FilePath { get; set; }
+        public bool UseSsl { get; set; }
         public bool HasSecret { get; set; }
     }
 

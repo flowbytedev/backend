@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using Application.Shared.Models.Data.Pipelines;
 
@@ -339,6 +339,12 @@ public static class PipelineCompiler
             return PipelineCompileResult.Failed(issues);
         }
 
+        // ---- 4b. Parallel groups ----
+        // After the topological sort, because the useful check needs to know what depends on what: a group
+        // whose members are chained can never have two of them ready at the same time, so the author has
+        // marked something that will never happen.
+        ValidateParallelGroups(graph, nodes, specs, orderPredecessors, issues);
+
         // ---- 5. Column-level checks against the cached schemas ----
         // Warnings only, deliberately. The cache can be stale in either direction, and blocking a save on
         // it would mean you cannot fix a pipeline whose source is temporarily unreachable. The executor
@@ -356,12 +362,109 @@ public static class PipelineCompiler
 
         var compiled = new CompiledPipelineGraph(
             graph, nodes, specs, order, waves, layer, successors, predecessors,
+            orderPredecessors.ToDictionary(
+                kv => kv.Key, kv => (IReadOnlyList<string>)kv.Value, StringComparer.Ordinal),
             sourceIds, destinationIds);
 
         return new PipelineCompileResult(compiled, issues);
     }
 
+    /// <summary>
+    /// Checks the per-node parallel groups. Everything here is a <b>warning</b> except a malformed name.
+    /// <para>
+    /// Deliberately lenient: a group that turns out to be useless costs nothing at run time — the
+    /// scheduler only ever consults it among steps that are already ready — so blocking a save over one
+    /// would stop an author part-way through wiring a graph up. A malformed name is different: it goes in
+    /// a log line and a UI label, so it is rejected rather than sanitised.
+    /// </para>
+    /// </summary>
+    private static void ValidateParallelGroups(
+        PipelineGraph graph,
+        Dictionary<string, PipelineNodeDef> nodes,
+        Dictionary<string, PipelineNodeSpec> specs,
+        Dictionary<string, List<string>> orderPredecessors,
+        List<PipelineValidationIssue> issues)
+    {
+        var groups = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var node in graph.Nodes)
+        {
+            if (!specs.ContainsKey(node.Id)) continue;
+
+            var group = node.ParallelGroup?.Trim();
+            if (string.IsNullOrEmpty(group)) continue;
+
+            if (group.Length > MaxParallelGroupLength || !group.All(IsParallelGroupChar))
+            {
+                issues.Add(new(node.Id, PipelineIssueCodes.NodeParallelGroupInvalid,
+                    $"'{group}' is not a usable group name for '{Name(nodes, node.Id)}'. Use up to " +
+                    $"{MaxParallelGroupLength} letters, digits, spaces, underscores or hyphens."));
+                continue;
+            }
+
+            if (!groups.TryGetValue(group, out var members)) groups[group] = members = new();
+            members.Add(node.Id);
+        }
+
+        // Transitive ordering dependencies, so "these two can never overlap" is answered correctly for a
+        // chain of any length rather than only for directly connected steps.
+        var reachable = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+
+        HashSet<string> AncestorsOf(string id)
+        {
+            if (reachable.TryGetValue(id, out var cached)) return cached;
+
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var queue = new Queue<string>(orderPredecessors.GetValueOrDefault(id) ?? new());
+
+            while (queue.Count > 0)
+            {
+                var next = queue.Dequeue();
+                if (!seen.Add(next)) continue;
+                foreach (var pred in orderPredecessors.GetValueOrDefault(next) ?? new())
+                    queue.Enqueue(pred);
+            }
+
+            reachable[id] = seen;
+            return seen;
+        }
+
+        foreach (var (group, members) in groups)
+        {
+            if (members.Count == 1)
+            {
+                issues.Add(new(members[0], PipelineIssueCodes.NodeParallelGroupUseless,
+                    $"'{Name(nodes, members[0])}' is the only step in parallel group '{group}', so it " +
+                    "still runs on its own. Put another step in the same group for them to overlap.",
+                    PipelineIssueSeverity.Warning));
+                continue;
+            }
+
+            // Every pair that can never be ready together. Reported per pair rather than per group,
+            // because in a group of four it is one specific pair that is wrong.
+            foreach (var member in members)
+            {
+                var ancestors = AncestorsOf(member);
+                foreach (var other in members)
+                {
+                    if (!ancestors.Contains(other)) continue;
+
+                    issues.Add(new(member, PipelineIssueCodes.NodeParallelGroupUseless,
+                        $"'{Name(nodes, member)}' reads from '{Name(nodes, other)}', so they cannot run " +
+                        $"at the same time even though both are in group '{group}'.",
+                        PipelineIssueSeverity.Warning));
+                }
+            }
+        }
+    }
+
     // ---------------- helpers ----------------
+
+    /// <summary>Group names end up in run logs and UI labels, so they are kept to plain text.</summary>
+    private const int MaxParallelGroupLength = 40;
+
+    private static bool IsParallelGroupChar(char c) =>
+        char.IsLetterOrDigit(c) || c is '_' or '-' or ' ';
 
     private static string Name(Dictionary<string, PipelineNodeDef> nodes, string id) =>
         nodes.TryGetValue(id, out var n) && !string.IsNullOrWhiteSpace(n.Label) ? n.Label! : id;
@@ -965,6 +1068,8 @@ public static class PipelineIssueCodes
     public const string NodeDanglingOutput = "node.danglingOutput";
     public const string NodeUploadNotSchedulable = "node.uploadNotSchedulable";
     public const string NodeSqlInvalid = "node.sqlInvalid";
+    public const string NodeParallelGroupInvalid = "node.parallelGroupInvalid";
+    public const string NodeParallelGroupUseless = "node.parallelGroupUseless";
 
     public const string EdgeFromMissing = "edge.fromMissing";
     public const string EdgeToMissing = "edge.toMissing";
@@ -1017,6 +1122,18 @@ public sealed record CompiledPipelineGraph(
     IReadOnlyDictionary<string, int> Layer,
     IReadOnlyDictionary<string, List<PipelineLink>> Successors,
     IReadOnlyDictionary<string, List<PipelineLink>> Predecessors,
+    /// <summary>
+    /// What each node must run <em>after</em>: its edge predecessors plus the ordering dependencies a
+    /// <c>{{ vars.* }}</c> reference creates, which have no edge behind them.
+    /// <para>
+    /// Separate from <see cref="Predecessors"/> and never a substitute for it. That one answers "where do
+    /// this step's input rows come from" and must not include a capture; this one answers "what has to
+    /// have finished first", which is the only correct basis for deciding what may run at the same time.
+    /// Scheduling off <see cref="Predecessors"/> would let a step run alongside the capture whose value it
+    /// reads, and the token would resolve to nothing.
+    /// </para>
+    /// </summary>
+    IReadOnlyDictionary<string, IReadOnlyList<string>> OrderPredecessors,
     IReadOnlyList<string> SourceIds,
     IReadOnlyList<string> DestinationIds)
 {

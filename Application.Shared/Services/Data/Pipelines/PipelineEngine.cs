@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -46,6 +47,9 @@ public partial class PipelineEngine(
     IPipelineSourceLoader sources,
     PipelineOptions options,
     DuckdbOption duckdbOption,
+    // Read once per run for the staging folder. Required rather than optional: both hosts register it,
+    // and a null here would silently put every staging file back in the OS temp folder.
+    ICompanySettingsService companySettings,
     // Optional: the scheduler and the web app both register it, but a host that only needs local datasets
     // can leave it out and get a clear refusal rather than a resolution failure at startup.
     IExternalTableWriter? externalWriter = null,
@@ -165,13 +169,41 @@ public partial class PipelineEngine(
         var timeout = graph.Settings.TimeoutSeconds;
         if (timeout > 0) runCts.CancelAfter(TimeSpan.FromSeconds(timeout));
 
+        // A cancel arrives as a status change on the run row, written by whichever process handled the
+        // button — usually the web app, while the scheduler is the one executing. Polling for it here is
+        // what makes Cancel stop work that is already in flight. The between-steps check below still
+        // exists, but on its own it could only ever fire once the current step had finished, so a cancel
+        // during a forty-minute load appeared to do nothing until the load completed.
+        using var cancelWatch = new CancelWatch(scopes, run.Id, runCts);
+
         ExecutionContext? context = null;
+
+        // Held for the whole run when steps can overlap - see IPipelineStore.HoldWriteHandleAsync for the
+        // measured DuckDB behaviour this exists for. Taken only when the graph actually asks for
+        // concurrency, so an ordinary run keeps the connection-per-operation shape exactly as it was.
+        IAsyncDisposable? scratchAnchor = null;
+        var parallelPossible = graph.Settings.MaxParallelSteps > 1
+                               && options.ResolveMaxParallelSteps(graph.Settings.MaxParallelSteps) > 1
+                               && graph.Nodes.Any(n => !string.IsNullOrWhiteSpace(n.ParallelGroup));
 
         try
         {
             scratch = await CreateScratchAsync(run, runCts.Token);
             run.ScratchDatasetId = scratch.Id;
             await db.SaveChangesAsync(runCts.Token);
+
+            // Left to throw rather than caught here: the catch clauses below already turn this into a
+            // failed run, and returning early from inside the try would skip the cleanup in the finally.
+            // Without the anchor a parallel run can hit "attached in read-only mode" depending on which
+            // step opened the file first, so it is not something to carry on quietly past either.
+            if (parallelPossible)
+                scratchAnchor = await store.HoldWriteHandleAsync(scratch.Id!, runCts.Token);
+
+            // Created here rather than lazily at the first source step, so a misconfigured folder is one
+            // line near the top of the log instead of an error inside whichever step happened to run first.
+            var workingDirectory = PipelineWorkspacePath.Ensure(
+                await companySettings.GetPipelineWorkingDirectoryAsync(run.CompanyId, runCts.Token),
+                log.WriteLine);
 
             // Hoisted out of the call so it survives into FinalizeAsync, which is where captured
             // watermarks are committed once the run's outcome is known.
@@ -186,6 +218,8 @@ public partial class PipelineEngine(
                 RowLimit = null,
                 SkipDestinations = false,
                 Scope = scope,
+                WorkingDirectory = workingDirectory,
+                Cancellation = cancelWatch,
                 Log = log,
                 Run = run
             };
@@ -194,13 +228,28 @@ public partial class PipelineEngine(
 
             var execution = await ExecuteGraphAsync(context, runCts.Token);
 
-            status = execution.HasFailure ? PipelineRunStatus.Failed : PipelineRunStatus.Success;
-            error = execution.Error;
-            errorType = execution.ErrorType;
-            errorNode = execution.ErrorNodeId;
+            if (cancelWatch.Requested)
+            {
+                // A step that turned the cancellation into its own failure result — most of the loaders
+                // catch broadly and return a Fail rather than throwing — must still finish the run as
+                // cancelled. Otherwise pressing Cancel reports Failed with a stack of I/O errors, and
+                // reads like the cancel broke something.
+                status = PipelineRunStatus.Canceled;
+                error = "The run was cancelled.";
+                errorType = PipelineErrorType.Canceled;
+            }
+            else
+            {
+                status = execution.HasFailure ? PipelineRunStatus.Failed : PipelineRunStatus.Success;
+                error = execution.Error;
+                errorType = execution.ErrorType;
+                errorNode = execution.ErrorNodeId;
+            }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested || cancelWatch.Requested)
         {
+            // Either the host is shutting the job down, or somebody pressed Cancel. Both are a cancel;
+            // only the run-level timeout, handled below, is a failure.
             status = PipelineRunStatus.Canceled;
             error = "The run was cancelled.";
             errorType = PipelineErrorType.Canceled;
@@ -211,6 +260,14 @@ public partial class PipelineEngine(
             error = $"The run exceeded its {timeout}s time limit.";
             errorType = PipelineErrorType.Timeout;
         }
+        catch (DuckDbBusyException ex)
+        {
+            // Its own clause so the run inspector styles it as a busy dataset rather than an unknown
+            // failure — which is what it is, and it is usually over by the next run.
+            status = PipelineRunStatus.Failed;
+            error = ex.Message;
+            errorType = PipelineErrorType.DatasetBusy;
+        }
         catch (Exception ex)
         {
             status = PipelineRunStatus.Failed;
@@ -219,6 +276,14 @@ public partial class PipelineEngine(
         }
         finally
         {
+            // Released before anything touches the file: the scratch database cannot be deleted while this
+            // process still holds a handle on it.
+            if (scratchAnchor is not null)
+            {
+                try { await scratchAnchor.DisposeAsync(); }
+                catch { /* closing a handle that is already gone is not a failure */ }
+            }
+
             // A successful run's scratch database has served its purpose. A failed one is kept, because the
             // intermediate tables are the best evidence of what went wrong; the sweeper removes it later.
             if (scratch is not null)
@@ -272,6 +337,9 @@ public partial class PipelineEngine(
                 name: ScratchNamePrefix + "preview_" + Guid.NewGuid().ToString("N")[..12],
                 ct);
 
+            var previewWorkingDirectory = PipelineWorkspacePath.Ensure(
+                await companySettings.GetPipelineWorkingDirectoryAsync(request.CompanyId, ct));
+
             var execution = await ExecuteGraphAsync(new ExecutionContext
             {
                 Plan = plan,
@@ -284,6 +352,7 @@ public partial class PipelineEngine(
                 SkipDestinations = true,
                 StopAfterNodeId = request.StopAfterNodeId,
                 UploadedFilePath = request.UploadedFilePath,
+                WorkingDirectory = previewWorkingDirectory,
                 Log = log,
                 Run = null
             }, ct);
@@ -323,6 +392,22 @@ public partial class PipelineEngine(
 
     // ------------------------------------------------------------------ the walk
 
+    /// <summary>
+    /// Walks the graph, running one <em>batch</em> of steps at a time.
+    /// <para>
+    /// A batch is normally a single step, which is what makes this identical to the serial walk it
+    /// replaced for every pipeline that has not asked for anything else. It is more than one step only
+    /// when the steps that are ready at that moment share a
+    /// <see cref="PipelineNodeDef.ParallelGroup"/> - the author's explicit statement that those steps may
+    /// overlap. The graph stays the authority on ordering: a group is only ever consulted among steps
+    /// whose inputs are <em>already</em> satisfied, so it can widen what runs together but never reorder
+    /// anything.
+    /// </para>
+    /// <para>
+    /// Readiness is decided from <see cref="CompiledPipelineGraph.OrderPredecessors"/> rather than from
+    /// the edges alone, so a step never runs alongside a capture whose <c>{{ vars.* }}</c> value it reads.
+    /// </para>
+    /// </summary>
     private async Task<ExecutionOutcome> ExecuteGraphAsync(ExecutionContext ctx, CancellationToken ct)
     {
         var outcome = new ExecutionOutcome();
@@ -333,89 +418,188 @@ public partial class PipelineEngine(
         var scope = ctx.Scope ?? ctx.Plan.Order;
         var inScope = new HashSet<string>(scope, StringComparer.Ordinal);
 
-        foreach (var nodeId in scope)
+        // A preview stays serial whatever the graph says. It samples a few rows for the editor, so there
+        // is no wall-clock worth winning, and it has no read-write anchor on its scratch database - which
+        // is what makes overlapping steps safe. Not worth a second code path to save a second.
+        var maxParallel = ctx.IsPreview
+            ? 1
+            : options.ResolveMaxParallelSteps(ctx.Graph.Settings.MaxParallelSteps);
+
+        // Still in topological order, and kept that way: it is what makes batch selection deterministic
+        // and what orders the steps inside one batch.
+        var pending = new List<string>(scope);
+        var stopped = false;
+
+        while (pending.Count > 0 && !stopped)
         {
             ct.ThrowIfCancellationRequested();
 
-            var node = ctx.Plan.Node(nodeId);
-            var spec = ctx.Plan.Spec(nodeId);
-            var label = node.Label ?? nodeId;
-
             // Cooperative cancellation, re-read from the database so the Cancel button works on a run this
-            // process is in the middle of.
+            // process is in the middle of. The run's own watcher covers the time inside a step; this
+            // covers the boundary and costs one trivial query per batch.
             if (ctx.Run is not null && await IsCanceledAsync(ctx.Run.Id, ct))
+            {
+                // Flagged before the throw so RunAsync reads this as a cancel rather than as the run-level
+                // timeout, which is the other thing an OperationCanceledException here can mean.
+                ctx.Cancellation?.MarkRequested();
                 throw new OperationCanceledException();
-
-            if (ctx.SkipDestinations && spec.IsTerminal)
-            {
-                ctx.Log.WriteLine($"[{++stepIndex}/{scope.Count}] {label} — skipped (preview)");
-                continue;
             }
 
-            // Anything downstream of a failure cannot run: its input relation does not exist. Running it
-            // with empty data would be worse than skipping, because it would look like it worked.
-            var blockedBy = ctx.Plan.Predecessors[nodeId]
-                .Select(l => l.Other)
-                .FirstOrDefault(p => !outcome.Results.TryGetValue(p, out var r) || !r.Success);
+            var ready = pending
+                .Where(id => ctx.Plan.OrderPredecessors.GetValueOrDefault(id, [])
+                    .All(p => !inScope.Contains(p) || outcome.Results.ContainsKey(p)))
+                .ToList();
 
-            if (blockedBy is not null)
+            // Cannot happen: the scope is closed and the graph is acyclic, so something is always ready.
+            // Breaking rather than looping forever means a contract this class does not own can only cost
+            // a short run, never a hung one.
+            if (ready.Count == 0) break;
+
+            var batch = SelectBatch(ctx.Plan, ready, maxParallel);
+
+            // Pass 1, serial: decide what each member of the batch is actually going to do, and give the
+            // ones that will run their step number and their Running row. Done before anything starts, so
+            // step numbers follow topological order rather than whichever task got there first.
+            var runnable = new List<(string NodeId, PipelineNodeDef Node, PipelineNodeSpec Spec, int Index)>();
+
+            foreach (var nodeId in batch)
             {
-                ctx.Log.WriteLine($"[{++stepIndex}/{scope.Count}] {label} — skipped ('{blockedBy}' did not produce data)");
-                outcome.Results[nodeId] = NodeOutcome.Skipped();
-                await RecordStepAsync(ctx, nodeId, node, stepIndex, PipelineStepStatus.Skipped, null, null, 0, ct);
-                outcome.Skipped++;
-                continue;
-            }
+                pending.Remove(nodeId);
 
-            stepIndex++;
-            ctx.Log.WriteLine($"[{stepIndex}/{scope.Count}] {label}");
+                var node = ctx.Plan.Node(nodeId);
+                var spec = ctx.Plan.Spec(nodeId);
+                var label = node.Label ?? nodeId;
 
-            // Marked running BEFORE the work, so the run view can show this step in progress and the live
-            // row counter has a row to write into. Without it a long fetch is indistinguishable from a
-            // stalled run.
-            await BeginStepAsync(ctx, nodeId, node, stepIndex, ct);
-
-            var stepWatch = Stopwatch.StartNew();
-            var result = await ExecuteNodeWithRetryAsync(ctx, nodeId, node, spec, outcome, ct);
-            stepWatch.Stop();
-
-            outcome.Results[nodeId] = result;
-            if (result.Columns.Count > 0) outcome.Schemas[nodeId] = result.Columns;
-
-            outcome.Traces.Add(new PipelineStepTrace(nodeId, node.Type, label,
-                result.Success ? PipelineStepStatus.Success : PipelineStepStatus.Failed,
-                result.RowsOut, result.Error, result.Sql, (int)stepWatch.ElapsedMilliseconds));
-
-            await RecordStepAsync(ctx, nodeId, node, stepIndex,
-                result.Success ? PipelineStepStatus.Success : PipelineStepStatus.Failed,
-                result, result.Sql, (int)stepWatch.ElapsedMilliseconds, ct);
-
-            if (result.Success)
-            {
-                ctx.Log.WriteLine($"      {result.RowsOut:N0} rows in {stepWatch.ElapsedMilliseconds:N0}ms");
-                outcome.Completed++;
-
-                if (ctx.Run is not null)
+                if (ctx.SkipDestinations && spec.IsTerminal)
                 {
-                    if (spec.IsSource) ctx.Run.RowsRead += result.RowsOut;
-                    // Accumulated separately: a run that skipped rows still reports Success, and
-                    // this is the only number that says so.
-                    ctx.Run.RowsRejected += result.RowsRejected;
-                    if (spec.IsTerminal) ctx.Run.RowsWritten += result.RowsOut;
+                    ctx.Log.WriteLine($"[{++stepIndex}/{scope.Count}] {label} - skipped (preview)");
+                    continue;
                 }
+
+                // Anything downstream of a failure cannot run: its input relation does not exist. Running
+                // it with empty data would be worse than skipping, because it would look like it worked.
+                var blockedBy = ctx.Plan.Predecessors[nodeId]
+                    .Select(l => l.Other)
+                    .FirstOrDefault(p => !outcome.Results.TryGetValue(p, out var r) || !r.Success);
+
+                if (blockedBy is not null)
+                {
+                    ctx.Log.WriteLine(
+                        $"[{++stepIndex}/{scope.Count}] {label} - skipped ('{blockedBy}' did not produce data)");
+                    outcome.Results[nodeId] = NodeOutcome.Skipped();
+                    await RecordStepAsync(ctx, nodeId, node, stepIndex, PipelineStepStatus.Skipped,
+                        null, null, 0, ct);
+                    outcome.Skipped++;
+                    continue;
+                }
+
+                stepIndex++;
+                runnable.Add((nodeId, node, spec, stepIndex));
+
+                // Marked running BEFORE the work, so the run view can show this step in progress and the
+                // live row counter has a row to write into. Without it a long fetch is indistinguishable
+                // from a stalled run.
+                await BeginStepAsync(ctx, nodeId, node, stepIndex, ct);
+            }
+
+            if (runnable.Count == 0) continue;
+
+            if (runnable.Count == 1)
+            {
+                ctx.Log.WriteLine(
+                    $"[{runnable[0].Index}/{scope.Count}] {runnable[0].Node.Label ?? runnable[0].NodeId}");
             }
             else
             {
-                ctx.Log.WriteLine($"      FAILED: {result.Error}");
-                outcome.Failed++;
+                ctx.Log.WriteLine(
+                    $"[{runnable[0].Index}-{runnable[^1].Index}/{scope.Count}] running {runnable.Count} "
+                    + $"steps together (group '{Group(runnable[0].Node)}'): "
+                    + string.Join(", ", runnable.Select(r => r.Node.Label ?? r.NodeId)));
+            }
 
-                // First failure wins the run's reported cause; later steps are skipped, not failures.
-                outcome.Error ??= $"{label}: {result.Error}";
-                outcome.ErrorType ??= result.ErrorType;
-                outcome.ErrorNodeId ??= nodeId;
+            // Pass 2: the work. One step stays on this instance - no extra scope, and byte for byte the
+            // path a serial run has always taken.
+            var timings = new Stopwatch[runnable.Count];
+            var results = new NodeOutcome[runnable.Count];
 
-                var mode = node.OnError ?? ctx.Graph.Settings.OnError;
-                if (mode != PipelineErrorMode.Continue) break;
+            if (runnable.Count == 1)
+            {
+                var (nodeId, node, spec, _) = runnable[0];
+                timings[0] = Stopwatch.StartNew();
+                results[0] = await ExecuteNodeWithRetryAsync(ctx, nodeId, node, spec, outcome, ct);
+                timings[0].Stop();
+            }
+            else
+            {
+                var tasks = runnable.Select(async (member, slot) =>
+                {
+                    var watch = Stopwatch.StartNew();
+                    var result = await ExecuteIsolatedAsync(
+                        ctx, member.NodeId, member.Node, member.Spec, outcome, ct);
+                    watch.Stop();
+
+                    timings[slot] = watch;
+                    results[slot] = result;
+                }).ToArray();
+
+                // WhenAll rather than awaiting in a loop, so one step failing does not leave the others
+                // running unobserved - and so the batch costs the slowest step rather than the sum.
+                await Task.WhenAll(tasks);
+            }
+
+            // Pass 3, serial and in topological order: fold the results. Everything that mutates the
+            // outcome, the run row or the log's running totals happens here, on one thread, which is why
+            // none of those needed a lock.
+            for (var slot = 0; slot < runnable.Count; slot++)
+            {
+                var (nodeId, node, spec, index) = runnable[slot];
+                var result = results[slot];
+                var elapsed = (int)timings[slot].ElapsedMilliseconds;
+                var label = node.Label ?? nodeId;
+                var prefix = runnable.Count > 1 ? $"      {label}: " : "      ";
+
+                outcome.Results[nodeId] = result;
+                if (result.Columns.Count > 0) outcome.Schemas[nodeId] = result.Columns;
+
+                outcome.Traces.Add(new PipelineStepTrace(nodeId, node.Type, label,
+                    result.Success ? PipelineStepStatus.Success : PipelineStepStatus.Failed,
+                    result.RowsOut, result.Error, result.Sql, elapsed));
+
+                await RecordStepAsync(ctx, nodeId, node, index,
+                    result.Success ? PipelineStepStatus.Success : PipelineStepStatus.Failed,
+                    result, result.Sql, elapsed, ct);
+
+                if (result.Success)
+                {
+                    ctx.Log.WriteLine($"{prefix}{result.RowsOut:N0} rows in {elapsed:N0}ms");
+                    outcome.Completed++;
+
+                    if (ctx.Run is not null)
+                    {
+                        if (spec.IsSource) ctx.Run.RowsRead += result.RowsOut;
+                        // Accumulated separately: a run that skipped rows still reports Success, and
+                        // this is the only number that says so.
+                        ctx.Run.RowsRejected += result.RowsRejected;
+                        if (spec.IsTerminal) ctx.Run.RowsWritten += result.RowsOut;
+                    }
+                }
+                else
+                {
+                    ctx.Log.WriteLine($"{prefix}FAILED: {result.Error}");
+                    outcome.Failed++;
+
+                    // First failure wins the run's reported cause; later steps are skipped, not failures.
+                    outcome.Error ??= $"{label}: {result.Error}";
+                    outcome.ErrorType ??= result.ErrorType;
+                    outcome.ErrorNodeId ??= nodeId;
+
+                    // Its own step's setting, as before. The rest of the batch is not abandoned - it has
+                    // already run - so stopping here means starting no further batches.
+                    var mode = node.OnError ?? ctx.Graph.Settings.OnError;
+                    if (mode != PipelineErrorMode.Continue) stopped = true;
+                }
+
+                if (ctx.StopAfterNodeId == nodeId) stopped = true;
             }
 
             if (ctx.Run is not null)
@@ -426,12 +610,10 @@ public partial class PipelineEngine(
                 ctx.Run.HeartbeatAt = DateTime.UtcNow;
                 await db.SaveChangesAsync(ct);
             }
-
-            if (ctx.StopAfterNodeId == nodeId) break;
         }
 
-        // Anything the break skipped still deserves a row, so the waterfall does not simply stop. Nodes
-        // outside the scope get no row at all — they were never part of this run, and a Skipped row for
+        // Anything a stop skipped still deserves a row, so the waterfall does not simply stop. Nodes
+        // outside the scope get no row at all - they were never part of this run, and a Skipped row for
         // each would drown the three steps the operator actually asked about.
         foreach (var nodeId in ctx.Plan.Order.Where(id => inScope.Contains(id) && !outcome.Results.ContainsKey(id)))
         {
@@ -453,6 +635,70 @@ public partial class PipelineEngine(
         }
 
         return outcome;
+    }
+
+    /// <summary>A node's parallel group, trimmed, or null when it has none.</summary>
+    internal static string? Group(PipelineNodeDef node) =>
+        string.IsNullOrWhiteSpace(node.ParallelGroup) ? null : node.ParallelGroup!.Trim();
+
+    /// <summary>
+    /// The steps to run together next, chosen from the ones whose inputs are satisfied.
+    /// <para>
+    /// The first ready step in topological order decides: in no group it runs alone, and in one, every
+    /// other ready step in the same group joins it. Anchoring on the first means the batch is a function
+    /// of the graph rather than of timing, so two runs of the same pipeline execute the same steps
+    /// together - which is what makes a run readable after the fact.
+    /// </para>
+    /// </summary>
+    /// <remarks>Takes the plan rather than the whole context so it can be exercised on its own.</remarks>
+    internal static List<string> SelectBatch(
+        CompiledPipelineGraph plan, List<string> ready, int maxParallel)
+    {
+        var head = ready[0];
+        var group = Group(plan.Node(head));
+
+        if (group is null || maxParallel <= 1) return [head];
+
+        return ready
+            .Where(id => string.Equals(Group(plan.Node(id)), group, StringComparison.OrdinalIgnoreCase))
+            .Take(maxParallel)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Runs one step on its <b>own service scope</b>, so it gets its own DbContext, its own DuckdbService
+    /// and its own source loader.
+    /// <para>
+    /// This is what makes running steps at the same time safe, and it is not optional. Almost everything a
+    /// step touches is registered scoped and therefore shared: two steps on one
+    /// <c>ApplicationDbContext</c> is a crash rather than a race that usually works, and
+    /// <c>DuckdbService</c> keeps a plain <c>Dictionary</c> cache of dataset paths that concurrent writers
+    /// would corrupt. Auditing every collaborator for thread safety and locking each one would leave the
+    /// next collaborator added unprotected; a scope per step cannot be got wrong that way.
+    /// </para>
+    /// <para>
+    /// Only the shared <see cref="ExecutionContext"/> crosses the boundary, and the three things a step
+    /// writes on it are concurrent collections. The step's own bookkeeping - its row, the run's counters -
+    /// stays with the orchestrator.
+    /// </para>
+    /// <para>
+    /// Falls back to this instance when no scope can be made, so a host that registered the engine
+    /// differently keeps working, serially, rather than failing.
+    /// </para>
+    /// </summary>
+    private async Task<NodeOutcome> ExecuteIsolatedAsync(
+        ExecutionContext ctx, string nodeId, PipelineNodeDef node, PipelineNodeSpec spec,
+        ExecutionOutcome outcome, CancellationToken ct)
+    {
+        if (scopes is null)
+            return await ExecuteNodeWithRetryAsync(ctx, nodeId, node, spec, outcome, ct);
+
+        using var scope = scopes.CreateScope();
+
+        if (scope.ServiceProvider.GetRequiredService<IPipelineEngine>() is not PipelineEngine worker)
+            return await ExecuteNodeWithRetryAsync(ctx, nodeId, node, spec, outcome, ct);
+
+        return await worker.ExecuteNodeWithRetryAsync(ctx, nodeId, node, spec, outcome, ct);
     }
 
     private async Task<NodeOutcome> ExecuteNodeWithRetryAsync(
@@ -506,6 +752,7 @@ public partial class PipelineEngine(
                 ResolveTokens = Resolve,
                 RowLimit = ctx.RowLimit,
                 UploadedFilePath = ctx.UploadedFilePath,
+                WorkingDirectory = ctx.WorkingDirectory,
                 Progress = ctx.Log,
                 RowsFetched = LiveRowCounter(ctx, nodeId),
                 IncrementalLow = ctx.WatermarkLows.GetValueOrDefault(nodeId),
@@ -1136,6 +1383,11 @@ public partial class PipelineEngine(
             pipeline.RunCount += 1;
         }
 
+        // Any step still marked Running never got to write its own outcome — the run was cancelled or
+        // timed out inside it, or the process died. Left alone it shows as in progress forever, which is
+        // exactly what makes a cancelled run look like it is still going.
+        await CloseOutRunningStepsAsync(run, status);
+
         // Watermarks advance here and nowhere else: after the run is known to have succeeded, in the same
         // save as the run's terminal status. A null ctx means the run never got as far as executing a
         // graph, so there is nothing captured to commit.
@@ -1151,6 +1403,40 @@ public partial class PipelineEngine(
 
         return new PipelineRunOutcome(status == PipelineRunStatus.Success, error, errorType,
             run.RowsRead, run.RowsWritten);
+    }
+
+    /// <summary>
+    /// Settles the step rows a finished run left showing <see cref="PipelineStepStatus.Running"/>.
+    /// <para>
+    /// A cancel reports them as Canceled, anything else as Failed — a step that was interrupted by a
+    /// timeout or a crash really did not produce its output, and calling that Failed is the honest
+    /// reading. Written with its own UPDATE and <see cref="CancellationToken.None"/>, because this runs
+    /// on the way out of a run that was very likely cancelled.
+    /// </para>
+    /// </summary>
+    private async Task CloseOutRunningStepsAsync(PipelineRun run, string status)
+    {
+        var canceled = status == PipelineRunStatus.Canceled;
+        var stepStatus = canceled ? PipelineStepStatus.Canceled : PipelineStepStatus.Failed;
+        var message = canceled
+            ? "Stopped part-way — the run was cancelled."
+            : "Stopped part-way — the run ended before this step finished.";
+        var errorType = canceled ? PipelineErrorType.Canceled : PipelineErrorType.Unknown;
+
+        try
+        {
+            await db.PipelineRunStep
+                .Where(x => x.RunId == run.Id && x.Status == PipelineStepStatus.Running)
+                .ExecuteUpdateAsync(u => u
+                    .SetProperty(x => x.Status, stepStatus)
+                    .SetProperty(x => x.Error, message)
+                    .SetProperty(x => x.ErrorType, errorType)
+                    .SetProperty(x => x.CompletedAt, DateTime.UtcNow), CancellationToken.None);
+        }
+        catch
+        {
+            // Cosmetic. Never let tidying up the waterfall stop a run from recording its own outcome.
+        }
     }
 
     /// <summary>
@@ -1299,6 +1585,94 @@ public partial class PipelineEngine(
         }
     }
 
+    /// <summary>
+    /// Polls a run's status on its own DbContext and trips the run's <see cref="CancellationTokenSource"/>
+    /// as soon as it reads <see cref="PipelineRunStatus.Canceled"/>.
+    /// <para>
+    /// Its own scope is not optional: the callback fires on a pool thread while the engine is blocked
+    /// inside a step, and two threads on one DbContext is a crash rather than a race you get away with —
+    /// the same reason the live row counter takes a fresh scope.
+    /// </para>
+    /// <para>
+    /// Polling rather than a notification because the writer is usually a different <em>process</em>: the
+    /// web app handles the button, the scheduler runs the job. The run row is the only thing both can see,
+    /// which also means this keeps working with any number of runners.
+    /// </para>
+    /// </summary>
+    private sealed class CancelWatch : IDisposable
+    {
+        /// <summary>
+        /// How often the row is read. Short enough that Cancel feels immediate, long enough that a run
+        /// with a two-hour step costs a few hundred trivial queries rather than a load.
+        /// </summary>
+        private static readonly TimeSpan Interval = TimeSpan.FromSeconds(3);
+
+        private readonly CancellationTokenSource _stop = new();
+        private readonly Task? _loop;
+        private int _requested;
+
+        /// <summary>True once a cancel has been seen — by this watcher or by the between-steps check.</summary>
+        public bool Requested => Volatile.Read(ref _requested) == 1;
+
+        public CancelWatch(IServiceScopeFactory? scopes, string runId, CancellationTokenSource cancel)
+        {
+            // No scope factory means no second DbContext, so no polling. The run still cancels at the next
+            // step boundary, which is what happened before this existed.
+            if (scopes is null) return;
+            _loop = Task.Run(() => PollAsync(scopes, runId, cancel, _stop.Token));
+        }
+
+        public void MarkRequested() => Interlocked.Exchange(ref _requested, 1);
+
+        private async Task PollAsync(
+            IServiceScopeFactory scopes, string runId, CancellationTokenSource cancel, CancellationToken stop)
+        {
+            try
+            {
+                while (!stop.IsCancellationRequested)
+                {
+                    await Task.Delay(Interval, stop);
+
+                    using var scope = scopes.CreateScope();
+                    var fresh = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                    var status = await fresh.PipelineRun.AsNoTracking()
+                        .Where(r => r.Id == runId)
+                        .Select(r => r.Status)
+                        .FirstOrDefaultAsync(stop);
+
+                    if (status != PipelineRunStatus.Canceled) continue;
+
+                    MarkRequested();
+                    cancel.Cancel();
+                    return;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // The run finished and Dispose stopped the loop. Nothing to do.
+            }
+            catch
+            {
+                // A failed poll — a blip on the way to the database, or the token source already disposed
+                // in a race with Dispose — must never fail the run. The between-steps check still catches
+                // a cancel, just later.
+            }
+        }
+
+        public void Dispose()
+        {
+            _stop.Cancel();
+
+            // Waited on so the loop cannot still be holding a scope, or about to call Cancel on a token
+            // source the caller is about to dispose. Bounded: the delay above throws the moment _stop
+            // trips, so this returns immediately in every ordinary case.
+            try { _loop?.Wait(TimeSpan.FromSeconds(5)); } catch { /* already faulted or cancelled */ }
+
+            _stop.Dispose();
+        }
+    }
+
     private async Task<bool> IsCanceledAsync(string runId, CancellationToken ct)
     {
         var status = await db.PipelineRun.AsNoTracking()
@@ -1443,6 +1817,17 @@ public partial class PipelineEngine(
 
         public string? StopAfterNodeId { get; init; }
         public string? UploadedFilePath { get; init; }
+
+        /// <summary>
+        /// Where this run stages files on the way into DuckDB. Resolved once from the company's settings
+        /// and carried on the context rather than looked up per step, so one run cannot half-use a folder
+        /// somebody changed while it was running.
+        /// </summary>
+        public required string WorkingDirectory { get; init; }
+
+        /// <summary>The run's cancel watcher. Null during a preview, which nobody can cancel by id.</summary>
+        public CancelWatch? Cancellation { get; init; }
+
         public required RunLog Log { get; init; }
 
         /// <summary>Null during a preview, which writes nothing to the database.</summary>
@@ -1459,10 +1844,15 @@ public partial class PipelineEngine(
         /// Nothing here is persisted unless the whole run reaches Success.
         /// </para>
         /// </summary>
-        public Dictionary<string, PipelineWatermarkWindow> CapturedWindows { get; } = new(StringComparer.Ordinal);
+        /// <para>
+        /// Concurrent because a source step writes its window from whichever task is running it, and steps
+        /// in one parallel group run at the same time.
+        /// </para>
+        public ConcurrentDictionary<string, PipelineWatermarkWindow> CapturedWindows { get; } =
+            new(StringComparer.Ordinal);
 
         /// <summary>Rows each incremental source read, recorded for the state row's diagnostics.</summary>
-        public Dictionary<string, long> WatermarkRows { get; } = new(StringComparer.Ordinal);
+        public ConcurrentDictionary<string, long> WatermarkRows { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// When each step finished successfully, and how many rows it produced — committed to
@@ -1475,7 +1865,7 @@ public partial class PipelineEngine(
         /// as stale and point the operator at the wrong node.
         /// </para>
         /// </summary>
-        public Dictionary<string, (DateTime At, long Rows)> NodeSucceededAt { get; } =
+        public ConcurrentDictionary<string, (DateTime At, long Rows)> NodeSucceededAt { get; } =
             new(StringComparer.Ordinal);
 
         /// <summary>
@@ -1486,7 +1876,13 @@ public partial class PipelineEngine(
         /// the capture comes first by turning the reference itself into an ordering dependency.
         /// </para>
         /// </summary>
-        public Dictionary<string, string> Vars { get; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <para>
+        /// Concurrent for the same reason as the others: a capture writes it from its own task. Steps that
+        /// <em>read</em> a captured value are never in the same batch as the capture that writes it - the
+        /// compiler turns the token reference into an ordering dependency, and the scheduler honours those
+        /// when it decides what is ready.
+        /// </para>
+        public ConcurrentDictionary<string, string> Vars { get; } = new(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>A preview must never move a watermark, however it ends.</summary>
         public bool IsPreview => Run is null || RowLimit is not null;
@@ -1538,15 +1934,30 @@ public partial class PipelineEngine(
     {
         private readonly StringBuilder _text = new();
 
-        public string Text => _text.ToString();
+        // Steps in a parallel group write here from their own tasks, and neither a StringBuilder nor
+        // Hangfire's console is safe against that. A plain lock is the right tool: writes are short, and
+        // the alternative - interleaved half-lines in the one artifact somebody reads to work out what a
+        // failed run did - is not a trade worth making for a few microseconds.
+        private readonly object _gate = new();
+
+        public string Text
+        {
+            get { lock (_gate) return _text.ToString(); }
+        }
 
         public void WriteLine(string message)
         {
-            _text.AppendLine(message);
-            inner?.WriteLine(message);
+            lock (_gate)
+            {
+                _text.AppendLine(message);
+                inner?.WriteLine(message);
+            }
         }
 
-        public void SetProgress(int percent) => inner?.SetProgress(percent);
+        public void SetProgress(int percent)
+        {
+            lock (_gate) inner?.SetProgress(percent);
+        }
     }
 }
 

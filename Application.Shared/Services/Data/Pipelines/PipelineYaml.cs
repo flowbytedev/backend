@@ -42,7 +42,7 @@ public static class PipelineYaml
     /// <summary>Keys on a step that describe structure rather than configuration.</summary>
     private static readonly HashSet<string> ReservedKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "id", "type", "label", "from", "onError", "retry", "timeoutSeconds", "freshness"
+        "id", "type", "label", "from", "onError", "retry", "timeoutSeconds", "freshness", "parallelGroup"
     };
 
     private static ISerializer Serializer => new SerializerBuilder()
@@ -93,6 +93,7 @@ public static class PipelineYaml
 
             foreach (var (key, value) in ConfigToMap(node, spec)) step[key] = value;
 
+            if (!string.IsNullOrWhiteSpace(node.ParallelGroup)) step["parallelGroup"] = node.ParallelGroup;
             if (!string.IsNullOrWhiteSpace(node.OnError)) step["onError"] = node.OnError;
             if (node.TimeoutSeconds is > 0) step["timeoutSeconds"] = node.TimeoutSeconds;
             if (node.Retry is { MaxAttempts: > 1 })
@@ -123,6 +124,8 @@ public static class PipelineYaml
         if (settings.TimeoutSeconds != defaults.TimeoutSeconds) map["timeoutSeconds"] = settings.TimeoutSeconds;
         if (settings.FailOnEmptySource != defaults.FailOnEmptySource)
             map["failOnEmptySource"] = settings.FailOnEmptySource;
+        if (settings.MaxParallelSteps != defaults.MaxParallelSteps)
+            map["maxParallelSteps"] = settings.MaxParallelSteps;
 
         if (FreshnessToMap(settings.Freshness) is { } freshness) map["freshness"] = freshness;
 
@@ -306,6 +309,7 @@ public static class PipelineYaml
             var node = new PipelineNodeDef { Id = id!, Type = type! };
 
             if (Text(Get(step, "label")) is { Length: > 0 } label) node.Label = label;
+            if (Text(Get(step, "parallelGroup")) is { Length: > 0 } group) node.ParallelGroup = group;
             if (Text(Get(step, "onError")) is { Length: > 0 } onError) node.OnError = onError;
             if (Get(step, "timeoutSeconds") is { } timeout && TryInt(timeout, out var seconds))
                 node.TimeoutSeconds = seconds;
@@ -407,6 +411,8 @@ public static class PipelineYaml
             target.TimeoutSeconds = seconds;
         if (Get(map, "failOnEmptySource") is { } fail && TryBool(fail, out var failOnEmpty))
             target.FailOnEmptySource = failOnEmpty;
+        if (Get(map, "maxParallelSteps") is { } parallel && TryInt(parallel, out var maxParallel))
+            target.MaxParallelSteps = maxParallel;
         target.Freshness = ReadFreshness(Get(map, "freshness"));
     }
 

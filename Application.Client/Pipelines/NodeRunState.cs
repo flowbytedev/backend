@@ -18,9 +18,7 @@ public sealed record NodeRunState(
     /// <summary>Rows the step expects in total, when it knows. Null for a step that cannot.</summary>
     long? RowsTotal = null)
 {
-    public bool IsTerminal => Status is PipelineStepStatus.Success
-                                     or PipelineStepStatus.Failed
-                                     or PipelineStepStatus.Skipped;
+    public bool IsTerminal => PipelineStepStatus.IsTerminal(Status);
 
     /// <summary>
     /// How far through this step is, 0-100, or null when there is nothing honest to draw.

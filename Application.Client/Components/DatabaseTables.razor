@@ -6,105 +6,81 @@
 @inject IJSRuntime JSRuntime
 
 <div class="dbt-scope">
-<!-- Database Connection -->
+@*
+    Connection details are NOT edited here.
+
+    They moved to Data > Connections, where the rest of what a pipeline is allowed to reach already lives -
+    API credentials, database write logins. Keeping a second editor on this page meant two forms writing the
+    same row behind two different roles, and a password box on a page whose job is the dependency map. What
+    stays here is what this page is for: turning the database's tables into entities.
+*@
+<!-- Connection summary -->
 <div class="bg-white overflow-hidden shadow rounded-lg">
     <div class="px-6 py-5 sm:p-6">
-        <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
+        <div class="flex items-center justify-between mb-2 gap-3 flex-wrap">
             <div>
                 <h3 class="text-lg leading-6 font-medium text-gray-900">Database Connection</h3>
-                <p class="text-xs text-gray-500 mt-0.5">Configure how to reach this database so its tables can be listed and added as dependencies.</p>
+                <p class="text-xs text-gray-500 mt-0.5">
+                    How this database is reached. Managed on the Connections page.
+                </p>
             </div>
             @if (savedConnection != null)
             {
                 <span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Configured</span>
             }
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-6 gap-4">
-            <div class="sm:col-span-2">
-                <label class="block text-sm font-medium text-gray-700">Engine</label>
-                <select @bind="form.DatabaseType" @bind:after="OnEngineChanged"
-                        class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                    @foreach (var t in Enum.GetValues<DataSourceType>())
-                    {
-                        <option value="@t">@EngineLabel(t)</option>
-                    }
-                </select>
-            </div>
-
-            @if (form.DatabaseType == DataSourceType.DuckDB)
-            {
-                <div class="sm:col-span-4">
-                    <label class="block text-sm font-medium text-gray-700">File path</label>
-                    <input @bind="form.FilePath" placeholder="C:/data/warehouse.duckdb"
-                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                </div>
-            }
             else
             {
-                <div class="sm:col-span-3">
-                    <label class="block text-sm font-medium text-gray-700">Host</label>
-                    <input @bind="form.Host" placeholder="db.example.com or IP"
-                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                </div>
-                <div class="sm:col-span-1">
-                    <label class="block text-sm font-medium text-gray-700">Port</label>
-                    <input @bind="form.Port" type="number" min="0"
-                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                </div>
-                <div class="sm:col-span-3">
-                    <label class="block text-sm font-medium text-gray-700">Database</label>
-                    <input @bind="form.DatabaseName" placeholder="catalog / database name"
-                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                </div>
-                <div class="sm:col-span-3">
-                    <label class="block text-sm font-medium text-gray-700">Username</label>
-                    <input @bind="form.Username" autocomplete="off"
-                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                </div>
-                <div class="sm:col-span-3">
-                    <label class="block text-sm font-medium text-gray-700">Password</label>
-                    <input @bind="form.Secret" type="password" autocomplete="new-password"
-                           placeholder="@(savedConnection?.HasSecret == true ? "Leave blank to keep current" : "Enter password")"
-                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                </div>
-                <div class="sm:col-span-3 flex items-end">
-                    <label class="inline-flex items-center gap-2 text-sm text-gray-700 pb-2">
-                        <input @bind="form.UseSsl" type="checkbox" class="h-4 w-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500" />
-                        Use SSL / encrypt connection
-                    </label>
-                </div>
+                <span class="text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-800">Not configured</span>
             }
         </div>
 
-        @if (!string.IsNullOrEmpty(connectionMessage))
+        @if (savedConnection != null)
         {
-            <div class="mt-4 rounded-md p-3 text-sm @(connectionOk ? "bg-green-50 border border-green-200 text-green-800" : "bg-red-50 border border-red-200 text-red-700")">
-                @connectionMessage
-            </div>
+            <dl class="grid grid-cols-1 sm:grid-cols-4 gap-4 mt-4">
+                <div>
+                    <dt class="text-xs uppercase tracking-wide text-gray-400">Engine</dt>
+                    <dd class="text-sm text-gray-900 mt-0.5">@EngineLabel(savedConnection.DatabaseType)</dd>
+                </div>
+                @if (savedConnection.DatabaseType == DataSourceType.DuckDB)
+                {
+                    <div class="sm:col-span-3">
+                        <dt class="text-xs uppercase tracking-wide text-gray-400">File</dt>
+                        <dd class="text-sm text-gray-900 mt-0.5 font-mono truncate">@savedConnection.FilePath</dd>
+                    </div>
+                }
+                else
+                {
+                    <div>
+                        <dt class="text-xs uppercase tracking-wide text-gray-400">Host</dt>
+                        <dd class="text-sm text-gray-900 mt-0.5 font-mono truncate">
+                            @savedConnection.Host@(savedConnection.Port > 0 ? $":{savedConnection.Port}" : "")
+                        </dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs uppercase tracking-wide text-gray-400">Database</dt>
+                        <dd class="text-sm text-gray-900 mt-0.5 font-mono truncate">@savedConnection.DatabaseName</dd>
+                    </div>
+                    <div>
+                        <dt class="text-xs uppercase tracking-wide text-gray-400">Username</dt>
+                        <dd class="text-sm text-gray-900 mt-0.5 font-mono truncate">@savedConnection.Username</dd>
+                    </div>
+                }
+            </dl>
+        }
+        else
+        {
+            <p class="text-sm text-gray-500 mt-3">
+                This database has no saved connection, so its tables cannot be listed and no dataset or
+                pipeline can read from it.
+            </p>
         }
 
-        <AuthorizeView Roles="@writeRoles" Context="cfgCtx">
-            <Authorized>
-                <div class="mt-5 pt-4 border-t border-gray-100 flex items-center justify-end gap-2">
-                    @if (savedConnection != null)
-                    {
-                        <button @onclick="DeleteConnection"
-                                class="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-red-600 bg-white hover:bg-red-50">
-                            Delete
-                        </button>
-                        <button @onclick="TestConnection" disabled="@isTesting"
-                                class="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50">
-                            @(isTesting ? "Testing..." : "Test")
-                        </button>
-                    }
-                    <button @onclick="SaveConnection" disabled="@isSaving"
-                            class="inline-flex items-center px-4 py-1.5 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50">
-                        @(isSaving ? "Saving..." : "Save")
-                    </button>
-                </div>
-            </Authorized>
-        </AuthorizeView>
+        <div class="mt-5 pt-4 border-t border-gray-100 flex items-center justify-end">
+            <a href="@ConnectionsUrl"
+               class="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                @(savedConnection != null ? "Edit on the Connections page" : "Add a connection")
+            </a>
+        </div>
     </div>
 </div>
 
@@ -242,13 +218,10 @@
     private string CompanyId => StateContainer.Company?.Id ?? string.Empty;
     private string writeRoles => $"{CompanyId}_INCIDENTS,{CompanyId}_ADMIN";
 
+    /// <summary>Read-only here: shown so the page explains itself, edited on the Connections page.</summary>
     private DatabaseConnectionDto? savedConnection;
-    private DatabaseConnectionRequest form = new() { DatabaseType = DataSourceType.SQLServer, Port = 1433 };
 
-    private bool isSaving;
-    private bool isTesting;
-    private bool connectionOk;
-    private string? connectionMessage;
+    private string ConnectionsUrl => $"/data/connections?c={CompanyId}&db={EntityId}";
 
     // Tables
     private DatabaseTableDiscoveryDto? discovery;
@@ -264,83 +237,8 @@
         await LoadConnection();
     }
 
-    private async Task LoadConnection()
-    {
+    private async Task LoadConnection() =>
         savedConnection = await DatabaseService.GetConnectionAsync(CompanyId, EntityId);
-        if (savedConnection != null)
-        {
-            form = new DatabaseConnectionRequest
-            {
-                DatabaseType = savedConnection.DatabaseType,
-                Host = savedConnection.Host,
-                Port = savedConnection.Port,
-                DatabaseName = savedConnection.DatabaseName,
-                Username = savedConnection.Username,
-                UseSsl = savedConnection.UseSsl,
-                FilePath = savedConnection.FilePath,
-                Secret = null
-            };
-        }
-    }
-
-    private void OnEngineChanged()
-    {
-        // Reset the port to the engine default when switching engines.
-        form.Port = DefaultPort(form.DatabaseType);
-    }
-
-    // ---- Connection ----
-
-    private async Task SaveConnection()
-    {
-        isSaving = true;
-        connectionMessage = null;
-        try
-        {
-            savedConnection = await DatabaseService.SaveConnectionAsync(CompanyId, EntityId, form);
-            form.Secret = null; // don't keep the plaintext around
-            connectionOk = true;
-            connectionMessage = "Connection saved.";
-        }
-        catch (Exception ex)
-        {
-            connectionOk = false;
-            connectionMessage = ex.Message;
-        }
-        finally
-        {
-            isSaving = false;
-        }
-    }
-
-    private async Task TestConnection()
-    {
-        isTesting = true;
-        connectionMessage = null;
-        try
-        {
-            var result = await DatabaseService.TestConnectionAsync(CompanyId, EntityId);
-            connectionOk = result.Ok;
-            connectionMessage = result.Ok ? "Connection succeeded." : $"Connection failed: {result.Error}";
-        }
-        finally
-        {
-            isTesting = false;
-        }
-    }
-
-    private async Task DeleteConnection()
-    {
-        if (!await JSRuntime.InvokeAsync<bool>("confirm", "Remove this database connection?")) return;
-        if (await DatabaseService.DeleteConnectionAsync(CompanyId, EntityId))
-        {
-            savedConnection = null;
-            discovery = null;
-            selectedTables.Clear();
-            form = new DatabaseConnectionRequest { DatabaseType = DataSourceType.SQLServer, Port = 1433 };
-            connectionMessage = null;
-        }
-    }
 
     // ---- Tables ----
 
@@ -414,22 +312,6 @@
 
     // ---- Helpers ----
 
-    private static string EngineLabel(DataSourceType t) => t switch
-    {
-        DataSourceType.SQLServer => "Microsoft SQL Server",
-        DataSourceType.PostgreSQL => "PostgreSQL",
-        DataSourceType.MySQL => "MySQL",
-        DataSourceType.ClickHouse => "ClickHouse",
-        DataSourceType.DuckDB => "DuckDB",
-        _ => t.ToString()
-    };
-
-    private static int DefaultPort(DataSourceType t) => t switch
-    {
-        DataSourceType.SQLServer => 1433,
-        DataSourceType.PostgreSQL => 5432,
-        DataSourceType.MySQL => 3306,
-        DataSourceType.ClickHouse => 8123,
-        _ => 0
-    };
+    // Shared with the connection editor rather than restated, so a new engine is added in one place.
+    private static string EngineLabel(DataSourceType t) => DatabaseConnectionFields.EngineLabel(t);
 }

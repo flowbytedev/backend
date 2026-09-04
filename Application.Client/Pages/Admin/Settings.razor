@@ -97,6 +97,40 @@
                         </div>
                     </div>
                 </div>
+
+                <hr class="settings-sep" />
+
+                <div class="settings-row settings-row-stacked">
+                    <div class="settings-text">
+                        <div class="settings-title">Pipeline working folder</div>
+                        <div class="settings-desc">
+                            Where a pipeline run stages files on their way into DuckDB &mdash; the CSV a
+                            database source streams into, the JSON an API source pages into, the copy a blob
+                            source downloads. These are full copies of the data, so a nightly load wants a
+                            volume with room for it. Leave it empty to use the server's own temp folder.
+                            The folder is created on the first run that needs it; if it can't be, the run
+                            says so in its log and falls back to the temp folder.
+                        </div>
+                    </div>
+                    <div class="settings-control settings-control-wide">
+                        <input class="settings-textarea" style="resize:none;"
+                               placeholder="@(string.IsNullOrWhiteSpace(_workingDirectoryEffective) ? "D:/flowbyte/work" : _workingDirectoryEffective)"
+                               value="@_workingDirectory"
+                               disabled="@(_loading || _saving)"
+                               @oninput="e => _workingDirectory = e.Value?.ToString() ?? string.Empty"
+                               @onblur="OnWorkingDirectoryChangedAsync" />
+                        <div class="settings-preview">
+                            @if (string.IsNullOrWhiteSpace(_workingDirectory))
+                            {
+                                <span>Using the server default: @_workingDirectoryEffective</span>
+                            }
+                            else
+                            {
+                                <span>Runs will stage files in @_workingDirectoryEffective</span>
+                            }
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </Authorized>
@@ -125,6 +159,14 @@
     /// </summary>
     private string _savedFreshnessRecipients = string.Empty;
 
+    private string _workingDirectory = string.Empty;
+
+    /// <summary>The path actually in use, sent by the server. The browser cannot derive the fallback.</summary>
+    private string _workingDirectoryEffective = string.Empty;
+
+    /// <summary>Same purpose as <see cref="_savedFreshnessRecipients"/>: tell an edit from a plain focus.</summary>
+    private string _savedWorkingDirectory = string.Empty;
+
     private int _recipientCount => AlertRecipients.Parse(_freshnessRecipients).Count;
 
     // A deliberately unambiguous sample (day 31 can't be read as a month), so the difference between the
@@ -146,6 +188,9 @@
             _freshnessEnabled = settings?.FreshnessChecksEnabled ?? true;
             _freshnessRecipients = settings?.FreshnessAlertRecipients ?? string.Empty;
             _savedFreshnessRecipients = _freshnessRecipients;
+            _workingDirectory = settings?.PipelineWorkingDirectory ?? string.Empty;
+            _workingDirectoryEffective = settings?.PipelineWorkingDirectoryEffective ?? string.Empty;
+            _savedWorkingDirectory = _workingDirectory;
         }
         _loading = false;
     }
@@ -254,6 +299,45 @@
         _toastService.ShowSuccess(_recipientCount == 0
             ? "Stale-data alerts will not be emailed."
             : $"Stale-data alerts will go to {_recipientCount} recipient{(_recipientCount == 1 ? "" : "s")}.");
+    }
+
+    private async Task OnWorkingDirectoryChangedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(companyId)) return;
+
+        // Compare normalised, so adding or removing a trailing slash is not a save.
+        if (PipelineWorkspacePath.Normalize(_workingDirectory)
+            == PipelineWorkspacePath.Normalize(_savedWorkingDirectory)) return;
+
+        if (PipelineWorkspacePath.Validate(_workingDirectory) is { } problem)
+        {
+            // Checked here as well as server-side, for the same reason the recipient list is: saying so
+            // immediately is the difference between a typo and a mystery.
+            _toastService.ShowError(problem);
+            return;
+        }
+
+        var saved = await SaveAsync(new CompanySettingsDto
+        {
+            DebugLoggingEnabled = _debugEnabled,
+            PipelineWorkingDirectory = _workingDirectory,
+        });
+
+        if (saved is null)
+        {
+            _toastService.ShowError("Couldn't update the pipeline working folder.");
+            _workingDirectory = _savedWorkingDirectory;
+            return;
+        }
+
+        // Show the stored form rather than what was typed, so the normalisation is visible.
+        _workingDirectory = saved.PipelineWorkingDirectory ?? string.Empty;
+        _workingDirectoryEffective = saved.PipelineWorkingDirectoryEffective ?? string.Empty;
+        _savedWorkingDirectory = _workingDirectory;
+
+        _toastService.ShowSuccess(string.IsNullOrWhiteSpace(_workingDirectory)
+            ? $"Pipeline runs will use the server default ({_workingDirectoryEffective})."
+            : $"Pipeline runs will stage files in {_workingDirectoryEffective}.");
     }
 
     /// <summary>
