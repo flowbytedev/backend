@@ -50,6 +50,53 @@
                         <div class="settings-preview">Example: @ExamplePreview</div>
                     </div>
                 </div>
+
+                <hr class="settings-sep" />
+
+                <div class="settings-row">
+                    <div class="settings-text">
+                        <div class="settings-title">Pipeline freshness checks</div>
+                        <div class="settings-desc">
+                            Check each pipeline step against its freshness policy, and report the ones that
+                            haven't produced output recently enough. A pipeline with no policy is unchecked
+                            either way — the policy is set per pipeline, on the canvas or in its YAML.
+                        </div>
+                    </div>
+                    <FluentSwitch @bind-Value="_freshnessEnabled"
+                                  @bind-Value:after="OnFreshnessToggleAsync"
+                                  Disabled="@(_loading || _saving)" />
+                </div>
+
+                <div class="settings-row settings-row-stacked">
+                    <div class="settings-text">
+                        <div class="settings-title">Stale-data alert recipients</div>
+                        <div class="settings-desc">
+                            Emailed when a step goes stale, and again when it recovers. Separate addresses
+                            with <code>;</code> — commas and new lines work too. Leave it empty and
+                            verdicts are still recorded and shown in the app; no mail is sent.
+                            Alerts fire on the <strong>change</strong>, so a pipeline that has been stale
+                            for a week won't mail you hourly.
+                        </div>
+                    </div>
+                    <div class="settings-control settings-control-wide">
+                        <textarea class="settings-textarea" rows="2"
+                                  placeholder="data-team@example.com; ops@example.com"
+                                  value="@_freshnessRecipients"
+                                  disabled="@(_loading || _saving || !_freshnessEnabled)"
+                                  @oninput="e => _freshnessRecipients = e.Value?.ToString() ?? string.Empty"
+                                  @onblur="OnFreshnessRecipientsChangedAsync"></textarea>
+                        <div class="settings-preview">
+                            @if (_recipientCount == 0)
+                            {
+                                <span>No recipients — nothing will be emailed.</span>
+                            }
+                            else
+                            {
+                                <span>@_recipientCount recipient@(_recipientCount == 1 ? "" : "s")</span>
+                            }
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </Authorized>
@@ -69,6 +116,16 @@
     private bool _saving;
     private string? _userId;
     private string _exportDateFormat = ExportDateFormats.Default;
+    private bool _freshnessEnabled = true;
+    private string _freshnessRecipients = string.Empty;
+
+    /// <summary>
+    /// What was last saved, so the blur handler can tell an actual edit from a focus that changed nothing.
+    /// Without it, tabbing through the box would PUT on every pass.
+    /// </summary>
+    private string _savedFreshnessRecipients = string.Empty;
+
+    private int _recipientCount => AlertRecipients.Parse(_freshnessRecipients).Count;
 
     // A deliberately unambiguous sample (day 31 can't be read as a month), so the difference between the
     // day-first and month-first patterns is obvious. Formatted invariantly to match what the export writes.
@@ -86,6 +143,9 @@
             var settings = await _debugLogClient.GetSettingsAsync(companyId);
             _debugEnabled = settings?.DebugLoggingEnabled ?? false;
             _exportDateFormat = ExportDateFormats.Resolve(settings?.ExportDateFormat);
+            _freshnessEnabled = settings?.FreshnessChecksEnabled ?? true;
+            _freshnessRecipients = settings?.FreshnessAlertRecipients ?? string.Empty;
+            _savedFreshnessRecipients = _freshnessRecipients;
         }
         _loading = false;
     }
@@ -137,6 +197,77 @@
             _exportDateFormat = ExportDateFormats.Resolve(current?.ExportDateFormat);
         }
     }
+
+    private async Task OnFreshnessToggleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(companyId)) return;
+
+        var saved = await SaveAsync(new CompanySettingsDto
+        {
+            DebugLoggingEnabled = _debugEnabled,
+            FreshnessChecksEnabled = _freshnessEnabled,
+        });
+
+        if (saved is not null)
+        {
+            _toastService.ShowSuccess($"Freshness checks {(_freshnessEnabled ? "enabled" : "disabled")}.");
+            return;
+        }
+
+        _toastService.ShowError("Couldn't update freshness checks.");
+        _freshnessEnabled = !_freshnessEnabled;   // revert the switch on failure
+    }
+
+    private async Task OnFreshnessRecipientsChangedAsync()
+    {
+        if (string.IsNullOrWhiteSpace(companyId)) return;
+
+        // Compare normalised, so re-ordering whitespace or swapping a comma for a semicolon is not a save.
+        if (AlertRecipients.Normalize(_freshnessRecipients)
+            == AlertRecipients.Normalize(_savedFreshnessRecipients)) return;
+
+        if (AlertRecipients.FirstInvalid(_freshnessRecipients) is { } bad)
+        {
+            // Caught here as well as server-side. The round trip would reject it too, but saying so
+            // immediately is the difference between a typo and a mystery.
+            _toastService.ShowError($"'{bad}' does not look like an email address.");
+            return;
+        }
+
+        var saved = await SaveAsync(new CompanySettingsDto
+        {
+            DebugLoggingEnabled = _debugEnabled,
+            FreshnessAlertRecipients = _freshnessRecipients,
+        });
+
+        if (saved is null)
+        {
+            _toastService.ShowError("Couldn't update the alert recipients.");
+            _freshnessRecipients = _savedFreshnessRecipients;
+            return;
+        }
+
+        // Show the stored form rather than what was typed, so the normalisation is visible.
+        _freshnessRecipients = saved.FreshnessAlertRecipients ?? string.Empty;
+        _savedFreshnessRecipients = _freshnessRecipients;
+
+        _toastService.ShowSuccess(_recipientCount == 0
+            ? "Stale-data alerts will not be emailed."
+            : $"Stale-data alerts will go to {_recipientCount} recipient{(_recipientCount == 1 ? "" : "s")}.");
+    }
+
+    /// <summary>
+    /// One PUT helper for the freshness rows. <c>DebugLoggingEnabled</c> is passed by every caller because
+    /// the API applies it unconditionally — omitting it would silently turn debug logging off, the same
+    /// trap the export-format handler works around.
+    /// </summary>
+    private async Task<CompanySettingsDto?> SaveAsync(CompanySettingsDto body)
+    {
+        _saving = true;
+        var saved = await _debugLogClient.SaveSettingsAsync(companyId!, _userId, body);
+        _saving = false;
+        return saved;
+    }
 }
 
 <style>
@@ -167,6 +298,19 @@
         font-size: 0.75rem; color: #71717a; font-variant-numeric: tabular-nums;
     }
 
+    /* A recipient list is too wide to sit beside its description at this card width, so this row stacks
+       and the control takes the full width instead of being squeezed into the right-hand column. */
+    .settings-row-stacked { flex-direction: column; align-items: stretch; margin-top: 0.85rem; }
+    .settings-control-wide { align-items: stretch; width: 100%; }
+    .settings-textarea {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8125rem;
+        padding: 0.45rem 0.55rem; border: 1px solid #e4e4e7; border-radius: 7px;
+        background: #fff; color: #18181b; width: 100%; resize: vertical; line-height: 1.5;
+    }
+    .settings-textarea:focus { outline: none; border-color: #18181b; box-shadow: 0 0 0 2px rgba(24,24,27,0.08); }
+    .settings-textarea:disabled { background: #fafafa; opacity: 0.65; cursor: not-allowed; }
+    .settings-textarea::placeholder { color: #a1a1aa; }
+
     [data-theme="dark"] .settings-card { background: #181a20; border-color: #2b303b; }
     [data-theme="dark"] .settings-title { color: #f3f4f6; }
     [data-theme="dark"] .settings-desc { color: #c5cad4; }
@@ -176,4 +320,8 @@
     [data-theme="dark"] .settings-select:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(129,140,248,0.2); }
     [data-theme="dark"] .settings-select:disabled { background: #16181e; }
     [data-theme="dark"] .settings-preview { color: #9aa1ac; }
+    [data-theme="dark"] .settings-textarea { background: #12141a; border-color: #2b303b; color: #f3f4f6; }
+    [data-theme="dark"] .settings-textarea:focus { border-color: #818cf8; box-shadow: 0 0 0 2px rgba(129,140,248,0.2); }
+    [data-theme="dark"] .settings-textarea:disabled { background: #16181e; }
+    [data-theme="dark"] .settings-textarea::placeholder { color: #6b7280; }
 </style>

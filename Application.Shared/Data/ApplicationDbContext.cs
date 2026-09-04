@@ -124,6 +124,10 @@ namespace Application.Shared.Data
         // What a pipeline remembers between runs — one incremental watermark per source step.
         public DbSet<PipelineState> PipelineState { get; set; }
 
+        // When each step last succeeded, kept beyond the step retention window so a freshness check can
+        // tell a long silence from a node that has never run. See PipelineNodeFreshness.
+        public DbSet<PipelineNodeFreshness> PipelineNodeFreshness { get; set; }
+
         // Standalone HTTP credential for source.api / destination.api. Not on an entity: an API is not a
         // monitored asset, so there is nothing to hang it off.
         public DbSet<ApiCredential> ApiCredential { get; set; }

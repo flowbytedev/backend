@@ -1026,6 +1026,11 @@ public partial class PipelineEngine(
     {
         if (ctx.Run is null) return;   // a preview keeps its trace in memory rather than in the database
 
+        // Noted here because this is the one funnel every step outcome passes through, so a new node type
+        // cannot be added that reports a step without also reporting its freshness.
+        if (status == PipelineStepStatus.Success)
+            ctx.NodeSucceededAt[nodeId] = (DateTime.UtcNow, result?.RowsOut ?? 0);
+
         var previewRows = options.ResolveStepPreviewRows();
         string? previewJson = null;
 
@@ -1137,6 +1142,11 @@ public partial class PipelineEngine(
         if (status == PipelineRunStatus.Success && ctx is not null)
             await CommitWatermarksAsync(ctx, run);
 
+        // Deliberately not gated on the run's status — see NodeSucceededAt. A partial run is fine here
+        // too: it only ever records the steps that actually ran, and says nothing about the rest.
+        if (ctx is not null)
+            await CommitFreshnessAsync(ctx, run);
+
         await db.SaveChangesAsync(CancellationToken.None);
 
         return new PipelineRunOutcome(status == PipelineRunStatus.Success, error, errorType,
@@ -1241,6 +1251,51 @@ public partial class PipelineEngine(
             row.ModifiedOn = DateTime.Now;
 
             ctx.Log.WriteLine($"  {nodeId}: watermark advanced to {window.High}");
+        }
+    }
+
+    /// <summary>
+    /// Records when each step that succeeded this run produced its output, so a freshness check can still
+    /// answer that question after the step rows have been purged.
+    /// <para>
+    /// Not part of <see cref="CommitWatermarksAsync"/> despite the identical shape: that one is gated on
+    /// the run succeeding and this one is not, which is the entire difference between the two features.
+    /// </para>
+    /// </summary>
+    private async Task CommitFreshnessAsync(ExecutionContext ctx, PipelineRun run)
+    {
+        if (ctx.IsPreview || ctx.NodeSucceededAt.Count == 0) return;
+
+        var pipelineId = run.PipelineId ?? string.Empty;
+
+        var existing = await db.PipelineNodeFreshness
+            .Where(x => x.CompanyId == ctx.CompanyId && x.PipelineId == pipelineId)
+            .ToListAsync(CancellationToken.None);
+
+        foreach (var (nodeId, (at, rows)) in ctx.NodeSucceededAt)
+        {
+            var row = existing.FirstOrDefault(x => x.NodeId == nodeId);
+
+            if (row is null)
+            {
+                row = new PipelineNodeFreshness
+                {
+                    CompanyId = ctx.CompanyId,
+                    PipelineId = pipelineId,
+                    NodeId = nodeId,
+                    CreatedOn = DateTime.Now
+                };
+                db.PipelineNodeFreshness.Add(row);
+            }
+
+            row.LastSuccessAt = at;
+            row.LastSuccessRunId = run.Id;
+            row.LastRowsOut = rows;
+            row.ModifiedOn = DateTime.Now;
+
+            // AlertedStatus is deliberately left alone. The sweep is its only writer, and the stale verdict
+            // sitting here is what lets the next sweep recognise this run as the recovery and say so.
+            // Clearing it would erase the transition and the recovery would go unreported.
         }
     }
 
@@ -1408,6 +1463,20 @@ public partial class PipelineEngine(
 
         /// <summary>Rows each incremental source read, recorded for the state row's diagnostics.</summary>
         public Dictionary<string, long> WatermarkRows { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// When each step finished successfully, and how many rows it produced — committed to
+        /// <see cref="PipelineNodeFreshness"/> once the run ends.
+        /// <para>
+        /// <b>Unlike <see cref="CapturedWindows"/>, these are kept even when the run fails.</b> A watermark
+        /// held back on failure is a correctness rule: advancing it would skip rows nobody read. Freshness
+        /// is the opposite — a step that really did produce its output is genuinely up to date, and holding
+        /// that back because a destination three steps later failed would report the entire upstream chain
+        /// as stale and point the operator at the wrong node.
+        /// </para>
+        /// </summary>
+        public Dictionary<string, (DateTime At, long Rows)> NodeSucceededAt { get; } =
+            new(StringComparer.Ordinal);
 
         /// <summary>
         /// Values published by <c>transform.capture</c> steps, keyed by full token path (<c>vars.x</c>).

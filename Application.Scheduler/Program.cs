@@ -153,6 +153,13 @@ builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineE
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineService,
     Application.Shared.Services.Data.Pipelines.PipelineService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.PipelineJob>();
+// The freshness sweep reads each company's own enable toggle and alert recipients, so the scheduler needs
+// the settings service (and the cache it reads through) that until now only the web app registered.
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<Application.Shared.Services.ICompanySettingsService,
+    Application.Shared.Services.CompanySettingsService>();
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineFreshnessService,
+    Application.Shared.Services.Data.Pipelines.PipelineFreshnessService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.PipelineMaintenanceJob>();
 builder.Services.AddScoped<PipelineRegistrarJob>();
 

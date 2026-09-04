@@ -1,5 +1,8 @@
-﻿using Application.Shared.Models.Data.Pipelines;
+﻿using Application.Shared.Models;
+using Application.Shared.Models.Data.Pipelines;
+using Application.Shared.Options;
 using Hangfire.Server;
+using Microsoft.Extensions.Options;
 
 namespace Application.Shared.Services.Data.Pipelines;
 
@@ -49,10 +52,20 @@ public class PipelineJob(IPipelineEngine engine, IPipelineService pipelines)
 }
 
 /// <summary>
-/// Periodic housekeeping: abandon runs whose runner died, and hard-delete step rows past their retention.
-/// Separate from the registrar because these touch runs rather than schedules.
+/// Periodic housekeeping: abandon runs whose runner died, hard-delete step rows past their retention, and
+/// evaluate freshness policies. Separate from the registrar because these touch runs rather than schedules.
+/// <para>
+/// Freshness lives here rather than in its own recurring job because it needs the same cadence and has the
+/// same failure mode — a sweep that stops sweeping. One job to notice is better than two.
+/// </para>
 /// </summary>
-public class PipelineMaintenanceJob(IPipelineService pipelines, PipelineOptions options)
+public class PipelineMaintenanceJob(
+    IPipelineService pipelines,
+    IPipelineFreshnessService freshness,
+    ICompanySettingsService companySettings,
+    PipelineOptions options,
+    IIncidentNotificationService notifications,
+    IOptions<PipelineEmailOptions> email)
 {
     public async Task RunAsync(PerformContext? context, CancellationToken ct = default)
     {
@@ -62,7 +75,85 @@ public class PipelineMaintenanceJob(IPipelineService pipelines, PipelineOptions 
             TimeSpan.FromMinutes(Math.Max(5, options.StaleRunMinutes)), ct);
         if (stale > 0) progress?.WriteLine($"Abandoned {stale} run(s) with no runner.");
 
+        // Ordered after the abandon sweep and before the purge, deliberately. A run abandoned above has
+        // just had its steps left un-succeeded, which is exactly the state freshness should notice; and
+        // running before the purge means the seeding path can still see step history on its first pass.
+        if (options.FreshnessChecksEnabled)
+            await CheckFreshnessAsync(progress, ct);
+
         var purged = await pipelines.PurgeOldStepsAsync(options.StepRetentionDays, ct);
         if (purged > 0) progress?.WriteLine($"Removed {purged} step row(s) past retention.");
+    }
+
+    private async Task CheckFreshnessAsync(HangfireJobProgress? progress, CancellationToken ct)
+    {
+        var reports = await freshness.SweepAsync(ct);
+
+        foreach (var report in reports)
+        {
+            var changed = await freshness.CommitAlertStateAsync(report, ct);
+            if (changed.Count == 0) continue;
+
+            // Only the independent causes are announced. A destination that is late because its source is
+            // late does not need its own line, and on a wide graph it would bury the one that matters.
+            var causes = changed.Where(c => c.IsRootCause).ToList();
+            var recovered = changed
+                .Where(c => c.Status == PipelineFreshnessStatus.Fresh)
+                .ToList();
+
+            foreach (var cause in causes)
+                progress?.WriteLine(
+                    $"{report.PipelineName}: {cause.Label ?? cause.NodeId} is {cause.Status} — {cause.Reason}");
+
+            foreach (var back in recovered)
+                progress?.WriteLine(
+                    $"{report.PipelineName}: {back.Label ?? back.NodeId} is fresh again — {back.Reason}");
+
+            if (causes.Count > 0)
+                await NotifyAsync(report, causes, recovered: false, ct);
+            else if (recovered.Count > 0)
+                await NotifyAsync(report, recovered, recovered: true, ct);
+        }
+    }
+
+    private async Task NotifyAsync(
+        PipelineFreshnessReport report, List<PipelineFreshnessVerdict> nodes, bool recovered,
+        CancellationToken ct)
+    {
+        // The company's own list wins; the appsettings one is the fallback for a deployment that has not
+        // set them per company. Empty means send nothing — the verdicts are already recorded either way,
+        // so silence here loses no state.
+        var companyRecipients = await companySettings.GetFreshnessAsync(
+            report.CompanyId ?? string.Empty, ct);
+
+        var recipients = AlertRecipients.Resolve(
+            companyRecipients.Recipients, options.FreshnessAlertRecipients);
+
+        if (recipients.Count == 0) return;
+
+        var subject = recovered
+            ? $"Recovered: {report.PipelineName} is fresh again"
+            : $"Stale data: {report.PipelineName}";
+
+        var body = string.Join(
+            "\n",
+            nodes.Select(n => $"- {n.Label ?? n.NodeId} ({n.NodeType}): {n.Reason}"));
+
+        var appBaseUri = email.Value.AppBaseUri;
+        var url = string.IsNullOrWhiteSpace(appBaseUri)
+            ? string.Empty
+            : $"{appBaseUri!.TrimEnd('/')}/data/pipelines/{report.PipelineId}";
+
+        // Never throws by contract, so a mail outage cannot stop the sweep from recording verdicts —
+        // which is the part that must not be lost, since the alert fires on the transition.
+        await notifications.NotifyGenericAsync(
+            recipients,
+            subject,
+            report.PipelineName ?? report.PipelineId,
+            recovered ? "Freshness recovered" : "Freshness policy breached",
+            recovered ? "Info" : "High",
+            $"{report.Summary}\n\n{body}",
+            url,
+            ct);
     }
 }

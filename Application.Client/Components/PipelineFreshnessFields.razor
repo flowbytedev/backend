@@ -1,0 +1,126 @@
+@using Application.Shared.Models
+@using Application.Shared.Models.Data.Pipelines
+
+@* The value fields of one freshness policy, shared by the pipeline default and a step's override so the
+   two cannot drift apart. Renders nothing when there is no active policy to configure — the mode dropdown
+   that creates one lives in the parent, because "inherit" is only meaningful for a step. *@
+
+@if (Policy is { Enabled: true })
+{
+    @if (Policy.MaxLagMinutes is not null)
+    {
+        <div class="field">
+            <label class="field-label">Within (minutes)</label>
+            <input class="input" type="number" min="1" value="@Policy.MaxLagMinutes"
+                   @onchange="e => SetLag(e.Value?.ToString())" />
+            <div class="field-help">
+                Measured from the step's last successful finish, not from the start of the run.
+            </div>
+        </div>
+    }
+
+    @if (Policy.Cron is not null)
+    {
+        <div class="field">
+            <label class="field-label">Due (cron)</label>
+            <input class="input" style="font-family:var(--font-mono);" value="@Policy.Cron"
+                   @onchange="e => SetCron(e.Value?.ToString())" />
+            <div class="field-help">
+                Five fields, e.g. <code>0 6 * * *</code> for 6am daily. This is the <em>deadline</em>, not a
+                schedule — it does not run anything.
+            </div>
+        </div>
+
+        <div class="field">
+            <label class="field-label">Grace (minutes)</label>
+            <input class="input" type="number" min="0" value="@Policy.GraceMinutes"
+                   @onchange="e => SetGrace(e.Value?.ToString())" />
+            <div class="field-help">
+                Slack after the deadline before the step is called late. A run takes time; without grace a
+                6am deadline reports every pipeline that starts at 6am as stale while it is still working.
+            </div>
+        </div>
+
+        <div class="field">
+            <label class="field-label">Deadline time zone</label>
+            <TimeZonePicker Value="@Policy.TimeZone"
+                            ValueChanged="SetZone"
+                            DefaultId="@(InheritedZoneId ?? ScheduleTimeZones.DefaultId)" />
+            <div class="field-help">
+                Leave it as the default to follow the pipeline's own schedule zone — a deadline and the
+                schedule meant to meet it disagreeing about midnight is a bug nobody finds until the clocks
+                change.
+            </div>
+        </div>
+    }
+
+    @if (Policy.Validate() is { } problem)
+    {
+        @* Same text the compiler reports as a warning and the sweep reports as an Unknown verdict. Shown
+           here so it is fixed while it is being typed rather than discovered on a monitoring page. *@
+        <div class="field-error">@problem</div>
+    }
+    else if (Policy.Cron is not null && LastDue is { } due)
+    {
+        <div class="field-help">
+            Last due @due.ToLocalTime().ToString("ddd d MMM, HH:mm") (your local time).
+        </div>
+    }
+}
+
+@code {
+    /// <summary>
+    /// The policy to edit, mutated in place. Null or disabled renders nothing — the parent's dropdown is
+    /// what creates and removes it.
+    /// </summary>
+    [Parameter] public PipelineFreshnessPolicy? Policy { get; set; }
+
+    /// <summary>
+    /// The pipeline's schedule zone, offered as the picker's default so "unset" reads as the zone the
+    /// deadline will actually use rather than as a blank.
+    /// </summary>
+    [Parameter] public string? InheritedZoneId { get; set; }
+
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    /// <summary>
+    /// When the current expression was last due, as immediate proof it parses and means what was intended.
+    /// Null when it cannot be evaluated, in which case the validation error is shown instead.
+    /// </summary>
+    private DateTime? LastDue => Policy?.Cron is null
+        ? null
+        : CronDeadline.MostRecent(
+            Policy.Cron,
+            ScheduleTimeZones.Resolve(Policy.TimeZone ?? InheritedZoneId),
+            DateTime.UtcNow);
+
+    private async Task SetLag(string? value)
+    {
+        if (Policy is null) return;
+        if (int.TryParse(value, out var minutes) && minutes > 0) Policy.MaxLagMinutes = minutes;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetCron(string? value)
+    {
+        if (Policy is null) return;
+        // Kept as typed rather than normalised: this is the author's text, and Validate() explains it when
+        // it is wrong. Blanking it leaves an empty string so the field stays a cron field.
+        Policy.Cron = value?.Trim() ?? string.Empty;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetGrace(string? value)
+    {
+        if (Policy is null) return;
+        if (int.TryParse(value, out var minutes) && minutes >= 0) Policy.GraceMinutes = minutes;
+        await OnChanged.InvokeAsync();
+    }
+
+    private async Task SetZone(string? value)
+    {
+        if (Policy is null) return;
+        Policy.TimeZone = string.IsNullOrWhiteSpace(value) ? null : value;
+        await OnChanged.InvokeAsync();
+    }
+}

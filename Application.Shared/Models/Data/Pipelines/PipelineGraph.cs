@@ -95,6 +95,16 @@ public sealed class PipelineSettings
     /// broke, which is the more common reading for a full daily extract.
     /// </summary>
     public bool FailOnEmptySource { get; set; }
+
+    /// <summary>
+    /// Freshness policy applied to every node that does not set its own. A pipeline-wide default because
+    /// the alternative is annotating twenty-five nodes to say the same thing, which nobody does — and an
+    /// unannotated node is an unchecked one.
+    /// <para>
+    /// Individual nodes opt out with <c>freshness: { enabled: false }</c>.
+    /// </para>
+    /// </summary>
+    public PipelineFreshnessPolicy? Freshness { get; set; }
 }
 
 public sealed class PipelineViewport
@@ -166,6 +176,12 @@ public sealed class PipelineNodeDef
 
     /// <summary>Overrides <see cref="PipelineSettings.OnError"/> for this node.</summary>
     public string? OnError { get; set; }
+
+    /// <summary>
+    /// Overrides <see cref="PipelineSettings.Freshness"/> for this node — a tighter deadline on the step
+    /// somebody actually waits on, or <c>enabled: false</c> to exclude one the default should not cover.
+    /// </summary>
+    public PipelineFreshnessPolicy? Freshness { get; set; }
 }
 
 public sealed class PipelineRetryDef

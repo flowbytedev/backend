@@ -99,7 +99,12 @@ public static class PipelineCompiler
 
             ValidateConfig(node, spec, issues, scheduled);
             ValidateTokenRoots(node, issues);
+            ValidateFreshness(node.Id, node.Freshness, issues);
         }
+
+        // The pipeline-wide default, checked once. Reported against no node, because that is where the
+        // editor should point: fixing it on one step would not fix the other twenty inheriting it.
+        ValidateFreshness(null, graph.Settings.Freshness, issues);
 
         if (specs.Count == 0) return PipelineCompileResult.Failed(issues);
 
@@ -704,6 +709,26 @@ public static class PipelineCompiler
         return aggregates.Any(a => text.StartsWith(a, StringComparison.OrdinalIgnoreCase));
     }
 
+    /// <summary>
+    /// Surfaces an unevaluatable freshness policy while the author is still looking at it, rather than
+    /// leaving it to show up as an <c>Unknown</c> verdict on a monitoring page nobody is watching yet.
+    /// <para>
+    /// A warning rather than an error, deliberately. The policy does not affect what the pipeline does to
+    /// data; refusing to run a nightly load over a mistyped deadline would trade a monitoring gap for an
+    /// outage.
+    /// </para>
+    /// </summary>
+    private static void ValidateFreshness(
+        string? nodeId, PipelineFreshnessPolicy? policy, List<PipelineValidationIssue> issues)
+    {
+        if (policy?.Validate() is not { } problem) return;
+
+        var where = nodeId is null ? "The pipeline's default freshness policy" : "This step's freshness policy";
+
+        issues.Add(new(nodeId, PipelineIssueCodes.FreshnessInvalid,
+            $"{where} cannot be checked: {problem}", PipelineIssueSeverity.Warning));
+    }
+
     /// <summary>Catches typos like <c>{{ rnu.date }}</c> at save time instead of mid-run.</summary>
     private static void ValidateTokenRoots(PipelineNodeDef node, List<PipelineValidationIssue> issues)
     {
@@ -948,6 +973,13 @@ public static class PipelineIssueCodes
 
     public const string TokenUnknownRoot = "token.unknownRoot";
     public const string ColumnMissing = "column.missing";
+
+    /// <summary>
+    /// A freshness policy that cannot be evaluated. A <b>warning</b>, not an error: the policy is
+    /// monitoring, and a graph that loads real data every night must not be blocked from running because
+    /// somebody mistyped a deadline.
+    /// </summary>
+    public const string FreshnessInvalid = "freshness.invalid";
 }
 
 /// <summary>A validation finding. <c>NodeId</c> lets the editor highlight the offending step.</summary>

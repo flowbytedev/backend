@@ -31,7 +31,24 @@ public interface ICompanySettingsService
     /// supported value (falls back to <see cref="ExportDateFormats.Default"/>).
     /// </summary>
     Task<string> GetExportDateFormatAsync(string companyId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Cached read for the freshness sweep: whether this company is checked, and who to tell.
+    /// <para>
+    /// Cached like the others because the sweep asks once per company per pass and the answer changes
+    /// rarely — but the TTL is short enough that turning the toggle off takes effect on the next sweep
+    /// rather than the one after.
+    /// </para>
+    /// </summary>
+    Task<CompanyFreshnessSettings> GetFreshnessAsync(string companyId, CancellationToken ct = default);
 }
+
+/// <summary>
+/// What the freshness sweep needs from a company's settings. A record rather than two calls so the sweep
+/// cannot read a stale enabled flag against a fresh recipient list.
+/// </summary>
+/// <param name="Enabled">Null when the company has never chosen; the caller applies its own default.</param>
+public sealed record CompanyFreshnessSettings(bool? Enabled, string? Recipients);
 
 public class CompanySettingsService : ICompanySettingsService
 {
@@ -47,6 +64,7 @@ public class CompanySettingsService : ICompanySettingsService
 
     private static string DebugCacheKey(string companyId) => $"company-settings:debug:{companyId}";
     private static string ExportFormatCacheKey(string companyId) => $"company-settings:export-date-format:{companyId}";
+    private static string FreshnessCacheKey(string companyId) => $"company-settings:freshness:{companyId}";
 
     public async Task<CompanySettings> GetAsync(string companyId, CancellationToken ct = default)
     {
@@ -57,6 +75,10 @@ public class CompanySettingsService : ICompanySettingsService
             CompanyId = companyId,
             DebugLoggingEnabled = false,
             ExportDateFormat = ExportDateFormats.Default,
+            // Left null rather than defaulted to true: "never chosen" is a state the freshness reader
+            // resolves against the deployment default, and inventing a value here would hide that.
+            FreshnessChecksEnabled = null,
+            FreshnessAlertRecipients = null,
         };
     }
 
@@ -71,6 +93,14 @@ public class CompanySettingsService : ICompanySettingsService
             ? row?.ExportDateFormat
             : ExportDateFormats.Resolve(settings.ExportDateFormat);
 
+        // Same "null = not being changed" rule. The recipient list additionally distinguishes an empty
+        // string, which is how the UI says "nobody" — normalising that back to null is what makes
+        // "cleared" and "never set" behave identically downstream.
+        var freshnessEnabled = settings.FreshnessChecksEnabled ?? row?.FreshnessChecksEnabled;
+        var recipients = settings.FreshnessAlertRecipients == null
+            ? row?.FreshnessAlertRecipients
+            : AlertRecipients.Normalize(settings.FreshnessAlertRecipients);
+
         if (row == null)
         {
             row = new CompanySettings
@@ -78,6 +108,8 @@ public class CompanySettingsService : ICompanySettingsService
                 CompanyId = companyId,
                 DebugLoggingEnabled = settings.DebugLoggingEnabled,
                 ExportDateFormat = format,
+                FreshnessChecksEnabled = freshnessEnabled,
+                FreshnessAlertRecipients = recipients,
                 CreatedBy = userId,
                 CreatedOn = now,
                 ModifiedBy = userId,
@@ -89,16 +121,20 @@ public class CompanySettingsService : ICompanySettingsService
         {
             row.DebugLoggingEnabled = settings.DebugLoggingEnabled;
             row.ExportDateFormat = format;
+            row.FreshnessChecksEnabled = freshnessEnabled;
+            row.FreshnessAlertRecipients = recipients;
             row.ModifiedBy = userId;
             row.ModifiedOn = now;
         }
 
         await _db.SaveChangesAsync(ct);
 
-        // Refresh both cached reads so a just-saved change takes effect on the next request rather than
+        // Refresh the cached reads so a just-saved change takes effect on the next request rather than
         // after the TTL lapses.
         _cache.Set(DebugCacheKey(companyId), row.DebugLoggingEnabled, CacheTtl);
         _cache.Set(ExportFormatCacheKey(companyId), ExportDateFormats.Resolve(row.ExportDateFormat), CacheTtl);
+        _cache.Set(FreshnessCacheKey(companyId),
+            new CompanyFreshnessSettings(row.FreshnessChecksEnabled, row.FreshnessAlertRecipients), CacheTtl);
     }
 
     public Task SetDebugLoggingAsync(string companyId, bool enabled, string? userId, CancellationToken ct = default)
@@ -133,5 +169,28 @@ public class CompanySettingsService : ICompanySettingsService
         var format = ExportDateFormats.Resolve(stored);
         _cache.Set(ExportFormatCacheKey(companyId), format, CacheTtl);
         return format;
+    }
+
+    public async Task<CompanyFreshnessSettings> GetFreshnessAsync(
+        string companyId, CancellationToken ct = default)
+    {
+        // An absent company is "never chosen" rather than "disabled": the caller's default decides, and
+        // returning false here would silently switch the feature off for a caller that passed a blank id.
+        if (string.IsNullOrWhiteSpace(companyId)) return new(null, null);
+
+        if (_cache.TryGetValue(FreshnessCacheKey(companyId), out CompanyFreshnessSettings? cached)
+            && cached is not null)
+            return cached;
+
+        var stored = await _db.CompanySettings.AsNoTracking()
+            .Where(s => s.CompanyId == companyId)
+            .Select(s => new { s.FreshnessChecksEnabled, s.FreshnessAlertRecipients })
+            .FirstOrDefaultAsync(ct);
+
+        var settings = new CompanyFreshnessSettings(
+            stored?.FreshnessChecksEnabled, stored?.FreshnessAlertRecipients);
+
+        _cache.Set(FreshnessCacheKey(companyId), settings, CacheTtl);
+        return settings;
     }
 }

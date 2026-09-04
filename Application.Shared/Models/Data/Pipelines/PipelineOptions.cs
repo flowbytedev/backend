@@ -44,6 +44,22 @@ public class PipelineOptions
     /// <summary>How long step rows are kept before the retention sweep hard-deletes them.</summary>
     public int StepRetentionDays { get; set; } = 30;
 
+    // ---- Freshness ----
+
+    /// <summary>
+    /// Master switch for the freshness sweep. On by default, but a pipeline with no policy is still
+    /// unchecked — declaring one is what opts a graph in, so this only exists to silence the whole feature
+    /// without editing every graph.
+    /// </summary>
+    public bool FreshnessChecksEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Who hears about a step going stale. Empty means the sweep still records verdicts and the API still
+    /// reports them — it just sends no mail, which is the right default for a deployment that has not
+    /// decided who owns these yet.
+    /// </summary>
+    public List<string> FreshnessAlertRecipients { get; set; } = new();
+
     /// <summary>
     /// A run whose heartbeat is older than this is considered abandoned and failed.
     /// <para>

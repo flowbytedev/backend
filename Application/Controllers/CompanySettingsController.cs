@@ -36,6 +36,10 @@ public class CompanySettingsController : ControllerBase
             DebugLoggingEnabled = settings.DebugLoggingEnabled,
             // Resolved rather than raw, so the settings UI always has a concrete pattern to preselect.
             ExportDateFormat = ExportDateFormats.Resolve(settings.ExportDateFormat),
+            // Sent as the concrete value the UI should show a switch in, so an unchosen company reads as
+            // enabled there rather than as an indeterminate control.
+            FreshnessChecksEnabled = settings.FreshnessChecksEnabled ?? true,
+            FreshnessAlertRecipients = settings.FreshnessAlertRecipients ?? string.Empty,
         });
     }
 
@@ -56,6 +60,11 @@ public class CompanySettingsController : ControllerBase
         // client bug would look like a saved setting that quietly doesn't apply. Null means "unchanged".
         if (body.ExportDateFormat != null && !ExportDateFormats.IsAllowed(body.ExportDateFormat))
             return BadRequest($"'{body.ExportDateFormat}' is not a supported export date format.");
+
+        // Same reasoning as the date format: name the bad address rather than storing it and leaving the
+        // sweep to fail silently at 3am against a list nobody can see.
+        if (AlertRecipients.FirstInvalid(body.FreshnessAlertRecipients) is { } badAddress)
+            return BadRequest($"'{badAddress}' does not look like an email address.");
 
         var userId = Request.Headers["UserId"].FirstOrDefault();
         await _settings.SaveAsync(companyId, body, userId, cancellationToken);

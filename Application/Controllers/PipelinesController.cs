@@ -21,6 +21,7 @@ namespace Application.Controllers;
 public class PipelinesController(
     IPipelineService pipelines,
     IPipelineEngine engine,
+    IPipelineFreshnessService freshness,
     IServiceProvider serviceProvider,
     IConfiguration configuration) : ControllerBase
 {
@@ -280,6 +281,24 @@ public class PipelinesController(
 
         var step = await pipelines.GetStepAsync(companyId, runId, nodeId, HttpContext.RequestAborted);
         return step is null ? NotFound() : Ok(step);
+    }
+
+    /// <summary>
+    /// Freshness verdict per step: whether each one produced its output as recently as the graph's policy
+    /// says it must, and which of the late ones are causes rather than consequences.
+    /// <para>
+    /// Computed on request rather than read from the sweep's last pass. The sweep runs hourly and owns
+    /// alerting; a page that showed its verdict would be up to an hour behind, and "the freshness page is
+    /// stale" is a hard thing to explain.
+    /// </para>
+    /// </summary>
+    [HttpGet("{id}/freshness")]
+    public async Task<ActionResult<PipelineFreshnessReport>> Freshness(string id)
+    {
+        if (!TryContext(out var companyId, out _, out var failure)) return failure!;
+
+        var report = await freshness.EvaluateAsync(companyId, id, HttpContext.RequestAborted);
+        return report is null ? NotFound() : Ok(report);
     }
 
     /// <summary>

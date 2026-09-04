@@ -216,6 +216,14 @@ public class PipelineService(ApplicationDbContext db, PipelineOptions options) :
 
         if (state.Count > 0) db.PipelineState.RemoveRange(state);
 
+        // Same reasoning for freshness rows, with a sharper failure if they linger: a new pipeline reusing
+        // the id would start out looking perfectly fresh on the strength of a deleted pipeline's runs.
+        var freshness = await db.PipelineNodeFreshness
+            .Where(x => x.CompanyId == companyId && x.PipelineId == id)
+            .ToListAsync(ct);
+
+        if (freshness.Count > 0) db.PipelineNodeFreshness.RemoveRange(freshness);
+
         db.Pipeline.Remove(pipeline);
         await db.SaveChangesAsync(ct);
         return true;

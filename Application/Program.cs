@@ -288,6 +288,10 @@ builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineS
 // The web app only ever ENQUEUES this; the scheduler executes it. Registered here so Hangfire can
 // serialize the call, and because "Run now" from the editor goes through the same wrapper as a cron fire.
 builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.PipelineJob>();
+// Read-only here: the web app reports freshness verdicts, the scheduler's sweep is what evaluates and
+// alerts on them. Same service either way — the evaluation is a pure function of graph, state and clock.
+builder.Services.AddScoped<Application.Shared.Services.Data.Pipelines.IPipelineFreshnessService,
+    Application.Shared.Services.Data.Pipelines.PipelineFreshnessService>();
 builder.Services.AddScoped<ICommentService, CommentService>();
 builder.Services.AddScoped<IUserPreferencesService, UserPreferencesService>();
 builder.Services.AddScoped<IUserSearchService, UserSearchService>();

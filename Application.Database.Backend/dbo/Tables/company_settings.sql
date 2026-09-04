@@ -5,6 +5,13 @@ CREATE TABLE [dbo].[company_settings] (
     -- Date pattern used when writing dates into CSV exports (e.g. 'dd/MM/yyyy'). NULL means "not chosen
     -- yet" and the app falls back to its dd/MM/yyyy default, so existing rows need no backfill.
     [export_date_format]    NVARCHAR (20)  NULL,
+    -- Whether this company's pipelines are checked against their freshness policies. NULL means "not
+    -- chosen yet" and reads as enabled, so existing rows need no backfill. Subordinate to the
+    -- Pipelines:FreshnessChecksEnabled deployment kill switch.
+    [freshness_checks_enabled]   BIT            NULL,
+    -- ';'-separated emails for stale-step alerts. NULL/empty falls back to
+    -- Pipelines:FreshnessAlertRecipients; empty everywhere means verdicts are recorded but no mail is sent.
+    [freshness_alert_recipients] NVARCHAR (1000) NULL,
     [created_on]            DATETIME2 (7)  NULL,
     [modified_on]           DATETIME2 (7)  NULL,
     [created_by]            NVARCHAR (MAX) NULL,

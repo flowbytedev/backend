@@ -97,6 +97,33 @@
                     </label>
                 </div>
             </details>
+
+            <details class="pl-group">
+                <summary>Freshness</summary>
+                <div class="pl-group-body">
+                    <div class="field-help" style="margin-bottom:8px;">
+                        How recently every step must have produced its output. Applies to each step in the
+                        pipeline; individual steps can tighten it or opt out under their own
+                        <strong>Advanced</strong> section.
+                    </div>
+
+                    <div class="field">
+                        <label class="field-label">Check that every step</label>
+                        <select class="select" @onchange="e => SetFreshnessMode(null, e.Value?.ToString())">
+                            @foreach (var mode in FreshnessModes)
+                            {
+                                <option value="@mode.Key" selected="@(ModeOf(Settings.Freshness) == mode.Key)">
+                                    @mode.Value
+                                </option>
+                            }
+                        </select>
+                    </div>
+
+                    <PipelineFreshnessFields Policy="Settings.Freshness"
+                                             InheritedZoneId="@TimeZone"
+                                             OnChanged="() => Committed(null)" />
+                </div>
+            </details>
         }
         else if (_spec is null)
         {
@@ -374,6 +401,40 @@
                             Only a transient failure is retried — a busy dataset or an unreachable source.
                         </div>
                     </div>
+
+                    <div class="field">
+                        <label class="field-label">Freshness</label>
+                        <select class="select" @onchange="e => SetFreshnessMode(Node, e.Value?.ToString())">
+                            <option value="@InheritMode" selected="@(Node.Freshness is null)">
+                                Use the pipeline setting
+                            </option>
+                            @foreach (var mode in FreshnessModes)
+                            {
+                                <option value="@mode.Key"
+                                        selected="@(Node.Freshness is not null && ModeOf(Node.Freshness) == mode.Key)">
+                                    @mode.Value
+                                </option>
+                            }
+                        </select>
+                        <div class="field-help">
+                            @if (Node.Freshness is null && Settings.Freshness?.IsActive == true)
+                            {
+                                <span>Inheriting: @Describe(Settings.Freshness)</span>
+                            }
+                            else if (Node.Freshness is null)
+                            {
+                                <span>The pipeline has no freshness policy, so this step is not checked.</span>
+                            }
+                            else
+                            {
+                                <span>Overrides the pipeline setting for this step only.</span>
+                            }
+                        </div>
+                    </div>
+
+                    <PipelineFreshnessFields Policy="Node.Freshness"
+                                             InheritedZoneId="@TimeZone"
+                                             OnChanged="() => Committed(Node)" />
                 </div>
             </details>
 
@@ -588,6 +649,117 @@
         Settings.FailOnEmptySource = !Settings.FailOnEmptySource;
         await OnSettingsChanged.InvokeAsync();
     }
+
+    // ---------------- freshness ----------------
+
+    /// <summary>Node-level only: "no policy of my own, take the pipeline's".</summary>
+    private const string InheritMode = "inherit";
+
+    private const string OffMode = "off";
+    private const string LagMode = "lag";
+    private const string CronMode = "cron";
+
+    /// <summary>
+    /// The three states a policy can be in, in the order the dropdown lists them. "Off" is a real stored
+    /// policy with <c>Enabled = false</c>, not the absence of one — that distinction is what lets a step
+    /// opt out of an inherited default.
+    /// </summary>
+    private static readonly List<KeyValuePair<string, string>> FreshnessModes =
+    [
+        new(OffMode, "Not checked"),
+        new(LagMode, "Must have run recently"),
+        new(CronMode, "Must have run by a deadline")
+    ];
+
+    private static string ModeOf(PipelineFreshnessPolicy? policy) => policy switch
+    {
+        null or { Enabled: false } => OffMode,
+        { MaxLagMinutes: not null } => LagMode,
+        { Cron: not null and not "" } => CronMode,
+        _ => OffMode
+    };
+
+    /// <summary>The policy being edited: the node's own, or the pipeline default when node is null.</summary>
+    private PipelineFreshnessPolicy? PolicyFor(PipelineNodeDef? node) =>
+        node is null ? Settings.Freshness : node.Freshness;
+
+    private async Task SetFreshnessMode(PipelineNodeDef? node, string? mode)
+    {
+        if (node is not null && mode == InheritMode)
+        {
+            // Null, not disabled: the step goes back to following the pipeline. Storing Enabled=false here
+            // would silently keep it excluded after somebody set a pipeline-wide policy.
+            node.Freshness = null;
+            await Edited(node);
+            return;
+        }
+
+        var existing = PolicyFor(node);
+
+        // Carry the grace and zone across a mode switch, and keep whichever bound the new mode uses. A
+        // person toggling lag/deadline to compare them should not lose what they typed.
+        var policy = new PipelineFreshnessPolicy
+        {
+            Enabled = mode != OffMode,
+            GraceMinutes = existing?.GraceMinutes ?? new PipelineFreshnessPolicy().GraceMinutes,
+            TimeZone = existing?.TimeZone,
+            MaxLagMinutes = mode == LagMode ? existing?.MaxLagMinutes ?? 60 : null,
+            Cron = mode == CronMode ? existing?.Cron ?? "0 6 * * *" : null
+        };
+
+        if (node is null)
+        {
+            // An "off" pipeline default is stored as null rather than a disabled policy: there is nothing
+            // above it to opt out of, so a disabled one would just be noise in the document and the YAML.
+            Settings.Freshness = mode == OffMode ? null : policy;
+            await OnSettingsChanged.InvokeAsync();
+            return;
+        }
+
+        node.Freshness = policy;
+        await Edited(node);
+    }
+
+    private async Task SetFreshnessLag(PipelineNodeDef? node, string? value)
+    {
+        if (PolicyFor(node) is not { } policy) return;
+        if (int.TryParse(value, out var minutes) && minutes > 0) policy.MaxLagMinutes = minutes;
+        await Committed(node);
+    }
+
+    private async Task SetFreshnessCron(PipelineNodeDef? node, string? value)
+    {
+        if (PolicyFor(node) is not { } policy) return;
+        policy.Cron = string.IsNullOrWhiteSpace(value) ? null : value!.Trim();
+        await Committed(node);
+    }
+
+    private async Task SetFreshnessGrace(PipelineNodeDef? node, string? value)
+    {
+        if (PolicyFor(node) is not { } policy) return;
+        if (int.TryParse(value, out var minutes) && minutes >= 0) policy.GraceMinutes = minutes;
+        await Committed(node);
+    }
+
+    private async Task SetFreshnessZone(PipelineNodeDef? node, string? value)
+    {
+        if (PolicyFor(node) is not { } policy) return;
+        policy.TimeZone = string.IsNullOrWhiteSpace(value) ? null : value;
+        await Committed(node);
+    }
+
+    private Task Committed(PipelineNodeDef? node) =>
+        node is null ? OnSettingsChanged.InvokeAsync() : Edited(node);
+
+    private Task Edited(PipelineNodeDef node) => OnNodeEdited.InvokeAsync("freshness:" + node.Id);
+
+    /// <summary>Plain-language summary of a policy, for the inherited-value hint on a step.</summary>
+    private string Describe(PipelineFreshnessPolicy policy) => policy switch
+    {
+        { MaxLagMinutes: { } lag } => $"must have run within {lag} min",
+        { Cron: { Length: > 0 } cron } => $"due on '{cron}' (+{policy.GraceMinutes} min grace)",
+        _ => "not checked"
+    };
 
     // ---------------- structured editors ----------------
 

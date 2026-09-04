@@ -42,7 +42,7 @@ public static class PipelineYaml
     /// <summary>Keys on a step that describe structure rather than configuration.</summary>
     private static readonly HashSet<string> ReservedKeys = new(StringComparer.OrdinalIgnoreCase)
     {
-        "id", "type", "label", "from", "onError", "retry", "timeoutSeconds"
+        "id", "type", "label", "from", "onError", "retry", "timeoutSeconds", "freshness"
     };
 
     private static ISerializer Serializer => new SerializerBuilder()
@@ -104,6 +104,8 @@ public static class PipelineYaml
                 };
             }
 
+            if (FreshnessToMap(node.Freshness) is { } freshness) step["freshness"] = freshness;
+
             steps.Add(step);
         }
 
@@ -122,7 +124,56 @@ public static class PipelineYaml
         if (settings.FailOnEmptySource != defaults.FailOnEmptySource)
             map["failOnEmptySource"] = settings.FailOnEmptySource;
 
+        if (FreshnessToMap(settings.Freshness) is { } freshness) map["freshness"] = freshness;
+
         return map;
+    }
+
+    /// <summary>
+    /// A freshness policy as a YAML map, or null when there is nothing to write.
+    /// <para>
+    /// <c>enabled</c> is emitted only when false, because that is the only case it carries information: an
+    /// explicit opt-out. Writing <c>enabled: true</c> on every policy would double the size of the block
+    /// and say nothing.
+    /// </para>
+    /// </summary>
+    private static Dictionary<string, object?>? FreshnessToMap(PipelineFreshnessPolicy? policy)
+    {
+        if (policy is null) return null;
+
+        var map = new Dictionary<string, object?>();
+        var defaults = new PipelineFreshnessPolicy();
+
+        if (!policy.Enabled) map["enabled"] = false;
+        if (policy.MaxLagMinutes is { } lag) map["maxLagMinutes"] = lag;
+        if (!string.IsNullOrWhiteSpace(policy.Cron)) map["cron"] = policy.Cron;
+        if (policy.GraceMinutes != defaults.GraceMinutes) map["graceMinutes"] = policy.GraceMinutes;
+        if (!string.IsNullOrWhiteSpace(policy.TimeZone)) map["timeZone"] = policy.TimeZone;
+
+        // An all-defaults policy round-trips to nothing rather than to an empty map, which YamlDotNet would
+        // emit as `freshness: {}` — a line that reads like a setting and is not one.
+        return map.Count > 0 ? map : null;
+    }
+
+    /// <summary>The inverse. Returns null when the key is absent or is not a map.</summary>
+    private static PipelineFreshnessPolicy? ReadFreshness(object? value)
+    {
+        if (value is not Dictionary<object, object?> map) return null;
+
+        var policy = new PipelineFreshnessPolicy();
+
+        if (Get(map, "enabled") is { } enabled && TryBool(enabled, out var isEnabled))
+            policy.Enabled = isEnabled;
+        if (Get(map, "maxLagMinutes") is { } lag && TryInt(lag, out var maxLag))
+            policy.MaxLagMinutes = maxLag;
+        if (Text(Get(map, "cron")) is { Length: > 0 } cron)
+            policy.Cron = cron;
+        if (Get(map, "graceMinutes") is { } grace && TryInt(grace, out var graceMinutes))
+            policy.GraceMinutes = graceMinutes;
+        if (Text(Get(map, "timeZone")) is { Length: > 0 } zone)
+            policy.TimeZone = zone;
+
+        return policy;
     }
 
     /// <summary>
@@ -268,6 +319,8 @@ public static class PipelineYaml
                     node.Retry.BackoffMs = backoffMs;
             }
 
+            node.Freshness = ReadFreshness(Get(step, "freshness"));
+
             var config = new JsonObject();
             foreach (var (rawKey, rawValue) in step)
             {
@@ -354,6 +407,7 @@ public static class PipelineYaml
             target.TimeoutSeconds = seconds;
         if (Get(map, "failOnEmptySource") is { } fail && TryBool(fail, out var failOnEmpty))
             target.FailOnEmptySource = failOnEmpty;
+        target.Freshness = ReadFreshness(Get(map, "freshness"));
     }
 
     // ---------------------------------------------------------------- helpers
