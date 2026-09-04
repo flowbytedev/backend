@@ -194,6 +194,8 @@ else
                                Tables="_tables"
                                Name="@_pipeline.Name"
                                Description="@_pipeline.Description"
+                               Group="@_pipeline.Group"
+                               Groups="_groups"
                                IsEnabled="_pipeline.IsEnabled"
                                ApiEnabled="_pipeline.ApiEnabled"
                                Cron="@_pipeline.CronExpression"
@@ -202,6 +204,7 @@ else
                                Settings="_graph.Settings"
                                OnNameChanged="v => { _pipeline.Name = v; MarkDirty(); }"
                                OnDescriptionChanged="v => { _pipeline.Description = v; MarkDirty(); }"
+                               OnGroupChanged="v => { _pipeline.Group = v; MarkDirty(); }"
                                OnEnabledChanged="v => { _pipeline.IsEnabled = v; MarkDirty(); }"
                                OnApiEnabledChanged="v => { _pipeline.ApiEnabled = v; MarkDirty(); }"
                                OnCronChanged="v => { _pipeline.CronExpression = v; MarkDirty(); }"
@@ -632,6 +635,9 @@ else
     private List<PipelineColumn> _upstreamColumns = new();
     private List<PipelineFieldOption> _datasets = new();
 
+    /// <summary>Group names already in use, offered in the inspector. Empty is not an error.</summary>
+    private List<string> _groups = new();
+
     /// <summary>
     /// Database entities that have a write credential, by entity id, with what that credential allows.
     /// <para>
@@ -780,6 +786,12 @@ else
 
     private async Task LoadPickerOptionsAsync()
     {
+        try
+        {
+            _groups = await _httpClient.GetFromJsonAsync<List<string>>("api/pipelines/groups") ?? new();
+        }
+        catch { _groups = new(); }
+
         // Loaded before the datasets, because whether a dataset can be written to is a fact about the
         // database behind it. A failure here leaves every dataset looking writable — see WriteBlock.
         await LoadWriteCredentialsAsync();
@@ -1372,6 +1384,7 @@ else
             {
                 Name = _pipeline.Name,
                 Description = _pipeline.Description,
+                Group = _pipeline.Group,
                 GraphJson = _pipeline.GraphJson,
                 IsEnabled = _pipeline.IsEnabled,
                 ApiEnabled = _pipeline.ApiEnabled,

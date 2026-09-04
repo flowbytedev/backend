@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Application.Shared.Models.Data.Pipelines;
 
@@ -30,6 +31,23 @@ public class Pipeline
 
     [StringLength(500)]
     public string? Description { get; set; }
+
+    /// <summary>
+    /// Free-text grouping for the list page — "Finance", "Nightly loads". Null means ungrouped, which is
+    /// what every existing pipeline is and a perfectly good state to stay in.
+    /// <para>
+    /// A column of text rather than a group table with an FK, matching <c>MonitoredAsset.Group</c>. There
+    /// is no property of a group beyond its name, nothing joins on one, and a table would mean managing
+    /// group rows — creating, renaming, deleting the empty ones — to solve a problem nobody has.
+    /// </para>
+    /// <para>
+    /// Mapped explicitly because the convention would produce <c>group</c>, which is a T-SQL keyword and
+    /// then needs bracketing in every piece of hand-written SQL that ever touches this table.
+    /// </para>
+    /// </summary>
+    [StringLength(100)]
+    [Column("group_name")]
+    public string? Group { get; set; }
 
     /// <summary>The graph document. See <see cref="PipelineGraph"/>.</summary>
     public string? GraphJson { get; set; }

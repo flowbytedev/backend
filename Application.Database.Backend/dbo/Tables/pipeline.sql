@@ -3,6 +3,9 @@ CREATE TABLE [dbo].[pipeline] (
     [company_id]       NVARCHAR (10)  NOT NULL,
     [name]             NVARCHAR (150) NOT NULL,
     [description]      NVARCHAR (500) NULL,
+    -- Free-text grouping for the list page. NULL means ungrouped, which is what every existing row
+    -- is, so no backfill. Named group_name rather than group: the latter is a T-SQL keyword.
+    [group_name]       NVARCHAR (100) NULL,
     [graph_json]       NVARCHAR (MAX) NULL,
     [schema_version]   INT            DEFAULT ((1)) NOT NULL,
     [is_enabled]       BIT            DEFAULT ((1)) NOT NULL,

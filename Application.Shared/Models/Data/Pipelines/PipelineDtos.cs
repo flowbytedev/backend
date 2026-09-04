@@ -12,6 +12,9 @@ public class PipelineDto
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
 
+    /// <summary>Free-text group, or null for ungrouped. The list page sections on this.</summary>
+    public string? Group { get; set; }
+
     public bool IsEnabled { get; set; }
     public bool ApiEnabled { get; set; }
     public string? CronExpression { get; set; }
@@ -62,6 +65,10 @@ public class PipelineSaveRequest
 {
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
+
+    /// <summary>Free-text group. Empty or whitespace stores null, so "cleared" and "never set" match.</summary>
+    public string? Group { get; set; }
+
     public string? GraphJson { get; set; }
 
     public bool IsEnabled { get; set; } = true;
@@ -261,6 +268,12 @@ public class PipelineYamlResponse
 }
 
 /// <summary>Body for starting a run.</summary>
+/// <summary>Body of the refile-into-a-group call. Empty or whitespace means "no group".</summary>
+public class PipelineGroupRequest
+{
+    public string? Group { get; set; }
+}
+
 public class PipelineRunRequest
 {
     /// <summary>Values available to step config as <c>{{ params.* }}</c>.</summary>

@@ -37,6 +37,35 @@ public class PipelinesController(
         return Ok(all);
     }
 
+    /// <summary>
+    /// The group names already in use, for the "existing groups" datalist on the editor and the new-pipeline
+    /// dialog. Offering them is what keeps a company from accumulating Finance, finance and "Finance ".
+    /// </summary>
+    [HttpGet("groups")]
+    public async Task<ActionResult<IEnumerable<string>>> Groups()
+    {
+        if (!TryContext(out var companyId, out _, out var failure)) return failure!;
+        return Ok(await pipelines.GetGroupsAsync(companyId, HttpContext.RequestAborted));
+    }
+
+    /// <summary>
+    /// Refiles a pipeline into a group, or out of one with an empty value.
+    /// <para>
+    /// Separate from the full save because that one carries the graph: a list page sending a partial body
+    /// to <c>PUT api/pipelines/{id}</c> would blank it.
+    /// </para>
+    /// </summary>
+    [HttpPut("{id}/group")]
+    public async Task<ActionResult> SetGroup(string id, [FromBody] PipelineGroupRequest? body)
+    {
+        if (!TryContext(out var companyId, out var userId, out var failure)) return failure!;
+
+        var moved = await pipelines.SetGroupAsync(
+            companyId, userId, id, body?.Group, HttpContext.RequestAborted);
+
+        return moved ? Ok() : NotFound("That pipeline no longer exists.");
+    }
+
     [HttpGet("{id}")]
     public async Task<ActionResult<PipelineDetailDto>> Get(string id)
     {

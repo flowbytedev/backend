@@ -37,8 +37,25 @@ else
             <div class="action-bar">
                 <input class="input" style="max-width:280px;" placeholder="Filter pipelines…"
                        value="@_filter" @oninput="e => _filter = e.Value?.ToString() ?? string.Empty" />
+
+                @if (_groupNames.Count > 0)
+                {
+                    <select class="select" style="max-width:200px;" value="@_groupFilter"
+                            @onchange="e => _groupFilter = e.Value?.ToString() ?? string.Empty">
+                        <option value="">All groups</option>
+                        @foreach (var group in _groupNames)
+                        {
+                            <option value="@group" selected="@(_groupFilter == group)">@group</option>
+                        }
+                        <option value="@Ungrouped" selected="@(_groupFilter == Ungrouped)">@Ungrouped</option>
+                    </select>
+                }
+
                 <span class="action-bar-spacer"></span>
-                <button class="btn btn-primary" @onclick="StartCreate">New pipeline</button>
+                <button class="btn btn-primary" @onclick="StartCreate">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                    New pipeline
+                </button>
             </div>
 
             @if (_loading)
@@ -66,96 +83,230 @@ else
             }
             else
             {
-                <div class="card">
-                    <div class="table-wrap">
-                        <table class="table table-clickable">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Steps</th>
-                                    <th>Schedule</th>
-                                    <th>Last run</th>
-                                    <th>Rows</th>
-                                    <th class="table-actions"></th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                @foreach (var pipeline in Filtered)
-                                {
-                                    var item = pipeline;
-                                    <tr @key="item.Id" @onclick="() => Open(item.Id)">
-                                        <td>
-                                            <div style="font-weight:600;">@item.Name</div>
-                                            @if (!string.IsNullOrWhiteSpace(item.Description))
-                                            {
-                                                <div style="font-size:11.5px;color:var(--text-muted);">
-                                                    @item.Description
-                                                </div>
-                                            }
-                                            @if (!item.Valid)
-                                            {
-                                                <span class="badge badge-danger" style="margin-top:3px;">
-                                                    @item.ErrorCount problem@(item.ErrorCount == 1 ? "" : "s")
-                                                </span>
-                                            }
-                                        </td>
-                                        <td>@item.NodeCount</td>
-                                        <td>
-                                            <span class="badge @ScheduleBadge(item.ScheduleState)">
-                                                @item.ScheduleState
-                                            </span>
-                                            @if (!string.IsNullOrWhiteSpace(item.CronExpression))
-                                            {
-                                                <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
-                                                    @item.CronExpression
-                                                </div>
-                                            }
-                                            @if (item.NextRunAt is { } next)
-                                            {
-                                                <div style="font-size:11px;color:var(--text-muted);">
-                                                    next @next.ToLocalTime().ToString("dd MMM HH:mm")
-                                                </div>
-                                            }
-                                        </td>
-                                        <td>
-                                            @if (item.LastRunAt is { } when)
-                                            {
-                                                <span class="badge @RunBadge(item.LastRunStatus)">
-                                                    @item.LastRunStatus
-                                                </span>
-                                                <div style="font-size:11px;color:var(--text-muted);">
-                                                    @when.ToLocalTime().ToString("dd MMM HH:mm")
-                                                </div>
-                                            }
-                                            else
-                                            {
-                                                <span style="color:var(--text-muted);">never</span>
-                                            }
-                                        </td>
-                                        <td style="font-family:var(--font-mono);font-size:12px;">
-                                            @(item.LastRunRows?.ToString("N0") ?? "—")
-                                        </td>
-                                        <td class="table-actions" @onclick:stopPropagation="true">
-                                            <button class="btn btn-ghost btn-sm" @onclick="() => OpenRuns(item.Id)">
-                                                History
-                                            </button>
-                                            <button class="btn btn-ghost btn-sm" @onclick="() => Duplicate(item.Id)">
-                                                Duplicate
-                                            </button>
-                                            <button class="btn btn-ghost btn-sm" style="color:var(--danger);"
-                                                    @onclick="() => AskDelete(item)">
-                                                Delete
-                                            </button>
-                                        </td>
-                                    </tr>
-                                }
-                            </tbody>
-                        </table>
+                @* One table per group rather than one table with header rows: a header row inside a
+                   tbody has to span every column and stops being a heading the moment somebody sorts or
+                   the columns change. Separate cards also let a group be collapsed without leaving a
+                   ragged table behind. *@
+                @foreach (var section in Sections)
+                {
+                    var sectionName = section.Key;
+                    var collapsed = _collapsed.Contains(sectionName);
+
+                    <div class="card" style="margin-bottom:12px;">
+                        <button class="pl-group-head" @onclick="() => ToggleGroup(sectionName)">
+                            <span class="pl-group-caret @(collapsed ? "is-collapsed" : "")">▾</span>
+                            <span class="pl-group-icon"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span>
+                            <span class="pl-group-name">@sectionName</span>
+                            <span class="badge badge-neutral">@section.Count()</span>
+                        </button>
+
+                        @if (!collapsed)
+                        {
+                            <div class="table-wrap">
+                                <table class="table table-clickable">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Steps</th>
+                                            <th>Schedule</th>
+                                            <th>Last run</th>
+                                            <th>Rows</th>
+                                            <th class="table-actions"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var pipeline in section)
+                                        {
+                                            var item = pipeline;
+                                            <tr @key="item.Id" @onclick="() => Open(item.Id)"
+                                        @oncontextmenu="e => OnRowContextMenu(e, item)"
+                                        @oncontextmenu:preventDefault="true">
+                                                <td>
+                                                    <div style="font-weight:600;">@item.Name</div>
+                                                    @if (!string.IsNullOrWhiteSpace(item.Description))
+                                                    {
+                                                        <div style="font-size:11.5px;color:var(--text-muted);">
+                                                            @item.Description
+                                                        </div>
+                                                    }
+                                                    @if (!item.Valid)
+                                                    {
+                                                        <span class="badge badge-danger" style="margin-top:3px;">
+                                                            @item.ErrorCount problem@(item.ErrorCount == 1 ? "" : "s")
+                                                        </span>
+                                                    }
+                                                </td>
+                                                <td>@item.NodeCount</td>
+                                                <td>
+                                                    <span class="badge @ScheduleBadge(item.ScheduleState)">
+                                                        @item.ScheduleState
+                                                    </span>
+                                                    @if (!string.IsNullOrWhiteSpace(item.CronExpression))
+                                                    {
+                                                        <div style="font-family:var(--font-mono);font-size:11px;color:var(--text-muted);">
+                                                            @item.CronExpression
+                                                        </div>
+                                                    }
+                                                    @if (item.NextRunAt is { } next)
+                                                    {
+                                                        <div style="font-size:11px;color:var(--text-muted);">
+                                                            next @next.ToLocalTime().ToString("dd MMM HH:mm")
+                                                        </div>
+                                                    }
+                                                </td>
+                                                <td>
+                                                    @if (item.LastRunAt is { } when)
+                                                    {
+                                                        <span class="badge @RunBadge(item.LastRunStatus)">
+                                                            @item.LastRunStatus
+                                                        </span>
+                                                        <div style="font-size:11px;color:var(--text-muted);">
+                                                            @when.ToLocalTime().ToString("dd MMM HH:mm")
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span style="color:var(--text-muted);">never</span>
+                                                    }
+                                                </td>
+                                                <td style="font-family:var(--font-mono);font-size:12px;">
+                                                    @(item.LastRunRows?.ToString("N0") ?? "—")
+                                                </td>
+                                                <td class="table-actions" @onclick:stopPropagation="true">
+                                                    @* Icons rather than words, matching the datasets list.
+                                                       Every one keeps a title, because an icon on its own
+                                                       is a guess for anyone who has not used the page. *@
+                                                    <div style="display:inline-flex;gap:2px;">
+                                                        <button class="btn-icon" title="Run history"
+                                                                @onclick="() => OpenRuns(item.Id)">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+                                                        </button>
+                                                        <button class="btn-icon" title="Duplicate"
+                                                                @onclick="() => Duplicate(item.Id)">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                                                        </button>
+                                                        <button class="btn-icon btn-icon-delete" title="Delete"
+                                                                @onclick="() => AskDelete(item)">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                                                        </button>
+                                                        <button class="btn-icon" title="More actions"
+                                                                @onclick="e => OpenActionsMenu(e, item)">
+                                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
                     </div>
-                </div>
+                }
             }
         </div>
     </div>
+
+    @* ---------- row context menu ---------- *@
+    @if (_menuFor is not null)
+    {
+        var target = _menuFor;
+        var currentGroup = GroupOf(target);
+
+        <div class="ctx-backdrop" @onclick="CloseMenu"
+             @oncontextmenu="CloseMenu" @oncontextmenu:preventDefault="true"></div>
+        <div class="ctx-menu pl-ctx" style="left:@(_menuX)px; top:@(_menuY)px;">
+            <button class="ctx-item" @onclick="() => { CloseMenu(); Open(target.Id); }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                Open in editor
+            </button>
+            <button class="ctx-item" @onclick="() => { CloseMenu(); OpenRuns(target.Id); }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l4 2"/></svg>
+                Run history
+            </button>
+            <button class="ctx-item" @onclick="() => { CloseMenu(); _ = Duplicate(target.Id); }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                Duplicate
+            </button>
+
+            <div class="ctx-sep"></div>
+            <div class="pl-ctx-label">Move to group</div>
+
+            @* The groups are listed here rather than behind a submenu: refiling is one click, and a
+               submenu would need hover timing and edge-of-screen handling to do the same job. *@
+            <div class="pl-ctx-groups">
+                @foreach (var group in _groupNames)
+                {
+                    var name = group;
+                    var isCurrent = string.Equals(currentGroup, name, StringComparison.OrdinalIgnoreCase);
+
+                    <button class="ctx-item @(isCurrent ? "is-current" : "")"
+                            @onclick="() => { CloseMenu(); _ = MoveToGroup(target, name); }">
+                        @if (isCurrent)
+                        {
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        }
+                        else
+                        {
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+                        }
+                        @name
+                    </button>
+                }
+            </div>
+
+            <button class="ctx-item" @onclick="() => { CloseMenu(); StartNewGroup(target); }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><line x1="12" x2="12" y1="10" y2="16"/><line x1="9" x2="15" y1="13" y2="13"/></svg>
+                New group…
+            </button>
+
+            @if (!string.IsNullOrWhiteSpace(target.Group))
+            {
+                <button class="ctx-item" @onclick="() => { CloseMenu(); _ = MoveToGroup(target, null); }">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><line x1="2" x2="22" y1="2" y2="22"/></svg>
+                    Remove from group
+                </button>
+            }
+
+            <div class="ctx-sep"></div>
+            <button class="ctx-item ctx-item-danger" @onclick="() => { CloseMenu(); AskDelete(target); }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                Delete pipeline
+            </button>
+        </div>
+    }
+
+    @* ---------- new group ---------- *@
+    @if (_groupingPipeline is not null)
+    {
+        <div class="fb-modal-backdrop" @onclick="() => _groupingPipeline = null">
+            <div class="fb-modal" style="max-width:420px;" @onclick:stopPropagation="true">
+                <div class="fb-modal-head"><span class="fb-modal-title">Move to a new group</span></div>
+                <div class="fb-modal-body sc">
+                    <div class="field">
+                        <label class="field-label">Group</label>
+                        <input class="input" list="pl-move-groups" maxlength="100" @bind="_moveGroup"
+                               @bind:event="oninput" placeholder="Finance" />
+                        <datalist id="pl-move-groups">
+                            @foreach (var group in _groupNames)
+                            {
+                                <option value="@group"></option>
+                            }
+                        </datalist>
+                        <div class="field-help">
+                            Moving <strong>@_groupingPipeline.Name</strong>. Typing a name that does not
+                            exist creates it.
+                        </div>
+                    </div>
+                </div>
+                <div class="fb-modal-foot">
+                    <button class="btn btn-secondary" @onclick="() => _groupingPipeline = null">Cancel</button>
+                    <button class="btn btn-primary" disabled="@string.IsNullOrWhiteSpace(_moveGroup)"
+                            @onclick="ConfirmNewGroup">Move</button>
+                </div>
+            </div>
+        </div>
+    }
 
     @if (_creating)
     {
@@ -172,6 +323,18 @@ else
                         <label class="field-label">Description</label>
                         <textarea class="textarea" @bind="_newDescription"
                                   placeholder="What this pipeline is for."></textarea>
+                    </div>
+                    <div class="field">
+                        <label class="field-label">Group</label>
+                        <input class="input" list="pl-new-groups" maxlength="100" placeholder="Ungrouped"
+                               @bind="_newGroup" @bind:event="oninput" />
+                        <datalist id="pl-new-groups">
+                            @foreach (var group in _groupNames)
+                            {
+                                <option value="@group"></option>
+                            }
+                        </datalist>
+                        <div class="field-help">Optional. Sections this pipeline in the list.</div>
                     </div>
                 </div>
                 <div class="fb-modal-foot">
@@ -214,18 +377,140 @@ else
     private bool _creating;
     private bool _saving;
     private string _filter = string.Empty;
+    private string _groupFilter = string.Empty;
     private string _newName = string.Empty;
     private string? _newDescription;
+    private string? _newGroup;
     private PipelineDto? _deleting;
 
     private List<PipelineDto> _all = new();
 
-    private List<PipelineDto> Filtered => string.IsNullOrWhiteSpace(_filter)
-        ? _all
-        : _all.Where(p =>
-            p.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)
-            || (p.Description ?? string.Empty).Contains(_filter, StringComparison.OrdinalIgnoreCase))
-          .ToList();
+    /// <summary>Collapsed sections. In-page only — not worth a round trip or a stored preference.</summary>
+    private readonly HashSet<string> _collapsed = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>What a pipeline with no group is filed under. A label, never a stored value.</summary>
+    private const string Ungrouped = "Ungrouped";
+
+    /// <summary>The groups actually in use, alphabetically. Ungrouped is not one of them.</summary>
+    private List<string> _groupNames = new();
+
+    private List<PipelineDto> Filtered
+    {
+        get
+        {
+            var rows = _all.AsEnumerable();
+
+            if (!string.IsNullOrWhiteSpace(_filter))
+            {
+                // The group is searched too, so typing "finance" finds that group's pipelines without
+                // having to know whether it is a name, a description or a group.
+                rows = rows.Where(p =>
+                    p.Name.Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                    || (p.Description ?? string.Empty).Contains(_filter, StringComparison.OrdinalIgnoreCase)
+                    || (p.Group ?? string.Empty).Contains(_filter, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (!string.IsNullOrWhiteSpace(_groupFilter))
+                rows = rows.Where(p => GroupOf(p) == _groupFilter);
+
+            return rows.ToList();
+        }
+    }
+
+    /// <summary>
+    /// The filtered rows as sections. Groups alphabetically, with Ungrouped last: it is where things end
+    /// up rather than somewhere they were put, so it does not belong above a group somebody chose.
+    /// </summary>
+    private IEnumerable<IGrouping<string, PipelineDto>> Sections =>
+        Filtered
+            .GroupBy(GroupOf, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key == Ungrouped ? 1 : 0)
+            .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+
+    private static string GroupOf(PipelineDto pipeline) =>
+        string.IsNullOrWhiteSpace(pipeline.Group) ? Ungrouped : pipeline.Group!.Trim();
+
+    private void ToggleGroup(string group)
+    {
+        if (!_collapsed.Remove(group)) _collapsed.Add(group);
+    }
+
+    // ---------------- row menu ----------------
+
+    private PipelineDto? _menuFor;
+    private double _menuX;
+    private double _menuY;
+
+    /// <summary>The pipeline being refiled while the new-group dialog is open.</summary>
+    private PipelineDto? _groupingPipeline;
+    private string? _moveGroup;
+
+    private void OnRowContextMenu(MouseEventArgs e, PipelineDto pipeline)
+    {
+        _menuFor = pipeline;
+        _menuX = e.ClientX;
+        _menuY = e.ClientY;
+    }
+
+    /// <summary>
+    /// Opened from the row's three-dot button, which sits at the far right. Anchored to the button's left
+    /// so the menu opens inward and stays on screen rather than hanging off the edge.
+    /// </summary>
+    private void OpenActionsMenu(MouseEventArgs e, PipelineDto pipeline)
+    {
+        _menuFor = pipeline;
+        _menuX = Math.Max(8, e.ClientX - 210);
+        _menuY = e.ClientY + 12;
+    }
+
+    private void CloseMenu() => _menuFor = null;
+
+    private void StartNewGroup(PipelineDto pipeline)
+    {
+        _groupingPipeline = pipeline;
+        _moveGroup = pipeline.Group;
+    }
+
+    private async Task ConfirmNewGroup()
+    {
+        var pipeline = _groupingPipeline;
+        var group = _moveGroup;
+        _groupingPipeline = null;
+
+        if (pipeline is not null) await MoveToGroup(pipeline, group);
+    }
+
+    /// <summary>
+    /// Refiles one pipeline. Its own endpoint, not the full save: that one carries the graph, so a partial
+    /// body from this page would blank it.
+    /// </summary>
+    private async Task MoveToGroup(PipelineDto pipeline, string? group)
+    {
+        var target = string.IsNullOrWhiteSpace(group) ? null : group.Trim();
+        if (string.Equals(pipeline.Group?.Trim(), target, StringComparison.OrdinalIgnoreCase)) return;
+
+        try
+        {
+            var response = await _httpClient.PutAsJsonAsync(
+                $"api/pipelines/{pipeline.Id}/group", new PipelineGroupRequest { Group = target });
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _toastService.ShowError(await response.Content.ReadAsStringAsync());
+                return;
+            }
+
+            _toastService.ShowSuccess(target is null
+                ? $"{pipeline.Name} is no longer in a group."
+                : $"{pipeline.Name} moved to {target}.");
+
+            await Load();
+        }
+        catch (Exception ex)
+        {
+            _toastService.ShowError($"Could not move it: {ex.Message}");
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -254,6 +539,24 @@ else
         try
         {
             _all = await _httpClient.GetFromJsonAsync<List<PipelineDto>>("api/pipelines") ?? new();
+
+            // Derived from the rows just loaded rather than fetched separately: the list page already has
+            // every pipeline, so a second call could only tell it something it can see.
+            _groupNames = _all
+                .Where(p => !string.IsNullOrWhiteSpace(p.Group))
+                .Select(p => p.Group!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(g => g, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            // A filter left pointing at a group that no longer exists would show an empty page with no
+            // clue why.
+            if (!string.IsNullOrWhiteSpace(_groupFilter)
+                && _groupFilter != Ungrouped
+                && !_groupNames.Contains(_groupFilter, StringComparer.OrdinalIgnoreCase))
+            {
+                _groupFilter = string.Empty;
+            }
         }
         catch (Exception ex)
         {
@@ -269,6 +572,9 @@ else
     {
         _newName = string.Empty;
         _newDescription = null;
+        // Prefilled from the group being viewed: creating a pipeline while filtered to Finance almost
+        // always means another Finance pipeline.
+        _newGroup = _groupFilter == Ungrouped ? null : _groupFilter;
         _creating = true;
     }
 
@@ -281,6 +587,7 @@ else
             {
                 Name = _newName.Trim(),
                 Description = _newDescription,
+                Group = _newGroup,
                 IsEnabled = true
             });
 
@@ -368,3 +675,36 @@ else
         _ => "badge-neutral"
     };
 }
+
+<style>
+    /* The context menu's group list. Capped and scrollable so a company with twenty groups still gets a
+       menu that fits on screen, rather than one running off the bottom. */
+    .pl-ctx-label {
+        padding: 0.3rem 0.6rem 0.2rem; font-size: 0.6875rem; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted, #a1a1aa);
+    }
+    .pl-ctx-groups { max-height: 220px; overflow-y: auto; }
+
+    /* The group this pipeline is already in. app.css greys every ctx-item icon, so the tick needs
+       saying explicitly or "where it is now" reads the same as "where it could go". */
+    .pl-ctx .ctx-item.is-current { font-weight: 600; }
+    .pl-ctx .ctx-item.is-current svg { color: var(--accent, #4f46e5) !important; }
+
+    /* The group header. A button rather than a div so it is reachable and operable from the keyboard —
+       it is the only control that collapses a section. */
+    .pl-group-head {
+        display: flex; align-items: center; gap: 8px; width: 100%;
+        padding: 10px 14px; background: none; border: none; cursor: pointer;
+        font: inherit; text-align: left; color: var(--text-primary);
+    }
+    .pl-group-head:hover { background: var(--bg-subtle, rgba(0,0,0,0.02)); }
+    .pl-group-name { font-weight: 600; font-size: 13px; }
+    .pl-group-icon { display: inline-flex; color: var(--text-muted); }
+    .pl-group-caret {
+        font-size: 11px; color: var(--text-muted); transition: transform 120ms ease;
+        display: inline-block; width: 10px;
+    }
+    .pl-group-caret.is-collapsed { transform: rotate(-90deg); }
+
+    [data-theme="dark"] .pl-group-head:hover { background: rgba(255,255,255,0.03); }
+</style>

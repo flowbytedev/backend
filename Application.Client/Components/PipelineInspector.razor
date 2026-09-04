@@ -34,6 +34,25 @@
                           @oninput="e => OnDescriptionChanged.InvokeAsync(e.Value?.ToString())"></textarea>
             </div>
 
+            <div class="field">
+                <label class="field-label">Group</label>
+                @* A datalist rather than a dropdown: the existing groups are offered, but a new one is
+                   made by typing it. A dropdown would need a separate "manage groups" screen to create
+                   the first one. *@
+                <input class="input" list="pl-pipeline-groups" maxlength="100" placeholder="Ungrouped"
+                       value="@Group"
+                       @onchange="e => OnGroupChanged.InvokeAsync(e.Value?.ToString())" />
+                <datalist id="pl-pipeline-groups">
+                    @foreach (var group in Groups)
+                    {
+                        <option value="@group"></option>
+                    }
+                </datalist>
+                <div class="field-help">
+                    Sections the pipeline list. Leave it empty and this one sits under Ungrouped.
+                </div>
+            </div>
+
             <details class="pl-group" open>
                 <summary>Triggers</summary>
                 <div class="pl-group-body">
@@ -552,6 +571,10 @@
     // Pipeline-level settings, shown when nothing is selected.
     [Parameter] public string Name { get; set; } = string.Empty;
     [Parameter] public string? Description { get; set; }
+    [Parameter] public string? Group { get; set; }
+
+    /// <summary>Groups already in use for this company, offered as suggestions.</summary>
+    [Parameter] public List<string> Groups { get; set; } = new();
     [Parameter] public bool IsEnabled { get; set; }
     [Parameter] public bool ApiEnabled { get; set; }
     [Parameter] public string? Cron { get; set; }
@@ -564,6 +587,7 @@
 
     [Parameter] public EventCallback<string> OnNameChanged { get; set; }
     [Parameter] public EventCallback<string?> OnDescriptionChanged { get; set; }
+    [Parameter] public EventCallback<string?> OnGroupChanged { get; set; }
     [Parameter] public EventCallback<bool> OnEnabledChanged { get; set; }
     [Parameter] public EventCallback<bool> OnApiEnabledChanged { get; set; }
     [Parameter] public EventCallback<string?> OnCronChanged { get; set; }

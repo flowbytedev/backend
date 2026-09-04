@@ -35,6 +35,23 @@ public interface IPipelineService
     Task<int> ResetStateAsync(string companyId, string id, CancellationToken ct = default);
     Task<PipelineSaveResult> DuplicateAsync(string companyId, string? userId, string id, CancellationToken ct = default);
 
+    /// <summary>
+    /// The group names in use, alphabetically. Feeds the "which groups already exist" datalist, which is
+    /// what stops one company ending up with Finance, finance and Finance&#160;.
+    /// </summary>
+    Task<List<string>> GetGroupsAsync(string companyId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Moves a pipeline into a group, or out of one when <paramref name="group"/> is empty.
+    /// <para>
+    /// Its own method rather than a <see cref="UpdateAsync"/> with only the group filled in, and that is
+    /// not tidiness: <c>UpdateAsync</c> assigns <c>GraphJson</c> from the request, so a caller that only
+    /// meant to refile a pipeline would blank its graph. Filing a pipeline is also not an edit to what it
+    /// does, so it deliberately does not recompile or touch the validation results.
+    /// </para>
+    /// </summary>
+    Task<bool> SetGroupAsync(string companyId, string? userId, string id, string? group, CancellationToken ct = default);
+
     /// <summary>Validates a graph without saving it. Backs the editor's live linter.</summary>
     PipelineValidateResponse Validate(PipelineValidateRequest request);
 
@@ -116,10 +133,10 @@ public class PipelineService(
         // graph_json and validation_json are projected out; see PipelineDto for why.
         var rows = await db.Pipeline.AsNoTracking()
             .Where(p => p.CompanyId == companyId)
-            .OrderBy(p => p.Name)
+            .OrderBy(p => p.Name)   // sections are ordered by the page; this keeps them stable within one
             .Select(p => new
             {
-                p.Id, p.Name, p.Description, p.IsEnabled, p.ApiEnabled, p.CronExpression, p.TimeZone,
+                p.Id, p.Name, p.Description, p.Group, p.IsEnabled, p.ApiEnabled, p.CronExpression, p.TimeZone,
                 p.NodeCount, p.Valid, p.ValidationJson, p.LastRunAt, p.LastRunStatus, p.LastRunMessage,
                 p.LastRunRows, p.RunCount, p.CreatedAt, p.CreatedBy, p.ModifiedAt
             })
@@ -133,6 +150,7 @@ public class PipelineService(
                 Id = r.Id,
                 Name = r.Name,
                 Description = r.Description,
+                Group = r.Group,
                 IsEnabled = r.IsEnabled,
                 ApiEnabled = r.ApiEnabled,
                 CronExpression = r.CronExpression,
@@ -180,6 +198,7 @@ public class PipelineService(
             CompanyId = companyId,
             Name = name,
             Description = request.Description?.Trim(),
+            Group = NormalizeGroup(request.Group),
             GraphJson = request.GraphJson ?? PipelineGraph.NewDefault().Serialize(),
             IsEnabled = request.IsEnabled,
             CreatedBy = userId,
@@ -212,6 +231,7 @@ public class PipelineService(
 
         pipeline.Name = name;
         pipeline.Description = request.Description?.Trim();
+        pipeline.Group = NormalizeGroup(request.Group);
         pipeline.GraphJson = request.GraphJson;
         pipeline.IsEnabled = request.IsEnabled;
         pipeline.ModifiedAt = DateTime.UtcNow;
@@ -284,9 +304,44 @@ public class PipelineService(
         {
             Name = name,
             Description = source.Description,
+            // Kept: a copy of a Finance pipeline is a Finance pipeline. The schedule is the thing that
+            // must not be inherited, not where it is filed.
+            Group = source.Group,
             GraphJson = source.GraphJson,
             IsEnabled = false
         }, ct);
+    }
+
+    public async Task<List<string>> GetGroupsAsync(string companyId, CancellationToken ct = default) =>
+        await db.Pipeline.AsNoTracking()
+            .Where(p => p.CompanyId == companyId && p.Group != null && p.Group != "")
+            .Select(p => p.Group!)
+            .Distinct()
+            .OrderBy(g => g)
+            .ToListAsync(ct);
+
+    public async Task<bool> SetGroupAsync(
+        string companyId, string? userId, string id, string? group, CancellationToken ct = default)
+    {
+        var pipeline = await db.Pipeline.FirstOrDefaultAsync(p => p.CompanyId == companyId && p.Id == id, ct);
+        if (pipeline is null) return false;
+
+        pipeline.Group = NormalizeGroup(group);
+        pipeline.ModifiedAt = DateTime.UtcNow;
+        pipeline.ModifiedBy = userId;
+
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>
+    /// The form to store: trimmed, or null when nothing is left. Null rather than an empty string so
+    /// "ungrouped" is one state rather than two that sort differently and read the same.
+    /// </summary>
+    private static string? NormalizeGroup(string? value)
+    {
+        var trimmed = value?.Trim();
+        return string.IsNullOrEmpty(trimmed) ? null : trimmed;
     }
 
     public PipelineValidateResponse Validate(PipelineValidateRequest request)
@@ -843,6 +898,7 @@ public class PipelineService(
             Id = p.Id,
             Name = p.Name,
             Description = p.Description,
+            Group = p.Group,
             GraphJson = p.GraphJson,
             IsEnabled = p.IsEnabled,
             ApiEnabled = p.ApiEnabled,
