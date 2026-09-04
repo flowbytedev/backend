@@ -254,6 +254,23 @@ public class PipelinesController(
         return Ok(runs);
     }
 
+    /// <summary>
+    /// The run this pipeline already has in flight, or 204 when it has none.
+    /// <para>
+    /// Asked by the editor before it queues another. Not enforcement — a second run stays allowed, because
+    /// re-running a pipeline whose source has just been fixed is a normal thing to do. This only exists so
+    /// the operator is told rather than finding out from the run list afterwards.
+    /// </para>
+    /// </summary>
+    [HttpGet("{id}/runs/active")]
+    public async Task<ActionResult<PipelineActiveRunDto>> ActiveRun(string id)
+    {
+        if (!TryContext(out var companyId, out _, out var failure)) return failure!;
+
+        var active = await pipelines.GetActiveRunAsync(companyId, id, HttpContext.RequestAborted);
+        return active is null ? NoContent() : Ok(active);
+    }
+
     [HttpGet("runs/{runId}")]
     public async Task<ActionResult<PipelineRunDto>> GetRun(string runId)
     {

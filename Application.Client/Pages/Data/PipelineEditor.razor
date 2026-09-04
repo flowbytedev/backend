@@ -1,4 +1,4 @@
-﻿@page "/data/pipelines/{Id}"
+@page "/data/pipelines/{Id}"
 @using System.Net.Http.Json
 @using System.Text.Json.Nodes
 @using Application.Shared.Models
@@ -310,6 +310,37 @@ else
     </div>
 }
 
+@* ---------- already running ---------- *@
+@if (_activeRun is not null)
+{
+    <div class="fb-modal-backdrop" @onclick="CancelRunConfirm">
+        <div class="fb-modal" role="dialog" aria-modal="true" @onclick:stopPropagation="true">
+            <div class="fb-modal-head">
+                <h2 class="fb-modal-title">This pipeline is already running</h2>
+            </div>
+            <div class="fb-modal-body">
+                <p class="field-help">
+                    @ActiveRunSummary
+                </p>
+                <p class="field-help" style="margin-top:10px;">
+                    Starting another does not stop it. Both runs get their own working database, but they
+                    write to the <strong>same destination</strong> — so with a replace or upsert step the
+                    result depends on which finishes last, and an incremental source would read the same
+                    window twice.
+                </p>
+            </div>
+            <div class="fb-modal-foot">
+                <button class="btn btn-ghost btn-sm" @onclick="OpenActiveRun">Show the running one</button>
+                <span style="flex:1"></span>
+                <button class="btn btn-ghost btn-sm" @onclick="CancelRunConfirm">No</button>
+                <button class="btn btn-primary btn-sm" disabled="@_running" @onclick="ConfirmRunAnyway">
+                    @(_running ? "Starting…" : "Yes, run it anyway")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 @* ---------- email recipient audit ---------- *@
 @if (_audit is not null)
 {
@@ -509,6 +540,60 @@ else
     private List<PipelineIssueDto> _issues = new();
     private int _errorCount;
 
+    // ---------------- write access ----------------
+
+    private async Task LoadWriteCredentialsAsync()
+    {
+        try
+        {
+            var rows = await _httpClient
+                .GetFromJsonAsync<List<WriteCredentialRow>>("api/database-write-credentials");
+
+            _writeCredentials = rows?
+                .Where(r => !string.IsNullOrWhiteSpace(r.EntityId))
+                .GroupBy(r => r.EntityId!, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.First().Configured, StringComparer.Ordinal);
+        }
+        catch
+        {
+            // Unknown rather than none. See the note on _writeCredentials.
+            _writeCredentials = null;
+        }
+    }
+
+    /// <summary>
+    /// Why a pipeline could not write into this dataset, or null when it can.
+    /// <para>
+    /// A local dataset is always writable — it is a DuckDB file this app owns. An external one is a live
+    /// database reached through a deliberately read-only connection, so writing needs the separate write
+    /// credential, and without it the run fails at the destination step. Saying so here is the point: that
+    /// failure otherwise arrives minutes into a run, after the sources have already been read.
+    /// </para>
+    /// </summary>
+    private string? WriteBlock(Application.Shared.Models.Dataset dataset)
+    {
+        if (_writeCredentials is null) return null;
+        if (dataset.SourceType != Application.Shared.Enums.DatasetSourceType.External) return null;
+
+        if (string.IsNullOrWhiteSpace(dataset.SourceEntityId))
+            return "This external dataset has no source database configured, so nothing can be written to it.";
+
+        if (!_writeCredentials.TryGetValue(dataset.SourceEntityId!, out var configured))
+            return "This dataset's source database is no longer registered, so nothing can be written to it.";
+
+        return configured
+            ? null
+            : "Its source database has no write credential. The read-only connection deliberately cannot "
+              + "write — an administrator adds one under Data > Connections > Database write access.";
+    }
+
+    /// <summary>Only the two fields the picker needs from api/database-write-credentials.</summary>
+    private sealed class WriteCredentialRow
+    {
+        public string? EntityId { get; set; }
+        public bool Configured { get; set; }
+    }
+
     // ---------------- email recipient audit ----------------
 
     /// <summary>Non-null while the recipient dialog is open.</summary>
@@ -538,8 +623,24 @@ else
     private List<string> _scopeWrites = new();
     private bool _requiresManualRun;
 
+    /// <summary>The run already in flight, while the confirmation is open. Null the rest of the time.</summary>
+    private PipelineActiveRunDto? _activeRun;
+
+    /// <summary>Which button opened the confirmation, so "yes" runs what was actually asked for.</summary>
+    private bool _pendingRunSelectedOnly;
+
     private List<PipelineColumn> _upstreamColumns = new();
     private List<PipelineFieldOption> _datasets = new();
+
+    /// <summary>
+    /// Database entities that have a write credential, by entity id, with what that credential allows.
+    /// <para>
+    /// Null when the lookup failed or was refused — which is treated as "unknown", not as "none". Marking
+    /// every external dataset unwritable because one request 403'd would block authoring over a UI
+    /// problem, and the run enforces this properly either way.
+    /// </para>
+    /// </summary>
+    private Dictionary<string, bool>? _writeCredentials;
     private List<PipelineFieldOption> _connections = new();
     private List<PipelineFieldOption> _apiCredentials = new();
     private List<string> _tables = new();
@@ -679,6 +780,10 @@ else
 
     private async Task LoadPickerOptionsAsync()
     {
+        // Loaded before the datasets, because whether a dataset can be written to is a fact about the
+        // database behind it. A failure here leaves every dataset looking writable — see WriteBlock.
+        await LoadWriteCredentialsAsync();
+
         try
         {
             var datasets = await _httpClient
@@ -689,7 +794,11 @@ else
             // table endpoint is keyed by id.
             _datasets = datasets?
                 .Where(d => d.Id is not null && !string.IsNullOrWhiteSpace(d.Name))
-                .Select(d => new PipelineFieldOption(d.Name!, d.Name!))
+                .Select(d =>
+                {
+                    var blocked = WriteBlock(d);
+                    return new PipelineFieldOption(d.Name!, d.Name!, blocked is not null, blocked);
+                })
                 .OrderBy(o => o.Label)
                 .ToList() ?? new();
 
@@ -1341,6 +1450,87 @@ else
             return;
         }
 
+        // Asked, not enforced: re-running a pipeline whose source has just been fixed is a normal thing to
+        // want. What is not normal is doing it by accident, which is easy when a long run shows nothing on
+        // this page — the run view is a different screen.
+        var active = await FetchActiveRunAsync();
+        if (active is not null)
+        {
+            _activeRun = active;
+            _pendingRunSelectedOnly = selectedOnly;
+            return;
+        }
+
+        await StartRunAsync(selectedOnly);
+    }
+
+    /// <summary>The active run, or null — including when the check itself failed.</summary>
+    private async Task<PipelineActiveRunDto?> FetchActiveRunAsync()
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync($"api/pipelines/{Id}/runs/active");
+
+            // 204 means none. A failure means we could not tell, and refusing to run over a failed
+            // *advisory* check would be worse than the double run it is trying to prevent.
+            if (response.StatusCode == System.Net.HttpStatusCode.NoContent) return null;
+            if (!response.IsSuccessStatusCode) return null;
+
+            return await response.Content.ReadFromJsonAsync<PipelineActiveRunDto>();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void CancelRunConfirm() => _activeRun = null;
+
+    private void OpenActiveRun()
+    {
+        var runId = _activeRun?.RunId;
+        _activeRun = null;
+
+        _navigationManager.NavigateTo(string.IsNullOrWhiteSpace(runId)
+            ? $"data/pipelines/{Id}/runs?c={_companyId}"
+            : $"data/pipelines/{Id}/runs/{runId}?c={_companyId}");
+    }
+
+    private async Task ConfirmRunAnyway()
+    {
+        var selectedOnly = _pendingRunSelectedOnly;
+        _activeRun = null;
+        await StartRunAsync(selectedOnly);
+    }
+
+    private string ActiveRunSummary
+    {
+        get
+        {
+            if (_activeRun is null) return string.Empty;
+
+            var queued = _activeRun.Status == PipelineRunStatus.Queued;
+            var trigger = _activeRun.TriggerType switch
+            {
+                PipelineTriggerType.Cron => "the schedule",
+                PipelineTriggerType.Api => "the API",
+                _ => "somebody"
+            };
+
+            var progress = _activeRun.StepsTotal > 0
+                ? $", {_activeRun.StepsCompleted} of {_activeRun.StepsTotal} steps done"
+                : string.Empty;
+
+            var started = _activeRun.StartedAt.ToLocalTime().ToString("HH:mm");
+
+            return queued
+                ? $"A run started by {trigger} at {started} is queued and has not begun yet."
+                : $"A run started by {trigger} at {started} is still going{progress}.";
+        }
+    }
+
+    private async Task StartRunAsync(bool selectedOnly)
+    {
         var nodeIds = selectedOnly && _runScope.Count > 0 ? _runScope.ToList() : null;
 
         _running = true;

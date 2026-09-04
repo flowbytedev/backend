@@ -1,4 +1,4 @@
-﻿using System.Text.Json.Serialization;
+using System.Text.Json.Serialization;
 
 namespace Application.Shared.Models.Data.Pipelines;
 
@@ -82,6 +82,24 @@ public class PipelineSaveResult
 }
 
 /// <summary>One run, for the history table and the run header.</summary>
+/// <summary>
+/// A run that has not finished, as the editor asks about before starting another. Four columns, because
+/// this is fetched on every press of Run and a full run row carries the graph and the log.
+/// </summary>
+public class PipelineActiveRunDto
+{
+    public string RunId { get; set; } = string.Empty;
+
+    /// <summary>Queued or Running — the difference decides how the confirmation is worded.</summary>
+    public string Status { get; set; } = string.Empty;
+
+    public string TriggerType { get; set; } = string.Empty;
+    public DateTime StartedAt { get; set; }
+
+    public int StepsTotal { get; set; }
+    public int StepsCompleted { get; set; }
+}
+
 public class PipelineRunDto
 {
     public string Id { get; set; } = string.Empty;

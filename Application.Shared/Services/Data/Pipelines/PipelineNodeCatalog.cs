@@ -1,4 +1,4 @@
-﻿using Application.Shared.Models.Data.Pipelines;
+using Application.Shared.Models.Data.Pipelines;
 
 namespace Application.Shared.Services.Data.Pipelines;
 
@@ -567,7 +567,8 @@ public static class PipelineNodeCatalog
                 "Writes the incoming rows into a dataset table, matching columns by name.",
                 "download", [PipelinePorts.In], [],
                 [
-                    new("dataset", "Dataset", PipelineFieldKinds.DatasetPicker, Required: true),
+                    new("dataset", "Dataset", PipelineFieldKinds.DatasetPicker, Required: true,
+                        RequiresWriteAccess: true),
                     new("table", "Table", PipelineFieldKinds.Text, Required: true,
                         Placeholder: "item  or  product.item",
                         Help: "An existing table, or a new name if you let it be created below. Write schema.table to choose a schema - a plain name uses the connection's default. For ClickHouse and MySQL the first part is the database."),
@@ -703,7 +704,8 @@ public static class PipelineNodeCatalog
                         ],
                         Help: "There is a hard size ceiling on an attachment that this app does not set. A link keeps the recipient's dataset permissions; an attachment has none."),
                     new("linkDataset", "Write it to", PipelineFieldKinds.DatasetPicker,
-                        VisibleWhen: $"onOversize={PipelineEmailOversizeBehaviour.DatasetLink}"),
+                        VisibleWhen: $"onOversize={PipelineEmailOversizeBehaviour.DatasetLink}",
+                        RequiresWriteAccess: true),
                     new("linkTable", "Table", PipelineFieldKinds.Text,
                         VisibleWhen: $"onOversize={PipelineEmailOversizeBehaviour.DatasetLink}",
                         Placeholder: "orders_export",
@@ -764,9 +766,26 @@ public sealed record PipelineFieldSpec(
     /// <see cref="PipelineTokenContexts"/>. Defaults to Plain, which is verbatim — right for text a person
     /// reads, wrong for anything a machine parses, so a SQL or URL field has to say so.
     /// </summary>
-    string TokenContext = PipelineTokenContexts.Plain);
+    string TokenContext = PipelineTokenContexts.Plain,
+    /// <summary>
+    /// This field names something the pipeline will <b>write into</b>, not just read. The inspector uses it
+    /// to grey out the choices that cannot be written to and say why.
+    /// <para>
+    /// A property of the field rather than of the node, because the same dataset picker appears on a source
+    /// step (where read access is all that is needed) and on a destination. Marking the node would disable
+    /// the source picker too, and a read-only dataset is a perfectly good source.
+    /// </para>
+    /// </summary>
+    bool RequiresWriteAccess = false);
 
-public sealed record PipelineFieldOption(string Value, string Label);
+/// <param name="Disabled">
+/// True when this choice exists but cannot be used. Offered-and-explained rather than hidden: a dataset
+/// missing from the list looks like a bug in the list, whereas a greyed-out one with a reason tells the
+/// author what to go and fix.
+/// </param>
+/// <param name="DisabledReason">Why, in a sentence the inspector can show as-is.</param>
+public sealed record PipelineFieldOption(
+    string Value, string Label, bool Disabled = false, string? DisabledReason = null);
 
 /// <summary>
 /// The vocabulary of inspector controls. Deliberately small: anything that cannot be a form control

@@ -230,18 +230,46 @@
                             break;
 
                         case PipelineFieldKinds.DatasetPicker:
+                            @* A field that WRITES greys out the datasets that cannot be written to, rather
+                               than hiding them. A dataset missing from the list reads as a broken list; a
+                               greyed-out one with a reason tells the author what to go and fix — and it is
+                               the difference between finding out here and finding out from a run that has
+                               already spent ten minutes reading its sources. *@
                             <select class="select" @onchange="e => SetString(field.Key, e.Value?.ToString())">
                                 <option value="">Choose a dataset…</option>
                                 @foreach (var option in Datasets)
                                 {
-                                    <option value="@option.Value" selected="@(Str(field.Key) == option.Value)">
-                                        @option.Label
+                                    var blocked = field.RequiresWriteAccess && option.Disabled;
+                                    <option value="@option.Value" disabled="@blocked"
+                                            selected="@(Str(field.Key) == option.Value)">
+                                        @option.Label@(blocked ? " — cannot be written to" : "")
                                     </option>
                                 }
                             </select>
                             @if (Datasets.Count == 0)
                             {
                                 <div class="field-help">Nothing to choose from — create a dataset first.</div>
+                            }
+                            else if (field.RequiresWriteAccess && BlockedReason(field) is { } reason)
+                            {
+                                @* The chosen one is unusable. Shown as an error rather than a hint: this is
+                                   a run that will fail, and it can happen without touching the graph — the
+                                   credential may have been removed after the step was configured. *@
+                                <div class="field-error">@reason</div>
+                            }
+                            else if (field.RequiresWriteAccess && WritableCount == 0)
+                            {
+                                <div class="field-error">
+                                    None of these datasets can be written to. A local dataset always can; an
+                                    external one needs a write credential under Data &rsaquo; Connections.
+                                </div>
+                            }
+                            else if (field.RequiresWriteAccess && BlockedCount > 0)
+                            {
+                                <div class="field-help">
+                                    @BlockedCount dataset@(BlockedCount == 1 ? " is" : "s are") greyed out
+                                    because nothing can write into @(BlockedCount == 1 ? "it" : "them").
+                                </div>
                             }
                             break;
 
@@ -635,6 +663,28 @@
     // ---------------- writes ----------------
 
     private async Task Notify(string coalesceKey) => await OnNodeEdited.InvokeAsync(coalesceKey);
+
+    // ---------------- write access ----------------
+
+    /// <summary>Datasets this step could actually write into.</summary>
+    private int WritableCount => Datasets.Count(d => !d.Disabled);
+
+    private int BlockedCount => Datasets.Count(d => d.Disabled);
+
+    /// <summary>
+    /// Why the dataset currently chosen for a write field cannot be written to, or null when it can be —
+    /// including when nothing is chosen yet, which is a different complaint the required-field check owns.
+    /// </summary>
+    private string? BlockedReason(PipelineFieldSpec field)
+    {
+        var chosen = Str(field.Key);
+        if (string.IsNullOrWhiteSpace(chosen)) return null;
+
+        var option = Datasets.FirstOrDefault(
+            d => string.Equals(d.Value, chosen, StringComparison.OrdinalIgnoreCase));
+
+        return option is { Disabled: true } ? option.DisabledReason : null;
+    }
 
     private async Task SetLabel(string? value)
     {

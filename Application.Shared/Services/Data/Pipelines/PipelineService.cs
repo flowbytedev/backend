@@ -61,6 +61,21 @@ public interface IPipelineService
     Task<bool> CancelRunAsync(string companyId, string runId, CancellationToken ct = default);
 
     Task<List<PipelineRunDto>> GetRunsAsync(string companyId, string? pipelineId, int take, CancellationToken ct = default);
+
+    /// <summary>
+    /// The run this pipeline currently has in flight — queued or running — or null when it has none.
+    /// <para>
+    /// Read-only, and deliberately not a lock. A second run is a legitimate thing to want (a nightly load
+    /// that stalled, a re-run after fixing a source), so this exists to let the UI <em>ask</em> rather than
+    /// to refuse. Two runs of one pipeline get separate scratch databases, but they write to the same
+    /// destination table — which is exactly the surprise worth a confirmation.
+    /// </para>
+    /// <para>
+    /// Oldest first, so a pipeline with a queue reports the run that has been waiting longest rather than
+    /// an arbitrary one.
+    /// </para>
+    /// </summary>
+    Task<PipelineActiveRunDto?> GetActiveRunAsync(string companyId, string pipelineId, CancellationToken ct = default);
     Task<PipelineRunDto?> GetRunAsync(string companyId, string runId, CancellationToken ct = default);
     Task<List<PipelineRunStepDto>> GetStepsAsync(string companyId, string runId, CancellationToken ct = default);
     Task<PipelineRunStepDto?> GetStepAsync(string companyId, string runId, string nodeId, CancellationToken ct = default);
@@ -463,6 +478,29 @@ public class PipelineService(
         foreach (var row in rows) row.Dto.SelectedNodeIds = ParseNodeIds(row.Selected);
 
         return rows.Select(r => r.Dto).ToList();
+    }
+
+    public async Task<PipelineActiveRunDto?> GetActiveRunAsync(
+        string companyId, string pipelineId, CancellationToken ct = default)
+    {
+        // Projected to four columns rather than reusing GetRunsAsync: this is asked on every press of Run,
+        // and a run row carries the whole graph and the whole log.
+        var active = await db.PipelineRun.AsNoTracking()
+            .Where(r => r.CompanyId == companyId && r.PipelineId == pipelineId
+                        && (r.Status == PipelineRunStatus.Queued || r.Status == PipelineRunStatus.Running))
+            .OrderBy(r => r.StartedAt)
+            .Select(r => new PipelineActiveRunDto
+            {
+                RunId = r.Id,
+                Status = r.Status,
+                TriggerType = r.TriggerType,
+                StartedAt = r.StartedAt,
+                StepsTotal = r.StepsTotal,
+                StepsCompleted = r.StepsCompleted
+            })
+            .FirstOrDefaultAsync(ct);
+
+        return active;
     }
 
     public async Task<PipelineRunDto?> GetRunAsync(string companyId, string runId, CancellationToken ct = default)
