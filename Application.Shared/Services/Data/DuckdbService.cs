@@ -506,7 +506,7 @@ public partial class DuckdbService : IDuckdbService, Pipelines.IPipelineStore
 
 
             // Generate DROP TABLE query
-            var dropTableQuery = $"DROP TABLE IF EXISTS {tableName};";
+            var dropTableQuery = $"DROP TABLE IF EXISTS {Q(tableName)};";
 
 
 
@@ -646,12 +646,19 @@ public partial class DuckdbService : IDuckdbService, Pipelines.IPipelineStore
     private string GenerateCreateTableQuery(Table table)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"CREATE TABLE {table.SchemaName}.{table.TableName} ("
-        );
+
+        // Identifiers are quoted: a column slugged from a spreadsheet header is regularly a reserved
+        // word ("group", "order", "end"), which is a parser error unquoted. DuckDB matches identifiers
+        // case-insensitively whether or not they are quoted, so this changes nothing else.
+        var qualifiedName = string.IsNullOrWhiteSpace(table.SchemaName)
+            ? Q(table.TableName)
+            : $"{Q(table.SchemaName)}.{Q(table.TableName)}";
+
+        sb.AppendLine($"CREATE TABLE {qualifiedName} (");
 
         var columnDefinitions = table.Columns.Select(col =>
         {
-            var definition = $"    {col.Name} {col.DataType}";
+            var definition = $"    {Q(col.Name)} {col.DataType}";
 
             if (!col.IsNullable)
                 definition += " NOT NULL";
@@ -713,7 +720,7 @@ public partial class DuckdbService : IDuckdbService, Pipelines.IPipelineStore
 
             // Use DuckDB's COPY command to import CSV data efficiently
             // This handles large files better than INSERT statements
-            command.CommandText = $"COPY {tableName} FROM '{tempCsvPath.Replace("\\", "\\\\")}' (HEADER, DELIMITER ',', QUOTE '\"', ESCAPE '\"', SAMPLE_SIZE -1)"; //, IGNORE_ERRORS true
+            command.CommandText = $"COPY {Q(tableName)} FROM '{tempCsvPath.Replace("\\", "\\\\")}' (HEADER, DELIMITER ',', QUOTE '\"', ESCAPE '\"', SAMPLE_SIZE -1)"; //, IGNORE_ERRORS true
 
             //command.CommandText = $"""
             //        CREATE TABLE {tableName} AS 
