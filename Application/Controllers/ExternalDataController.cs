@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -247,24 +247,33 @@ public class ExternalDataController : ControllerBase
         }
     }
 
-    // POST: api/external/datasets/{datasetId}/tables/{tableName}/import
-    // Appends CSV rows into an existing table. Requires an import grant for the table.
+    // POST: api/external/datasets/{datasetId}/tables/{tableName}/import[?createIfMissing=true]
+    // Loads CSV rows into a table. Requires an import grant for the table.
     // Snapshot layer only, and there is no ?source= here: an external database source is opened read-only
     // by every path in this app, so there is nothing to write into.
+    //
+    // The target normally has to exist, because the load is a bare COPY. createIfMissing=true instead has an
+    // absent table created from the CSV's own inferred schema and loaded in one shot. It is opt-in rather
+    // than automatic because creating a table is a schema change: an unattended integration whose target was
+    // renamed or dropped should fail loudly, not quietly start filling a brand-new table nobody reads.
     [HttpPost("datasets/{datasetId}/tables/{tableName}/import")]
     [RequestSizeLimit(300_000_000)]
     [RequestFormLimits(MultipartBodyLengthLimit = 300_000_000)]
-    public async Task<ActionResult> Import(string datasetId, string tableName)
+    public async Task<ActionResult> Import(
+        string datasetId, string tableName, [FromQuery] string? createIfMissing, CancellationToken ct = default)
     {
         var denied = CheckScope(datasetId, tableName, ApiKeyOperation.Import);
         if (denied != null) return denied;
+
+        if (!TryReadCreateIfMissing(createIfMissing, out var create, out var optionError))
+            return BadRequest(optionError);
 
         try
         {
             if (!Request.HasFormContentType)
                 return BadRequest("Request must be multipart/form-data with a CSV file field named 'file'.");
 
-            var form = await Request.ReadFormAsync();
+            var form = await Request.ReadFormAsync(ct);
             if (form.Files.Count == 0)
                 return BadRequest("CSV file is required");
 
@@ -276,16 +285,82 @@ public class ExternalDataController : ControllerBase
                 !Path.GetExtension(csvFile.FileName).Equals(".csv", StringComparison.OrdinalIgnoreCase))
                 return BadRequest("File must be a CSV file");
 
+            // Resolve "does the target exist" up front rather than letting COPY fail: a missing table is
+            // either this request's job to create, or an answer the caller deserves in this API's own words
+            // instead of a raw DuckDB parser error.
+            var exists = (await _duckdbService.GetTablesAsync(datasetId) ?? Enumerable.Empty<string>())
+                .Any(t => string.Equals(t, tableName, StringComparison.OrdinalIgnoreCase));
+
             using var stream = csvFile.OpenReadStream();
+
+            if (!exists)
+            {
+                if (!create)
+                    return BadRequest(new
+                    {
+                        errorCode = PublicSqlErrorCodes.UnknownTable,
+                        message = $"Table '{tableName}' does not exist in dataset '{datasetId}'. Pass " +
+                                  "createIfMissing=true to create it from the CSV's inferred schema."
+                    });
+
+                // ImportFileAsync's create path is CREATE TABLE AS SELECT over the CSV, so DuckDB infers the
+                // column names and types from the whole file. Mode and key columns say nothing about a table
+                // this very call is creating, so they are left at their neutral values.
+                var created = await _duckdbService.ImportFileAsync(
+                    datasetId, tableName, stream, ImportFileFormat.Csv, ImportMode.Append,
+                    new List<string>(), skipInvalidRows: false, createIfMissing: true, ct);
+
+                if (!created.Success)
+                    return BadRequest($"Error creating table '{tableName}': {created.Error}");
+
+                return Ok(new
+                {
+                    message = "Table created and CSV data imported successfully",
+                    datasetId,
+                    tableName,
+                    tableCreated = true,
+                    rowsInserted = (int?)created.RowsInserted
+                });
+            }
+
             var ok = await _duckdbService.ImportCsvDataAsync(datasetId, tableName, stream);
             if (!ok) return StatusCode(500, "Failed to import CSV data");
 
-            return Ok(new { message = "CSV data imported successfully", datasetId, tableName });
+            // rowsInserted is null here, not 0: COPY into an existing table reports no count, and a 0 would
+            // read as "nothing was loaded".
+            return Ok(new
+            {
+                message = "CSV data imported successfully",
+                datasetId,
+                tableName,
+                tableCreated = false,
+                rowsInserted = (int?)null
+            });
         }
         catch (Exception ex)
         {
             return BadRequest($"Error importing CSV data: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Reads the <c>createIfMissing</c> option. Absent means false, so an existing caller's behaviour is
+    /// unchanged. An unrecognised value is an error rather than a default, for the same reason
+    /// <see cref="TryReadSource"/> rejects one: reading <c>createIfMissing=yes</c> as "do not create" would
+    /// fail the request of a caller who plainly meant the opposite.
+    /// </summary>
+    private static bool TryReadCreateIfMissing(string? value, out bool create, out string? error)
+    {
+        create = false;
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(value)) return true;
+        if (bool.TryParse(value.Trim(), out create)) return true;
+
+        error = $"Unknown createIfMissing value '{value}'. Use 'true' to create the target table from the " +
+                "CSV's inferred schema when it does not exist, or omit it (the default) to require a table " +
+                "that already exists.";
+        return false;
     }
 
     // ---- layer selection ----------------------------------------------------------------------

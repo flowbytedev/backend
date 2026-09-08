@@ -130,6 +130,8 @@
                     <p class="apidocs-note">
                         Each endpoint requires the matching grant on your key: <strong>read</strong> for list/columns/data/download,
                         <strong>import</strong> for upload. Requests outside your key's scope return <code>403</code>.
+                        Creating a table runs on that same import grant, so a key scoped to the whole dataset can
+                        bring new tables into it — scope a key to one table by name if it should only ever load that one.
                         @if (liveMode)
                         {
                             <span>
@@ -153,6 +155,27 @@
                         Append rows from a CSV file (requires import grant)@(liveMode ? " — writes to the snapshot, never the source:" : ":")
                     </p>
                     @CodeBlock(ImportCurl())
+
+                    <p class="apidocs-p" style="margin-top:0.75rem">
+                        That needs the table to already exist. To land one that doesn't — a new feed arriving
+                        for the first time — add <code>?createIfMissing=true</code>, and the column names and
+                        types are inferred from the CSV itself:
+                    </p>
+                    @CodeBlock(ImportCreateCurl())
+                    <p class="apidocs-note">
+                        The response tells you which happened: <code>tableCreated</code> is <code>true</code> with a
+                        <code>rowsInserted</code> count when it created the table, and <code>false</code> when it
+                        appended to an existing one. Without the flag, importing into a table that isn't there
+                        returns <code>400</code> with <code>errorCode: "unknown_table"</code> rather than creating
+                        anything — so a feed whose target was renamed fails loudly instead of quietly filling a
+                        new table.
+                    </p>
+                    <p class="apidocs-note">
+                        Inference is one-shot. Whatever types the first file implies become the table's types for
+                        good, nothing is marked nullable or a primary key, and a later file with <code>N/A</code> in
+                        a column that first looked numeric will be rejected. When the schema matters, create the
+                        table in this dataset first and leave the flag off.
+                    </p>
                 </section>
             </div>
         </div>
@@ -230,7 +253,9 @@
             new("GET",  $"{root}/{TableName}/download{SourceQuery}",
                 liveMode ? "Download rows as CSV (max 5,000)" : "Download full table as CSV"),
             new("POST", $"{root}/{TableName}/import",
-                liveMode ? "Append rows from a CSV file (snapshot only)" : "Append rows from a CSV file"),
+                liveMode
+                    ? "Append rows from a CSV file (snapshot only), or create the table with ?createIfMissing=true"
+                    : "Append rows from a CSV file, or create the table with ?createIfMissing=true"),
         };
     }
 
@@ -286,6 +311,13 @@ $@"curl -L ""{DownloadPath}"" \
 
     private string ImportCurl() =>
 $@"curl -X POST ""{ImportPath}"" \
+  -H ""X-Api-Key: YOUR_API_KEY"" \
+  -F ""file=@data.csv;type=text/csv""";
+
+    // Same call with the opt-in create flag. Kept as a separate snippet rather than a note on the one
+    // above, because it is the copy-paste people actually want when standing up a new feed.
+    private string ImportCreateCurl() =>
+$@"curl -X POST ""{ImportPath}?createIfMissing=true"" \
   -H ""X-Api-Key: YOUR_API_KEY"" \
   -F ""file=@data.csv;type=text/csv""";
 
