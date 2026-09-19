@@ -1,4 +1,5 @@
-using Application.Client.Pages.Data.DatasetPages;
+﻿using Application.Client.Pages.Data.DatasetPages;
+using Application.Services.Data;
 using Application.Shared.Authorization;
 using Application.Shared.Models;
 using Application.Shared.Models.Data;
@@ -33,6 +34,7 @@ public class DatasetsController : ControllerBase
     private readonly Application.Shared.Services.Data.IUserDatasetPreferenceService _preferences;
     private readonly IDatasetDocService _docService;
     private readonly Application.Shared.Services.ICompanySettingsService _companySettings;
+    private readonly ITableExportTicketStore _exportTickets;
 
     public DatasetsController(
         IDatasetService datasetService,
@@ -45,7 +47,8 @@ public class DatasetsController : ControllerBase
         IDatasetTableMoveService tableMoveService,
         Application.Shared.Services.Data.IUserDatasetPreferenceService preferences,
         IDatasetDocService docService,
-        Application.Shared.Services.ICompanySettingsService companySettings)
+        Application.Shared.Services.ICompanySettingsService companySettings,
+        ITableExportTicketStore exportTickets)
     {
         _datasetService = datasetService;
         _duckdbService = duckdbService;
@@ -58,6 +61,7 @@ public class DatasetsController : ControllerBase
         _preferences = preferences;
         _docService = docService;
         _companySettings = companySettings;
+        _exportTickets = exportTickets;
     }
 
     // GET: api/Datasets/{companyId}
@@ -872,75 +876,129 @@ public class DatasetsController : ControllerBase
         return Ok(outcome);
     }
 
-    // GET: api/Datasets/{datasetId}/tables/{tableName}/download
-    [HttpGet("{datasetId}/tables/{tableName}/download")]
-    public async Task<ActionResult> DownloadTable(string datasetId, string tableName)
+    // ----- Table CSV export -----------------------------------------------------------------------
+    //
+    // Exports are written by DuckDB itself (COPY … TO) and streamed off disk. They used to be built in
+    // memory — every row as a Dictionary, then the whole file as a StringBuilder, a string and a byte[] —
+    // which cost gigabytes on a large table and, because nothing was sent until all of it finished, timed
+    // out the browser at the HttpClient default of 100s having transferred nothing. See
+    // IDuckdbService.ExportTableToCsvAsync.
+
+    /// <summary>
+    /// Prepares an export and returns a one-time ticket the browser can collect with a plain navigation.
+    /// <para>
+    /// Two steps rather than one because this POST is the only half that can be authorized: it carries the
+    /// <c>X-Company-ID</c> and <c>UserId</c> headers, which a browser-initiated download cannot. The GET
+    /// that follows redeems a token already bound to that decision.
+    /// </para>
+    /// </summary>
+    // POST: api/Datasets/{datasetId}/tables/{tableName}/export
+    [HttpPost("{datasetId}/tables/{tableName}/export")]
+    public async Task<ActionResult<TableExportTicketResponse>> PrepareTableExport(
+        string datasetId, string tableName, [FromBody] TableDataQuery? query = null, CancellationToken ct = default)
     {
         var userId = Request.Headers["UserId"].ToString();
-        if (string.IsNullOrWhiteSpace(userId))
-            return BadRequest("User ID is required in headers");
-
         var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
-        if (!User.HasCompanyRole(companyId, "VIEW_DATA", "QUERY", "DATA_ADMIN"))
-            return Forbid();
 
-        if (string.IsNullOrWhiteSpace(datasetId))
-            return BadRequest("Dataset ID is required");
-
-        if (string.IsNullOrWhiteSpace(tableName))
-            return BadRequest("Table name is required");
-
-        if (!await DatasetExists(datasetId, userId))
-            return NotFound($"Dataset with ID '{datasetId}' not found.");
+        var denied = await GuardTableExportAsync(datasetId, tableName, userId, companyId);
+        if (denied != null) return denied;
 
         try
         {
-            if (!await IsTableAllowedAsync(datasetId, userId, tableName))
-                return Forbid();
-
-            // Create a query to get all table data (no pagination for download)
-            var query = new TableDataQuery
-            {
-                DatasetId = datasetId,
-                TableName = tableName,
-                Page = 1,
-                PageSize = int.MaxValue // Get all data for download
-            };
-
-            var tableDataResult = await _duckdbService.QueryTableDataAsync(query);
-            
-            if (tableDataResult?.Data == null || !tableDataResult.Data.Any())
+            var export = await WriteTableExportAsync(datasetId, tableName, companyId, query, ct);
+            if (export == null)
                 return NotFound($"No data found for table '{tableName}' in dataset '{datasetId}'.");
 
-            // Convert data to CSV format
-            var csvContent = new StringBuilder();
-            
-            // Add headers from columns if available, otherwise from first data row
-            if (tableDataResult.Columns?.Any() == true)
-            {
-                var headers = string.Join(",", tableDataResult.Columns.Select(c => $"\"{c.Name}\""));
-                csvContent.AppendLine(headers);
-            }
-            else if (tableDataResult.Data.Any())
-            {
-                var firstRow = tableDataResult.Data.First();
-                var headers = string.Join(",", firstRow.Keys.Select(k => $"\"{k}\""));
-                csvContent.AppendLine(headers);
-            }
-            
-            // Add data rows. Dates use the company's configured export format (default dd/MM/yyyy) — a bare
-            // ToString() here would format with the server's culture and emit MM/dd/yyyy.
-            var dateFormat = await _companySettings.GetExportDateFormatAsync(companyId, HttpContext.RequestAborted);
-            foreach (var row in tableDataResult.Data)
-            {
-                var values = string.Join(",", row.Values.Select(v => CsvExportFormatter.Field(v, dateFormat)));
-                csvContent.AppendLine(values);
-            }
+            var ticket = _exportTickets.Issue(export.Value.Path, export.Value.FileName, userId, companyId, export.Value.Rows);
 
-            var csvBytes = Encoding.UTF8.GetBytes(csvContent.ToString());
-            var fileName = $"{tableName}_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+            return Ok(new TableExportTicketResponse(
+                Url: Url.Action(nameof(CollectTableExport), "Datasets", new { token = ticket.Token })
+                     ?? $"/api/Datasets/exports/{ticket.Token}",
+                FileName: ticket.FileName,
+                Rows: ticket.Rows,
+                Bytes: ticket.Bytes));
+        }
+        catch (Exception ex)
+        {
+            return BadRequest($"Error preparing table export: {ex.Message}");
+        }
+    }
 
-            return File(csvBytes, "text/csv", fileName);
+    /// <summary>
+    /// Streams a prepared export to the browser and deletes it afterwards.
+    /// <para>
+    /// Deliberately header-free: it is reached by navigation, so it authenticates from the session cookie
+    /// and authorizes by matching the signed-in user against the one the ticket was issued to. The tenant
+    /// check already happened when the ticket was issued — this endpoint never selects data.
+    /// </para>
+    /// </summary>
+    // GET: api/Datasets/exports/{token}
+    [HttpGet("exports/{token}", Name = nameof(CollectTableExport))]
+    public ActionResult CollectTableExport(string token)
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(userId))
+            return Forbid();
+
+        var ticket = _exportTickets.Redeem(token, userId);
+        if (ticket == null)
+            return NotFound("This download link has expired or has already been used. Start the download again.");
+
+        // Delete once the response has actually finished writing — not before, and not on a timer that
+        // could fire mid-transfer.
+        Response.OnCompleted(() =>
+        {
+            _exportTickets.Discard(ticket);
+            return Task.CompletedTask;
+        });
+
+        // Range processing stays off deliberately: the ticket is single use and the file is deleted the
+        // moment a response completes, so a client that probes with one request and fetches with a second
+        // would find it gone. One request, one whole file.
+        return PhysicalFile(ticket.FilePath, "text/csv", ticket.FileName);
+    }
+
+    // GET: api/Datasets/{datasetId}/tables/{tableName}/download
+    //
+    // The original single-request download, kept for programmatic callers that can set the headers. It now
+    // streams the same COPY-written file instead of buffering the CSV in memory, so it is no longer bounded
+    // by table size — but a browser still cannot call it directly, which is what the two-step export above
+    // is for.
+    [HttpGet("{datasetId}/tables/{tableName}/download")]
+    public async Task<ActionResult> DownloadTable(string datasetId, string tableName, CancellationToken ct)
+        => await StreamTableExportAsync(datasetId, tableName, query: null, ct);
+
+    // POST: api/Datasets/{datasetId}/tables/{tableName}/download-filtered
+    [HttpPost("{datasetId}/tables/{tableName}/download-filtered")]
+    public async Task<ActionResult> DownloadFilteredTable(
+        string datasetId, string tableName, [FromBody] TableDataQuery query, CancellationToken ct)
+        => await StreamTableExportAsync(datasetId, tableName, query, ct);
+
+    /// <summary>The shared body of the two direct-download endpoints: authorize, export, stream, delete.</summary>
+    private async Task<ActionResult> StreamTableExportAsync(
+        string datasetId, string tableName, TableDataQuery? query, CancellationToken ct)
+    {
+        var userId = Request.Headers["UserId"].ToString();
+        var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
+
+        var denied = await GuardTableExportAsync(datasetId, tableName, userId, companyId);
+        if (denied != null) return denied;
+
+        try
+        {
+            var export = await WriteTableExportAsync(datasetId, tableName, companyId, query, ct);
+            if (export == null)
+                return NotFound($"No data found for table '{tableName}' in dataset '{datasetId}'.");
+
+            var path = export.Value.Path;
+            Response.OnCompleted(() =>
+            {
+                try { if (System.IO.File.Exists(path)) System.IO.File.Delete(path); }
+                catch { /* swept by the next export */ }
+                return Task.CompletedTask;
+            });
+
+            return PhysicalFile(path, "text/csv", export.Value.FileName);
         }
         catch (Exception ex)
         {
@@ -948,15 +1006,15 @@ public class DatasetsController : ControllerBase
         }
     }
 
-    // POST: api/Datasets/{datasetId}/tables/{tableName}/download-filtered
-    [HttpPost("{datasetId}/tables/{tableName}/download-filtered")]
-    public async Task<ActionResult> DownloadFilteredTable(string datasetId, string tableName, [FromBody] TableDataQuery query)
+    /// <summary>
+    /// The access checks every export path repeats. Returns the failing result, or null when allowed.
+    /// </summary>
+    private async Task<ActionResult?> GuardTableExportAsync(
+        string datasetId, string tableName, string userId, string companyId)
     {
-        var userId = Request.Headers["UserId"].ToString();
         if (string.IsNullOrWhiteSpace(userId))
             return BadRequest("User ID is required in headers");
 
-        var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
         if (!User.HasCompanyRole(companyId, "VIEW_DATA", "QUERY", "DATA_ADMIN"))
             return Forbid();
 
@@ -969,94 +1027,62 @@ public class DatasetsController : ControllerBase
         if (!await DatasetExists(datasetId, userId))
             return NotFound($"Dataset with ID '{datasetId}' not found.");
 
-        try
+        if (!await IsTableAllowedAsync(datasetId, userId, tableName))
+            return Forbid();
+
+        return null;
+    }
+
+    /// <summary>
+    /// Writes one export file and returns where it landed, or null when the table produced no rows.
+    /// </summary>
+    /// <remarks>
+    /// The file goes in the company's pipeline working folder rather than <c>Path.GetTempPath()</c>: under a
+    /// Windows service that resolves to <c>C:\Windows\TEMP</c>, which is the wrong place to put a file that
+    /// can be several gigabytes. The folder is shared with pipeline staging, so exports carry their own
+    /// filename prefix and are swept on the way in — an abandoned download otherwise leaves its file behind.
+    /// </remarks>
+    private async Task<(string Path, string FileName, long Rows)?> WriteTableExportAsync(
+        string datasetId, string tableName, string companyId, TableDataQuery? query, CancellationToken ct)
+    {
+        var directory = await _companySettings.GetPipelineWorkingDirectoryAsync(companyId, ct);
+        directory = PipelineWorkspacePath.Ensure(directory);
+        _exportTickets.SweepStale(directory);
+
+        var path = PipelineWorkspacePath.FileIn(directory, TableExportTicketStore.FilePrefix, ".csv");
+
+        var export = query ?? new TableDataQuery();
+        export.DatasetId = datasetId;
+        export.TableName = tableName;
+
+        var dateFormat = await _companySettings.GetExportDateFormatAsync(companyId, ct);
+        var rows = await _duckdbService.ExportTableToCsvAsync(export, path, dateFormat, ct);
+
+        // An empty table still produces a header-only file; 404 instead, matching what the buffered
+        // implementation did rather than handing back a CSV with no rows in it.
+        if (rows == 0)
         {
-            if (!await IsTableAllowedAsync(datasetId, userId, tableName))
-                return Forbid();
-
-            // Ensure the query has the correct dataset and table information
-            query.DatasetId = datasetId;
-            query.TableName = tableName;
-            
-            // Set page size to max to get all filtered data
-            query.PageSize = int.MaxValue;
-            query.Page = 1;
-
-            var tableDataResult = await _duckdbService.QueryTableDataAsync(query);
-            
-            if (tableDataResult?.Data == null || !tableDataResult.Data.Any())
-                return NotFound($"No data found for table '{tableName}' with the applied filters.");
-
-            // Convert data to CSV format
-            var csvContent = new StringBuilder();
-            
-            // Add headers - use selected columns if specified, otherwise use all columns from result
-            List<string> columnHeaders;
-            if (query.SelectedColumns?.Any() == true)
-            {
-                columnHeaders = query.SelectedColumns;
-            }
-            else if (tableDataResult.Columns?.Any() == true)
-            {
-                columnHeaders = tableDataResult.Columns.Select(c => c.Name).ToList();
-            }
-            else if (tableDataResult.Data.Any())
-            {
-                columnHeaders = tableDataResult.Data.First().Keys.ToList();
-            }
-            else
-            {
-                return BadRequest("No columns available for export.");
-            }
-
-            // Add CSV headers
-            var headers = string.Join(",", columnHeaders.Select(h => $"\"{h}\""));
-            csvContent.AppendLine(headers);
-            
-            // Add data rows - only include selected columns. Dates use the company's configured export
-            // format (default dd/MM/yyyy); see CsvExportFormatter for why a bare ToString() is wrong here.
-            var dateFormat = await _companySettings.GetExportDateFormatAsync(companyId, HttpContext.RequestAborted);
-            foreach (var row in tableDataResult.Data)
-            {
-                var values = columnHeaders.Select(col =>
-                {
-                    var value = row.TryGetValue(col, out var cell) ? cell : "";
-                    return CsvExportFormatter.Field(value, dateFormat);
-                });
-                csvContent.AppendLine(string.Join(",", values));
-            }
-
-            var csvBytes = Encoding.UTF8.GetBytes(csvContent.ToString());
-            
-            // Create descriptive filename
-            var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-            var hasFilters = query.Filters?.Any() == true;
-            var hasSelectedColumns = query.SelectedColumns?.Any() == true;
-            
-            string fileName;
-            if (hasFilters && hasSelectedColumns)
-            {
-                fileName = $"{tableName}_filtered_custom_columns_{timestamp}.csv";
-            }
-            else if (hasFilters)
-            {
-                fileName = $"{tableName}_filtered_{timestamp}.csv";
-            }
-            else if (hasSelectedColumns)
-            {
-                fileName = $"{tableName}_custom_columns_{timestamp}.csv";
-            }
-            else
-            {
-                fileName = $"{tableName}_{timestamp}.csv";
-            }
-
-            return File(csvBytes, "text/csv", fileName);
+            try { if (System.IO.File.Exists(path)) System.IO.File.Delete(path); } catch { }
+            return null;
         }
-        catch (Exception ex)
+
+        return (path, ExportFileName(tableName, query), rows);
+    }
+
+    /// <summary>The name the browser saves the file under — unchanged from the buffered implementation.</summary>
+    private static string ExportFileName(string tableName, TableDataQuery? query)
+    {
+        var timestamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var hasFilters = query?.Filters?.Any() == true;
+        var hasSelectedColumns = query?.SelectedColumns?.Any() == true;
+
+        return (hasFilters, hasSelectedColumns) switch
         {
-            return BadRequest($"Error downloading filtered table data: {ex.Message}");
-        }
+            (true, true) => $"{tableName}_filtered_custom_columns_{timestamp}.csv",
+            (true, false) => $"{tableName}_filtered_{timestamp}.csv",
+            (false, true) => $"{tableName}_custom_columns_{timestamp}.csv",
+            _ => $"{tableName}_{timestamp}.csv",
+        };
     }
 
     // POST: api/Datasets/import-csv

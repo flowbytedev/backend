@@ -53,13 +53,23 @@ public class DuckdbOption
     /// </summary>
     public int? MaxAdHocRows { get; set; }
 
+    /// <summary>
+    /// Timeout for a full-table CSV export (<c>COPY … TO</c>). Deliberately not
+    /// <see cref="QueryTimeoutSeconds"/>: this path is bounded by table size rather than query complexity,
+    /// DuckDB streams the rows to a file so nothing accumulates in memory, and the interactive 60s limit
+    /// would just become a cap on how large a table anyone can download. Defaults to 600s.
+    /// </summary>
+    public int? ExportTimeoutSeconds { get; set; }
+
     private const int DefaultQueryTimeoutSeconds = 60;
     private const int DefaultBuildTimeoutSeconds = 60;
     private const int DefaultMaxAdHocRows = 5000;
+    private const int DefaultExportTimeoutSeconds = 600;
 
     public int ResolveQueryTimeoutSeconds() => Positive(QueryTimeoutSeconds, DefaultQueryTimeoutSeconds);
     public int ResolveBuildTimeoutSeconds() => Positive(BuildTimeoutSeconds, DefaultBuildTimeoutSeconds);
     public int ResolveMaxAdHocRows() => Positive(MaxAdHocRows, DefaultMaxAdHocRows);
+    public int ResolveExportTimeoutSeconds() => Positive(ExportTimeoutSeconds, DefaultExportTimeoutSeconds);
 
     // A configured 0 or negative would mean "cancel immediately" / "return nothing" — always a typo, and
     // one that would look like a hung or empty dataset rather than a bad setting. Treat it as unset.

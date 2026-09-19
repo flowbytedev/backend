@@ -1,4 +1,4 @@
-@page "/data/view"
+﻿@page "/data/view"
 @page "/data/edit"
 @using System.Text.Json
 @using Application.Shared.Models.Data
@@ -13,6 +13,7 @@
 @inject IJSRuntime JSRuntime
 @inject IToastService ToastService
 @inject Application.Client.Services.ActivityLogClient ActivityLog
+@inject Application.Client.Services.TableExportClient TableExport
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @attribute [Authorize(Policy = PolicyNames.DatasetsAccess)]
 @implements IAsyncDisposable
@@ -68,9 +69,9 @@ else
             }
             @if (!sourceMode)
             {
-                <button class="btn btn-outline dv-btn-success" style="color:#16a34a;border-color:#16a34a" @onclick="DownloadCsv" disabled="@IsLoading" title="Download the full table as CSV">
+                <button class="btn btn-outline dv-btn-success" style="color:#16a34a;border-color:#16a34a" @onclick="DownloadCsv" disabled="@(IsLoading || isExporting)" title="Download the full table as CSV">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                    Download
+                    @(isExporting ? "Preparing…" : "Download")
                 </button>
             }
             <button class="btn btn-outline" @onclick="RefreshData" disabled="@IsLoading">
@@ -439,28 +440,32 @@ else
 
     private async Task RefreshData() => await JSRuntime.InvokeVoidAsync("dataGridEditor.refresh");
 
+    private bool isExporting;
+
     private async Task DownloadCsv()
     {
-        EnsureCompanyHeader();
-        EnsureUserIdHeader();
+        if (isExporting) return;
+
+        // Server-side full-table export (the grid only has the loaded blocks in memory). DuckDB writes the
+        // CSV and the browser collects it directly — see TableExportClient for why it does not come back
+        // through this page.
+        isExporting = true;
         try
         {
-            // Server-side full-table export (the grid only has the loaded blocks in memory).
-            var response = await HttpClient.GetAsync($"api/Datasets/{DatasetId}/tables/{TableName}/download");
-            if (response.IsSuccessStatusCode)
-            {
-                var content = await response.Content.ReadAsByteArrayAsync();
-                var fileName = response.Content.Headers.ContentDisposition?.FileName?.Trim('"') ?? $"{TableName}.csv";
-                await JSRuntime.InvokeVoidAsync("downloadFileFromByteArray", fileName, "text/csv", content);
-                ToastService.ShowSuccess("Download started");
-            }
-            else
-            {
-                ToastService.ShowError($"Download failed: {response.StatusCode}");
-            }
+            var ticket = await TableExport.DownloadAsync(DatasetId!, TableName!, c ?? string.Empty, CurrentUserId);
+            ToastService.ShowSuccess($"Downloading {ticket.Rows:N0} rows ({FormatSize(ticket.Bytes)})");
         }
         catch (Exception ex) { ToastService.ShowError($"Error downloading: {ex.Message}"); }
+        finally { isExporting = false; }
     }
+
+    private static string FormatSize(long bytes) => bytes switch
+    {
+        <= 0 => "size unknown",
+        < 1024 * 1024 => $"{bytes / 1024.0:N0} KB",
+        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):N1} MB",
+        _ => $"{bytes / (1024.0 * 1024 * 1024):N2} GB",
+    };
 
     // ---- AG Grid sort/filter model → TableDataQuery ----
 

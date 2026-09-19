@@ -234,6 +234,11 @@ builder.Services.AddScoped<IApplicationAccessService, ApplicationAccessService>(
 builder.Services.AddScoped<Application.Shared.Services.Data.IDatasetService, DatasetService>();
 builder.Services.AddScoped<IDuckdbService, DuckdbService>();
 
+// Singleton, not scoped: a ticket is issued on one request and redeemed on the next, so the store has to
+// outlive both. State lives in IMemoryCache, which is already a singleton.
+builder.Services.AddSingleton<Application.Services.Data.ITableExportTicketStore,
+    Application.Services.Data.TableExportTicketStore>();
+
 // ---- ETL pipelines -------------------------------------------------------------------------------
 // IPipelineStore is DuckdbService's second interface, not a second service: it needs that class's
 // private path resolution and PromoteRelationAsync. Resolved from the same scoped instance so a run

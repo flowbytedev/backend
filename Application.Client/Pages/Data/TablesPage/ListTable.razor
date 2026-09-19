@@ -1,4 +1,4 @@
-@page "/data/tables"
+﻿@page "/data/tables"
 @using Application.Shared.Models
 @using Application.Shared.Models.Data
 @using Application.Shared.Models.Dashboards
@@ -10,6 +10,7 @@
 @inject AuthenticationStateProvider _authenticationStateProvider
 @inject IJSRuntime _jsRuntime
 @inject Application.Client.Services.ActivityLogClient _activityLog
+@inject Application.Client.Services.TableExportClient _tableExport
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @attribute [Authorize(Policy = PolicyNames.DatasetsAccess)]
 
@@ -1433,29 +1434,17 @@ else
         try
         {
             var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
-            var user = authState.User;
-            if (user.Identity?.IsAuthenticated == true)
+            var userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId))
             {
-                var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-                if (!string.IsNullOrEmpty(userId))
-                {
-                    _httpClient.DefaultRequestHeaders.Remove("UserId");
-                    _httpClient.DefaultRequestHeaders.Add("UserId", userId);
-                }
+                _toastService.ShowError("You need to be signed in to download a table.");
+                return;
             }
-            var response = await _httpClient.GetAsync($"api/Datasets/{datasetId}/tables/{tableName}/download");
-            if (response.IsSuccessStatusCode)
-            {
-                var content = await response.Content.ReadAsByteArrayAsync();
-                var contentType = response.Content.Headers.ContentType?.ToString() ?? "application/csv";
-                var fileName = response.Content.Headers.ContentDisposition?.FileName?.Trim('"') ?? $"{tableName}.csv";
-                await _jsRuntime.InvokeVoidAsync("downloadFileFromByteArray", fileName, contentType, content);
-                _toastService.ShowSuccess($"Table '{tableName}' downloaded successfully");
-            }
-            else
-            {
-                _toastService.ShowError($"Failed to download table: {response.StatusCode}");
-            }
+
+            // DuckDB writes the CSV server-side and the browser collects it directly — the rows never pass
+            // through this page. See TableExportClient.
+            var ticket = await _tableExport.DownloadAsync(datasetId, tableName, companyId ?? string.Empty, userId);
+            _toastService.ShowSuccess($"Downloading '{tableName}' — {ticket.Rows:N0} rows");
         }
         catch (Exception ex)
         {

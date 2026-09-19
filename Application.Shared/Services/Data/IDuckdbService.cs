@@ -45,6 +45,38 @@ public interface IDuckdbService
     Task<TableDataResult> QueryTableDataAsync(TableDataQuery query);
     Task<int> GetTableRowCountAsync(string datasetId, string tableName, List<FilterCondition>? filters = null);
 
+    /// <summary>
+    /// Writes the whole (optionally filtered, sorted and column-projected) table to a CSV file with
+    /// DuckDB's own <c>COPY … TO</c>, and returns the number of data rows written.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The download counterpart of <see cref="QueryTableDataAsync"/>, and deliberately not built on it:
+    /// that method materializes every row as a <c>Dictionary&lt;string, object&gt;</c>, so exporting a
+    /// multi-million-row table through it costs gigabytes of managed heap before a single byte of CSV
+    /// exists. Here the rows never enter .NET at all — DuckDB streams them to the file — so memory stays
+    /// flat regardless of table size and the caller can stream the result off disk.
+    /// </para>
+    /// <para>
+    /// <paramref name="query"/>'s <c>Page</c>/<c>PageSize</c> are ignored: an export is the whole result
+    /// set by definition. <c>IncludeRowId</c> is ignored too — the rowid exists to target a row for an
+    /// edit, and would otherwise appear as a column in the file.
+    /// </para>
+    /// <para>
+    /// <paramref name="destinationPath"/> must be chosen by the server, never by a caller: it is a path
+    /// DuckDB writes to on the host. Dates are written with the company's configured export format (see
+    /// <see cref="ExportDateFormats.ToStrftime"/>, which documents the one rendering difference from the
+    /// in-process formatter).
+    /// </para>
+    /// <para>
+    /// One other output difference from the buffered implementation this replaced: DuckDB quotes a header
+    /// name only where the CSV grammar needs it, where the old code quoted every one. Both are valid CSV,
+    /// but a consumer matching the header line byte-for-byte will see it.
+    /// </para>
+    /// </remarks>
+    Task<long> ExportTableToCsvAsync(TableDataQuery query, string destinationPath, string dateFormat,
+        System.Threading.CancellationToken ct = default);
+
     // Row-level editing for the data viewer. Rows are identified by the DuckDB rowid (returned in the
     // page when TableDataQuery.IncludeRowId is set). Each value is the raw string form of a column and is
     // CAST to the column's type. Errors are returned via RowMutationResult.Error, never thrown.

@@ -959,6 +959,67 @@ public partial class DuckdbService : IDuckdbService, Pipelines.IPipelineStore
         }
     }
 
+    public async Task<long> ExportTableToCsvAsync(TableDataQuery query, string destinationPath, string dateFormat,
+        CancellationToken ct = default)
+    {
+        var duckdbFilePath = ResolveDbPath(query.DatasetId);
+        if (!File.Exists(duckdbFilePath))
+            throw new FileNotFoundException($"Database not found at '{duckdbFilePath}'.");
+
+        // The SELECT mirrors QueryTableDataAsync's, minus the rowid and minus LIMIT/OFFSET — see the
+        // interface for why both are dropped.
+        var selectList = query.SelectedColumns?.Any() == true
+            ? string.Join(", ", query.SelectedColumns.Select(Q))
+            : "*";
+
+        var select = new StringBuilder();
+        select.Append($"SELECT {selectList} FROM {Q(query.TableName)}");
+        select.Append(BuildWhereClause(query.Filters));
+        if (query.SortColumns?.Any() == true)
+        {
+            var sortClauses = query.SortColumns.Select(s => $"{Q(s.ColumnName)} {(s.IsDescending ? "DESC" : "ASC")}");
+            select.Append($" ORDER BY {string.Join(", ", sortClauses)}");
+        }
+
+        var sql =
+            $"COPY ({select}) TO '{Esc(destinationPath)}' (FORMAT CSV, HEADER, " +
+            $"DATEFORMAT '{Esc(ExportDateFormats.ToStrftime(dateFormat))}', " +
+            $"TIMESTAMPFORMAT '{Esc(ExportDateFormats.ToTimestampStrftime(dateFormat))}')";
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(_option.ResolveExportTimeoutSeconds()));
+
+        try
+        {
+            // Read-only, like ExportRelationToFileAsync: COPY TO reads the catalog and writes an operating
+            // system file, so it never needs the write handle — and taking the one QueryTableDataAsync takes
+            // would lock the dataset against the rest of the app for the length of a multi-million-row export.
+            //
+            // Note this connection deliberately does NOT set enable_external_access=false, unlike the ad-hoc
+            // SQL path below: that setting is precisely what refuses COPY TO. Safe here only because the
+            // statement is built from a TableDataQuery — never from caller-supplied SQL — and the
+            // destination path comes from the server.
+            await using var connection = await OpenWithRetryAsync(duckdbFilePath, readOnly: true, cts.Token);
+
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+
+            // ExecuteNonQuery, not ExecuteScalar: COPY reports how many rows it wrote as an affected-row
+            // count, and DuckDB.NET surfaces it only here — ExecuteScalar returns null and the reader
+            // comes back with no fields at all (measured against DuckDB.NET 1.3).
+            var written = await command.ExecuteNonQueryAsync(cts.Token);
+
+            await connection.CloseAsync();
+            return written;
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                $"Exporting '{query.TableName}' timed out after {_option.ResolveExportTimeoutSeconds()}s. " +
+                "Raise Duckdb:ExportTimeoutSeconds, or narrow the export with a filter.");
+        }
+    }
+
     // ----- Ad-hoc SQL workbench --------------------------------------------------------------
 
     // The row ceiling and the two timeouts used below live on DuckdbOption (ResolveMaxAdHocRows /
@@ -2154,8 +2215,12 @@ public partial class DuckdbService : IDuckdbService, Pipelines.IPipelineStore
         if (string.IsNullOrWhiteSpace(filter.ColumnName) || string.IsNullOrWhiteSpace(filter.Value))
             return string.Empty;
 
-        var columnName = $"\"{filter.ColumnName}\"";
-        var value = filter.Value.Replace("'", "''"); // Escape single quotes
+        // Q, not a bare $"\"{…}\"" — the column name arrives from the caller's filter model, and an
+        // embedded double quote would otherwise close the identifier and let the rest of the name run on as
+        // SQL. Values are already safe: doubling the single quote is the whole escape for a DuckDB string
+        // literal, which does not process backslash escapes.
+        var columnName = Q(filter.ColumnName);
+        var value = filter.Value.Replace("'", "''");
 
         return filter.Operator.ToLower() switch
         {

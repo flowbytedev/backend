@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace Application.Shared.Models.Data;
 
@@ -115,3 +115,17 @@ public class ExternalTableDataResult
 
     public long ElapsedMs { get; set; }
 }
+
+/// <summary>
+/// Where to collect a prepared table export, returned by <c>POST api/Datasets/{id}/tables/{table}/export</c>.
+/// <para>
+/// The export is already written to disk by the time this is returned; <see cref="Url"/> is a one-time,
+/// user-bound link the browser fetches with an ordinary navigation, so the file never passes through the
+/// WebAssembly heap.
+/// </para>
+/// </summary>
+/// <param name="Url">Root-relative collection link. Single use, and it expires.</param>
+/// <param name="FileName">The name the browser will save it under.</param>
+/// <param name="Rows">Data rows written.</param>
+/// <param name="Bytes">Size on disk, or 0 when it could not be read.</param>
+public sealed record TableExportTicketResponse(string Url, string FileName, long Rows, long Bytes);
