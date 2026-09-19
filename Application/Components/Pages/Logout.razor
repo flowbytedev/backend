@@ -1,0 +1,142 @@
+@page "/Account/Logout"
+@using Microsoft.AspNetCore.Authorization
+@attribute [AllowAnonymous]
+
+@*
+    The signed-out page, and the confirmation that gets you there.
+
+    /Account/Logout is a POST endpoint — signing out is state-changing, and a GET would let an
+    <img> tag or a prefetch sign somebody out. That left nothing behind this URL on a GET, so
+    landing here after logout showed an empty page. This is that page.
+
+    It is also where the POST sends you afterwards, instead of back to where you were. Returning
+    into the application looks like sign-out did nothing: you arrive unauthenticated, the router
+    bounces you to identity, identity's own session is still live, and it signs you straight back
+    in without a prompt. See AuthEndpoints.
+*@
+
+<PageTitle>Signed out</PageTitle>
+
+<div class="signed-out-wrap">
+    <div class="signed-out-card">
+        <div class="signed-out-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                 stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                <path d="M16 17l5-5-5-5M21 12H9" />
+            </svg>
+        </div>
+
+        <AuthorizeView>
+            <Authorized>
+                @* Still signed in: someone reached this URL directly. Offer the real thing. *@
+                <h1 class="signed-out-title">Sign out?</h1>
+                <p class="signed-out-text">
+                    You are signed in as <strong>@context.User.Identity?.Name</strong>.
+                </p>
+
+                @*
+                    data-enhance="false": let the browser do a plain POST and follow the redirect
+                    itself, rather than Blazor fetching it. One less moving part on the one flow
+                    whose whole job is to end the session.
+                *@
+                <form action="Account/Logout" method="post" data-enhance="false">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="ReturnUrl" value="@ReturnUrl" />
+                    <button type="submit" class="signed-out-button">Sign out</button>
+                </form>
+            </Authorized>
+
+            <NotAuthorized>
+                <h1 class="signed-out-title">You are signed out</h1>
+                <p class="signed-out-text">
+                    This application has forgotten you. Your Flowbyte identity session is still
+                    open, so signing in again will not ask for your password.
+                </p>
+
+                <a href="@SignInUrl" data-enhance-nav="false" class="signed-out-button">Sign in</a>
+            </NotAuthorized>
+        </AuthorizeView>
+    </div>
+</div>
+
+<style>
+    /* Self-contained: this page has to look deliberate in every application in the estate, and
+       they do not share a stylesheet. Only the page's own classes are touched. */
+    .signed-out-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 60vh;
+        padding: 1.5rem;
+    }
+
+    .signed-out-card {
+        width: 100%;
+        max-width: 22rem;
+        padding: 1.75rem 1.5rem;
+        border: 1px solid rgba(128, 128, 128, .25);
+        border-radius: .625rem;
+        text-align: center;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, .06);
+    }
+
+    .signed-out-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.5rem;
+        height: 2.5rem;
+        border-radius: 9999px;
+        background: rgba(128, 128, 128, .12);
+    }
+
+    .signed-out-title {
+        margin: 1rem 0 0;
+        font-size: 1.125rem;
+        font-weight: 600;
+        letter-spacing: -.01em;
+    }
+
+    .signed-out-text {
+        margin: .5rem 0 0;
+        font-size: .875rem;
+        opacity: .75;
+        line-height: 1.5;
+    }
+
+    .signed-out-button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        height: 2.25rem;
+        margin-top: 1.25rem;
+        padding: 0 1rem;
+        border: 0;
+        border-radius: .375rem;
+        background: #2563eb;
+        color: #fff;
+        font: inherit;
+        font-size: .875rem;
+        font-weight: 500;
+        text-decoration: none;
+        cursor: pointer;
+    }
+
+    .signed-out-button:hover {
+        background: #1d4ed8;
+    }
+</style>
+
+@code {
+    /// <summary>The company the user was working in, carried through so signing in returns to it.</summary>
+    [SupplyParameterFromQuery(Name = "c")]
+    public string? Company { get; set; }
+
+    private string? ReturnUrl => string.IsNullOrWhiteSpace(Company) ? null : $"/?c={Uri.EscapeDataString(Company)}";
+
+    private string SignInUrl => string.IsNullOrWhiteSpace(Company)
+        ? "Account/Login"
+        : $"Account/Login?returnUrl={Uri.EscapeDataString($"/?c={Company}")}";
+}

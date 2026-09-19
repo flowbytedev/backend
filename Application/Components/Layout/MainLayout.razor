@@ -5,7 +5,7 @@
 @inject NavigationManager _navigationManager
 @inject AuthenticationStateProvider _authenticationStateProvider
 @inject StateContainer _stateContainer
-@inject ICompanyService _companyService
+@inject ITenancyDirectory _tenancy
 @inject IConfiguration _configuration
 
 <div class="al-root">
@@ -102,22 +102,28 @@
         var currentUserId = await GetUserId();
         if (currentUserId is null) return;
 
-        // Companies this user belongs to — powers the company switcher.
-        try { memberCompanies = await _companyService.GetCompanies(currentUserId) ?? new(); }
-        catch (InvalidOperationException e) { Console.WriteLine(e.Message); }
+        // Companies this user belongs to, from identity — powers the company switcher, and is
+        // also the membership check, so it is read once.
+        memberCompanies = [.. await _tenancy.GetCompaniesAsync(currentUserId)];
 
         var uri = new Uri(_navigationManager.Uri);
-        if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("c", out var companyId))
+
+        var requestedId = QueryHelpers.ParseQuery(uri.Query).TryGetValue("c", out var companyId)
+            ? companyId.ToString()
+            : null;
+
+        // ?c= selects from that list; it does not grant. It used to be honoured on its own —
+        // whatever id was in the address bar got loaded and adopted — so editing it reached any
+        // tenant in the estate. TenantSelection states the rule once for the whole estate.
+        var company = TenantSelection.Choose(memberCompanies, requestedId);
+
+        if (company?.Id is null) return;
+
+        _stateContainer.Company = company;
+
+        if (!string.Equals(requestedId, company.Id, StringComparison.Ordinal))
         {
-            _stateContainer.Company = await _companyService.GetCompany(companyId);
-        }
-        else
-        {
-            var company = memberCompanies.FirstOrDefault();
-            if (company is null) return;
-            _stateContainer.Company = company;
-            var newUri = QueryHelpers.AddQueryString(uri.AbsoluteUri, "c", company.Id);
-            _navigationManager.NavigateTo(newUri);
+            _navigationManager.NavigateTo(QueryHelpers.AddQueryString(uri.AbsoluteUri, "c", company.Id));
         }
 
         _stateContainer.OnChange += StateHasChanged;

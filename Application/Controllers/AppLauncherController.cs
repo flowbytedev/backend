@@ -1,7 +1,7 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Application.Models;
 using Application.Shared.Models;
-using Application.Shared.Services;
+using Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -16,16 +16,16 @@ namespace Application.Controllers;
 [Authorize]
 public class AppLauncherController : ControllerBase
 {
-    private readonly IApplicationAccessService _service;
+    private readonly IAppLauncherClient _launcher;
 
-    public AppLauncherController(IApplicationAccessService service) => _service = service;
+    public AppLauncherController(IAppLauncherClient launcher) => _launcher = launcher;
 
     /// <summary>
     /// Applications the signed-in user has been granted. The user id is read from the auth cookie
     /// and never accepted from the caller, so this cannot be used to enumerate anyone else.
     /// </summary>
     [HttpGet("apps")]
-    public async Task<ActionResult<Response<List<AppTile>>>> Apps()
+    public async Task<ActionResult<Response<IReadOnlyList<AppTile>>>> Apps(CancellationToken cancellationToken)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrEmpty(userId))
@@ -33,9 +33,9 @@ public class AppLauncherController : ControllerBase
             return Unauthorized();
         }
 
-        var tiles = await _service.GetAppTilesForUserAsync(userId);
+        var tiles = await _launcher.GetTilesAsync(userId, cancellationToken);
 
-        return Ok(new Response<List<AppTile>>
+        return Ok(new Response<IReadOnlyList<AppTile>>
         {
             Items = tiles,
             Status = ResponseStatus.Success

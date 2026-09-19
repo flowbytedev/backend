@@ -1,53 +1,70 @@
-﻿using Application.Shared.Services.Org;
+﻿using System.Security.Claims;
+using Application.Tenancy;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
-using System;
-using System.Threading.Tasks;
-
 
 namespace Application.Attributes;
 
-
-[AttributeUsage(AttributeTargets.Method, AllowMultiple = false)]
-public class ValidateCompanyMembershipAttribute : Attribute, IAsyncActionFilter
+/// <summary>
+/// Refuses the request unless the signed-in user is a member of the company named in the
+/// <c>X-Company-ID</c> header.
+/// </summary>
+/// <remarks>
+/// <b>The user id comes from the principal, never from the request.</b> This filter used to read a
+/// <c>userId</c> HTTP header and trust it as the caller's identity, which meant anyone could act as
+/// anyone by changing one header. Worse, the client set it on a shared <c>HttpClient</c>'s
+/// <c>DefaultRequestHeaders</c>, so it rode along on every subsequent request from that client.
+/// <para>
+/// There is deliberately no fallback to the header when the claim is absent. A fallback would be
+/// the vulnerability, restored.
+/// </para>
+/// <para>
+/// The company id stays a header: it names which tenant the caller is asking about, which is a
+/// request parameter, not a claim. It is only ever honoured after the membership check below.
+/// </para>
+/// </remarks>
+[AttributeUsage(AttributeTargets.Method | AttributeTargets.Class, AllowMultiple = false)]
+public sealed class ValidateCompanyMembershipAttribute : Attribute, IAsyncActionFilter
 {
     public async Task OnActionExecutionAsync(ActionExecutingContext context, ActionExecutionDelegate next)
     {
-        var headers = context.HttpContext.Request.Headers;
+        var user = context.HttpContext.User;
 
-        if (!headers.ContainsKey("X-Company-ID") || string.IsNullOrEmpty(headers["X-Company-ID"]))
+        if (user.Identity?.IsAuthenticated != true)
         {
-            context.Result = new BadRequestObjectResult("Company should be in the header");
+            context.Result = new UnauthorizedResult();
             return;
         }
 
-        if (!headers.ContainsKey("userId") || string.IsNullOrEmpty(headers["userId"]))
+        var userId = user.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userId))
         {
-            context.Result = new BadRequestObjectResult("User should be in the header");
+            context.Result = new UnauthorizedResult();
             return;
         }
 
-        var companyId = headers["X-Company-ID"].ToString();
-        var userId = headers["userId"].ToString();
-
-        // Resolve the service dynamically to allow DI
-        var companyService = context.HttpContext.RequestServices.GetService(typeof(ICompanyService)) as ICompanyService;
-        
-        if (companyService == null)
+        var companyId = context.HttpContext.Request.Headers["X-Company-ID"].ToString();
+        if (string.IsNullOrWhiteSpace(companyId))
         {
-            context.Result = new StatusCodeResult(500); // Internal server error if service is missing
+            context.Result = new BadRequestObjectResult("The X-Company-ID header is required.");
             return;
         }
 
-        bool userIsCompanyMember = await companyService.UserIsCompanyMember(userId, companyId);
-
-        if (!userIsCompanyMember)
+        var tenancy = context.HttpContext.RequestServices.GetService<ITenancyDirectory>();
+        if (tenancy is null)
         {
-            context.Result = new UnauthorizedObjectResult($"You are not a member of the company {companyId}");
+            context.Result = new StatusCodeResult(StatusCodes.Status500InternalServerError);
             return;
         }
 
-        // Proceed to the next action
+        if (!await tenancy.IsMemberAsync(userId, companyId, context.HttpContext.RequestAborted))
+        {
+            // 403, not 401: the caller is authenticated, they simply are not a member. Returning
+            // 401 would tell a browser to re-authenticate, which cannot help.
+            context.Result = new ForbidResult();
+            return;
+        }
+
         await next();
     }
 }

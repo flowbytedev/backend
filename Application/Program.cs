@@ -1,10 +1,12 @@
-﻿using Application.Authorization;
+﻿using Application.Auth;
+using Application.Security;
+using Application.Tenancy;
+using Application.Authorization;
 using Application.Client.Pages;
 using Application.DailyInventory;
 using Hangfire;
 using Hangfire.SqlServer;
 using Application.Components;
-using Application.Components.Account;
 using Application.Helpers;
 using Application.Hubs;
 using Application.Services;
@@ -18,7 +20,6 @@ using Application.Shared.Services;
 using Application.Shared.Services.Data;
 using Application.Shared.Services.Org;
 using Microsoft.AspNetCore.Authentication.Cookies;
-using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Components.Server.ProtectedBrowserStorage;
@@ -34,7 +35,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.Identity.Client;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
 using System;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
@@ -76,91 +76,61 @@ builder.Services.AddFluentUIComponents();
 builder.Services.AddCascadingAuthenticationState();
 //builder.Services.AddAuthorizationCore();
 
-builder.Services.AddScoped<IdentityUserAccessor>();
-builder.Services.AddScoped<IdentityRedirectManager>();
-builder.Services.AddScoped<AuthenticationStateProvider, PersistingServerAuthenticationStateProvider>();
+builder.Services.AddScoped<AuthenticationStateProvider, Application.Auth.PersistingServerAuthenticationStateProvider>();
 
-builder.Services.AddApiAuthorization();
 
-const string MS_OIDC_SCHEME = "MicrosoftOidc";
 
 // Per-company, role-based authorization policies (shared with the WASM client).
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentCompanyAccessor, HttpContextCompanyAccessor>();
 builder.Services.AddScoped<IAuthorizationHandler, ModuleAccessHandler>();
 builder.Services.AddAuthorization(options => options.AddFlowbytePolicies());
+// Sign-in goes through the Flowbyte identity application. What was here: ASP.NET Identity's own
+// cookie schemes plus a "Continue with Microsoft" handler talking to Entra directly, which gave a
+// person one account per application and bypassed identity entirely.
+//
+// Identity is an OAuth 2.0 server (code + PKCE, signed JWT access tokens, a JWKS), not an OpenID
+// provider, so this uses the generic OAuth handler and reads the user from the validated access
+// token. There is no sign-in secret; PKCE is the whole of the client authentication. Access is
+// identity's decision too: it refuses the hand-off for anyone without a grant to this application.
+//
+// The API-key scheme below is untouched: ExternalDataController serves non-interactive callers
+// that have no user and no browser, which is a different question from who is signed in.
+//
+// NOT changed: UserManager, the user store and the shared-catalog context further down. This app
+// shares datasets and notebooks WITH users and reads them from that catalog; identity exposes no
+// API for that yet, so that coupling is the next one to remove, not this one.
 builder.Services.AddAuthentication(options =>
     {
-        options.DefaultScheme = IdentityConstants.ApplicationScheme;
-        options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
-
-
-    }).AddCookie("Identity.Application")
-    .AddCookie("Identity.External")
-    //.AddCookie(CookieAuthenticationDefaults.AuthenticationScheme)
+        options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = AuthenticationSchemes.Identity;
+    })
+    .AddCookie(CookieAuthenticationDefaults.AuthenticationScheme, options =>
+    {
+        options.Cookie.Name = "backend.auth";
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Lax;
+        options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+        options.SlidingExpiration = true;
+        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+    })
 
     // API-key scheme for external, non-interactive data access (used only by ExternalDataController).
     .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, Application.Authorization.ApiKeyAuthenticationHandler>(
         Application.Authorization.ApiKeyAuthenticationDefaults.Scheme, _ => { })
 
-    .AddOpenIdConnect(MS_OIDC_SCHEME, displayName: "Continue with Microsoft" , options =>
-    {
+    .AddFlowbyteIdentity(builder.Configuration);
 
-        options.SignInScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+var identitySettings = IdentitySettings.From(builder.Configuration);
 
-        options.SignInScheme = IdentityConstants.ExternalScheme;
-        options.ClientId = builder.Configuration["AzureAd:ClientId"];
-        options.ClientSecret = builder.Configuration["AzureAd:ClientSecret"];
-        options.Authority = builder.Configuration["AzureAd:Authority"];
-        options.MetadataAddress = builder.Configuration["AzureAd:MetadataAddress"];
-        options.CallbackPath = builder.Configuration["AzureAd:CallbackPath"];
-        options.RequireHttpsMetadata = false;
-
-        options.SaveTokens = true;
-        options.GetClaimsFromUserInfoEndpoint = true;
-
-        options.SignedOutRedirectUri = builder.Configuration["AzureAd:SignedOutRedirectUri"];
-        options.SignedOutCallbackPath = builder.Configuration["AzureAd:SignedOutCallbackPath"];
-        options.ResponseType = OpenIdConnectResponseType.Code;
-
-
-        // .NET 9 feature
-        options.PushedAuthorizationBehavior = PushedAuthorizationBehavior.Disable;
-        options.TokenValidationParameters.NameClaimType = JwtRegisteredClaimNames.Name;
-        options.TokenValidationParameters.RoleClaimType = "role";
-
-        // CRITICAL: Use Object ID (oid) as NameIdentifier instead of sub
-        options.Events = new OpenIdConnectEvents
-        {
-            OnTokenValidated = context =>
-            {
-                var identity = context.Principal.Identity as ClaimsIdentity;
-                
-                if (identity != null)
-                {
-                    // Get the Object ID claim
-                    var oidClaim = context.Principal.FindFirst(
-                        "http://schemas.microsoft.com/identity/claims/objectidentifier");
-                    
-                    if (oidClaim != null)
-                    {
-                        // Remove existing NameIdentifier (sub claim)
-                        var existingNameId = identity.FindFirst(ClaimTypes.NameIdentifier);
-                        if (existingNameId != null)
-                        {
-                            identity.RemoveClaim(existingNameId);
-                        }
-                        
-                        // Add Object ID as NameIdentifier
-                        identity.AddClaim(new Claim(ClaimTypes.NameIdentifier, oidClaim.Value));
-                    }
-                }
-                
-                return Task.CompletedTask;
-            }
-        };
-
-    });
+// Company membership comes from identity's API rather than the shared catalog. The token is this
+// application's own -- the client credentials grant -- so it works with no browser open. Issue the
+// secret in identity's Applications screen.
+builder.Services.AddSingleton(IdentityServiceClient.For(
+    identitySettings.BaseUrl, identitySettings.ClientId, builder.Configuration));
+builder.Services.AddSingleton<IdentityServiceTokens>();
+builder.Services.AddScoped<ITenancyDirectory, IdentityTenancyDirectory>();
+builder.Services.AddScoped<IAppLauncherClient, IdentityAppLauncherClient>();
 
 
 
@@ -223,14 +193,12 @@ builder.Configuration.Bind("Duckdb", duckdbOption);
 builder.Services.AddSingleton(duckdbOption);
 
 
-builder.Services.AddSingleton<IEmailSender<ApplicationUser>, IdentityNoOpEmailSender>();
 
 builder.Services.AddScoped<StateContainer>();
 builder.Services.AddScoped<ClientAuthenticationDetail>();
 
 builder.Services.AddScoped<ICompanyService, CompanyService>();
 builder.Services.AddScoped<IUserService, UserService>();
-builder.Services.AddScoped<IApplicationAccessService, ApplicationAccessService>();
 builder.Services.AddScoped<Application.Shared.Services.Data.IDatasetService, DatasetService>();
 builder.Services.AddScoped<IDuckdbService, DuckdbService>();
 
@@ -645,9 +613,6 @@ app.UseAntiforgery();
 app.UseCors("AllowAll");
 
 // Refuse anyone who does not hold access to this application in the shared identity database.
-// Placed here so static files and CORS preflight are already handled, and before endpoint
-// execution. See Middleware/ApplicationAccessMiddleware.cs for why this is not an auth policy.
-app.UseMiddleware<Application.Middleware.ApplicationAccessMiddleware>();
 
 
 app.MapHub<NotificationHub<DataJob>>("/notification/datajob");
@@ -660,7 +625,7 @@ app.MapRazorComponents<App>()
     .AddAdditionalAssemblies(typeof(Application.Client._Imports).Assembly);
 
 // Add additional endpoints required by the Identity /Account Razor components.
-app.MapAdditionalIdentityEndpoints();
+app.MapAuthEndpoints();
 
 // A "Run now" ingestion executes inline in the web request, so a restart mid-run can leave its run
 // record stuck at "Running". Reconcile any such orphaned runs once at startup.
