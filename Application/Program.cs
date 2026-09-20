@@ -602,6 +602,22 @@ app.Use((context, next) =>
 
 app.UseHttpsRedirection();
 
+// Explicit, and deliberately AFTER the scheme correction above.
+//
+// WebApplication inserts UseRouting/UseAuthentication/UseAuthorization automatically when they are
+// not called -- at the FRONT of the pipeline, ahead of any middleware registered here. That splits
+// the OAuth sign-in in half: /Account/Login is an endpoint and runs at the back, so it builds its
+// redirect_uri from the corrected https scheme, while /signin-identity is handled by the
+// authentication middleware at the front and builds its redirect_uri from the raw http scheme IIS
+// reports when TLS terminates in front of it.
+//
+// The two must be byte-identical: identity stores the one from /connect/authorize and compares it
+// at /connect/token, and answers "invalid_grant; redirect_uri does not match the one the code was
+// issued for" when they differ. Calling these here suppresses the automatic insertion and puts
+// authentication behind the scheme fix, which is what fleet has always done.
+app.UseAuthentication();
+app.UseAuthorization();
+
 // Must sit before MapControllers so the [EnableRateLimiting] metadata on PublicQueryController is seen.
 app.UseRateLimiter();
 
