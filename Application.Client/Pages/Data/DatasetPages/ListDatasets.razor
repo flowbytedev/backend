@@ -13,258 +13,395 @@
 
 <PageTitle>Datasets</PageTitle>
 
-@if (!canView && !isLoading)
-{
-    <div class="flex flex-col items-center justify-center h-64 text-gray-500 gap-2">
-        <svg class="w-10 h-10 text-gray-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <p class="text-sm font-semibold text-gray-700">Access Denied</p>
-        <p class="text-xs text-gray-400">You don't have permission to view datasets.</p>
-    </div>
-}
-else
-{
-<div class="ds-page">
-    <div class="ds-header">
-        <div>
-            <h1 class="ds-title">Datasets</h1>
-            <p class="ds-subtitle">
-                @if (!isLoading)
-                {
-                    <span>@(allItems?.Count ?? 0) dataset@(allItems?.Count == 1 ? "" : "s")</span>
-                }
-            </p>
-        </div>
-        @if (canEdit)
-        {
-        <button class="btn btn-default" @onclick="CreateDataset">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-            New Dataset
-        </button>
-        }
-    </div>
-
-    <div class="ds-card">
-        <div class="ds-card-toolbar">
-            <div class="ds-search-wrap">
-                <svg class="ds-search-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                <input class="ds-search" type="search" placeholder="Search datasets..." @bind="searchTerm" @bind:event="oninput" @bind:after="HandleSearch" />
+<div class="sc dl">
+    <div class="page-wrap dl-wrap">
+    @if (!canView && !isLoading)
+    {
+        <div class="card">
+            <div class="empty">
+                <div class="dl-empty-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <div class="empty-title">Access denied</div>
+                <div class="empty-text">You don't have permission to view datasets.</div>
             </div>
         </div>
-
-        @if (isLoading)
-        {
-            <div class="ds-loading">
-                <div class="ds-spinner"></div>
-                <span>Loading datasets...</span>
-            </div>
-        }
-        else if (pagedItems?.Any() == true)
-        {
-            <div class="ds-table-wrap">
-                <table class="ds-table">
-                    <thead>
-                        <tr>
-                            <th class="ds-th ds-th-sortable" @onclick='() => SetSort("name")'>
-                                <span>Name</span> @SortIcon("name")
-                            </th>
-                            <th class="ds-th ds-th-sortable" @onclick='() => SetSort("description")'>
-                                <span>Description</span> @SortIcon("description")
-                            </th>
-                            <th class="ds-th">Source Type</th>
-                            <th class="ds-th">Source Entity</th>
-                            <th class="ds-th">Tables</th>
-                            <th class="ds-th">Size</th>
-                            <th class="ds-th">Rows</th>
-                            <th class="ds-th">Status</th>
-                            <th class="ds-th">Shared</th>
-                            <th class="ds-th ds-th-sortable" @onclick='() => SetSort("created")'>
-                                <span>Created</span> @SortIcon("created")
-                            </th>
-                            <th class="ds-th ds-th-actions">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var dataset in pagedItems)
-                        {
-                            <tr class="ds-tr ds-tr-clickable" @onclick="() => OpenDataset(dataset)"
-                                @oncontextmenu="e => OnRowContextMenu(e, dataset)" @oncontextmenu:preventDefault="true">
-                                <td class="ds-td ds-td-name">
-                                    <span class="ds-dataset-name">@dataset.Name</span>
-                                    @if (IsDefaultDataset(dataset.Id))
-                                    {
-                                        <span title="Your default dataset" style="margin-left:0.4rem;font-size:0.625rem;font-weight:700;color:#b45309;background:#fef3c7;border-radius:9999px;padding:0.05rem 0.4rem;text-transform:uppercase;letter-spacing:0.03em">Default</span>
-                                    }
-                                </td>
-                                <td class="ds-td">
-                                    <span class="ds-dataset-desc">@dataset.Description</span>
-                                </td>
-                                <td class="ds-td">
-                                    @if (dataset.SourceType == DatasetSourceType.External)
-                                    {
-                                        var info = SourceInfo(dataset.SourceEntityId);
-                                        <span style="display:inline-flex;align-items:center;font-size:0.6875rem;font-weight:600;padding:0.125rem 0.5rem;border-radius:9999px;background:#eef2ff;color:#4f46e5;text-transform:uppercase;letter-spacing:0.03em">
-                                            @(info?.DatabaseType.ToString() ?? "External")
-                                        </span>
-                                    }
-                                    else
-                                    {
-                                        <span style="font-size:0.6875rem;font-weight:600;padding:0.125rem 0.5rem;border-radius:9999px;background:#f4f4f5;color:#71717a;text-transform:uppercase;letter-spacing:0.03em">Local</span>
-                                    }
-                                </td>
-                                <td class="ds-td">
-                                    @if (dataset.SourceType == DatasetSourceType.External && !string.IsNullOrEmpty(dataset.SourceEntityId))
-                                    {
-                                        <a href="@($"/status/entities/{dataset.SourceEntityId}?c={companyId}")"
-                                           title="@(SourceInfo(dataset.SourceEntityId)?.Name ?? "Open entity details")"
-                                           @onclick:stopPropagation="true"
-                                           style="font-size:0.75rem;color:#2563eb;font-family:ui-monospace,Consolas,monospace;text-decoration:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block">
-                                            @dataset.SourceEntityId
-                                        </a>
-                                    }
-                                    else
-                                    {
-                                        <span style="font-size:0.75rem;color:#a1a1aa">—</span>
-                                    }
-                                </td>
-                                <td class="ds-td">
-                                    @{ var st = StatsFor(dataset.Id); }
-                                    @if (st != null) { <span class="ds-stat">@st.TableCount</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
-                                </td>
-                                <td class="ds-td">
-                                    @if (st != null && st.DatabaseExists) { <span class="ds-stat">@FormatBytes(st.SizeBytes)</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
-                                </td>
-                                <td class="ds-td">
-                                    @if (st != null) { <span class="ds-stat">@st.TotalRows.ToString("N0")</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
-                                </td>
-                                <td class="ds-td">
-                                    @if (st != null)
-                                    {
-                                        var (bg, fg) = StatusColors(st.Status);
-                                        <span style="display:inline-flex;align-items:center;font-size:0.6875rem;font-weight:600;padding:0.125rem 0.5rem;border-radius:9999px;background:@bg;color:@fg;text-transform:uppercase;letter-spacing:0.03em">@st.Status</span>
-                                    }
-                                    else { <span style="color:#a1a1aa">—</span> }
-                                </td>
-                                <td class="ds-td">
-                                    @if ((st?.SharedWith ?? 0) > 0)
-                                    {
-                                        <button type="button" title="@($"Shared with {st!.SharedWith} {(st.SharedWith == 1 ? "person" : "people")} — click to manage")"
-                                                @onclick="() => OpenSharedWith(dataset)" @onclick:stopPropagation="true"
-                                                style="display:inline-flex;align-items:center;gap:0.25rem;font-size:0.75rem;font-weight:500;color:#4f46e5;background:none;border:none;cursor:pointer;padding:0">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                                            <span>@st.SharedWith</span>
-                                        </button>
-                                    }
-                                    else { <span style="font-size:0.75rem;color:#a1a1aa">Private</span> }
-                                </td>
-                                <td class="ds-td ds-td-date">@dataset.CreatedAt.ToString("MMM dd, yyyy")</td>
-                                <td class="ds-td ds-td-actions-cell" @onclick:stopPropagation="true">
-                                    <div class="ds-actions">
-                                        <button class="btn-icon" title="@(IsPinned(dataset.Id) ? "Unpin" : "Pin to top")" @onclick="() => TogglePin(dataset)" style="@(IsPinned(dataset.Id) ? "color:#4f46e5" : "")">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsPinned(dataset.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
-                                        </button>
-                                        <button class="btn-icon" title="@(IsDefaultDataset(dataset.Id) ? "Default dataset (click to clear)" : "Set as default")" @onclick="() => ToggleDefault(dataset)" style="@(IsDefaultDataset(dataset.Id) ? "color:#f59e0b" : "")">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsDefaultDataset(dataset.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                                        </button>
-                                        <button class="btn-icon" title="More actions" @onclick="e => OpenActionsMenu(e, dataset)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-
-            @if (contextMenuDataset != null)
-            {
-                var ds = contextMenuDataset;
-                <div class="ctx-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault="true"></div>
-                <div class="ctx-menu" style="left:@(contextMenuX)px; top:@(contextMenuY)px;">
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = TogglePin(ds); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsPinned(ds.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
-                        @(IsPinned(ds.Id) ? "Unpin" : "Pin to top")
-                    </button>
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = ToggleDefault(ds); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsDefaultDataset(ds.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                        @(IsDefaultDataset(ds.Id) ? "Clear default" : "Set as default")
-                    </button>
-                    <div class="ctx-sep"></div>
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); OpenDataset(ds); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
-                        Open dataset
-                    </button>
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); ShareDataset(ds); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
-                        Share dataset
-                    </button>
-                    @if (canEdit)
+    }
+    else
+    {
+        <div class="dl-head">
+            <div class="page-header">
+                <h1 class="page-title">Datasets</h1>
+                <p class="page-subtitle">
+                    @if (isLoading)
                     {
-                        <div class="ctx-sep"></div>
-                        <button class="ctx-item" @onclick="() => { CloseContextMenu(); EditDataset(ds); }">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                            Edit dataset
-                        </button>
-                        <button class="ctx-item ctx-item-danger" @onclick="() => { CloseContextMenu(); _ = DeleteDataset(ds); }">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                            Delete dataset
-                        </button>
-                    }
-                </div>
-            }
-
-            @if (totalPages > 1)
-            {
-                <div class="ds-pagination">
-                    <span>Page @(currentPage + 1) of @totalPages</span>
-                    <div class="ds-page-btns">
-                        <button class="btn-page" disabled="@(currentPage == 0)" @onclick="PrevPage">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-                        </button>
-                        @for (int i = 0; i < totalPages; i++)
-                        {
-                            var pageIndex = i;
-                            <button class="btn-page @(currentPage == pageIndex ? "btn-page-active" : "")" @onclick="() => GoToPage(pageIndex)">@(i + 1)</button>
-                        }
-                        <button class="btn-page" disabled="@(currentPage >= totalPages - 1)" @onclick="NextPage">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-                        </button>
-                    </div>
-                </div>
-            }
-        }
-        else
-        {
-            <div class="ds-empty">
-                <div class="ds-empty-icon">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>
-                </div>
-                <h3 class="ds-empty-title">No datasets found</h3>
-                <p class="ds-empty-sub">
-                    @if (!string.IsNullOrWhiteSpace(searchTerm))
-                    {
-                        <span>No datasets match "<strong>@searchTerm</strong>". Try a different search.</span>
-                    }
-                    else if (string.IsNullOrEmpty(companyId))
-                    {
-                        <span>Company ID is required to load datasets.</span>
+                        <span class="skeleton dl-skel" style="display:inline-block;width:140px;vertical-align:middle;"></span>
                     }
                     else
                     {
-                        <span>Get started by creating your first dataset.</span>
+                        var total = allItems?.Count ?? 0;
+                        var external = CountFor("external");
+                        var pinned = CountFor("pinned");
+                        <span>@total dataset@(total == 1 ? "" : "s")</span>
+                        @if (external > 0) { <span class="dl-sep">·</span><span>@external external</span> }
+                        @if (pinned > 0) { <span class="dl-sep">·</span><span>@pinned pinned</span> }
                     }
                 </p>
-                @if (canEdit && !string.IsNullOrEmpty(companyId) && string.IsNullOrWhiteSpace(searchTerm))
-                {
-                    <button class="btn btn-default" @onclick="CreateDataset">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-                        Create Dataset
-                    </button>
-                }
             </div>
-        }
+            @if (canEdit)
+            {
+                <button class="btn btn-primary" @onclick="CreateDataset">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                    New dataset
+                </button>
+            }
+        </div>
+
+        <div class="card dl-card">
+            <div class="dl-toolbar">
+                <div class="dl-search">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                    <input class="input" type="search" placeholder="Search by name or description…"
+                           @bind="searchTerm" @bind:event="oninput" @bind:after="HandleSearch" />
+                </div>
+
+                <div class="dl-seg" role="group" aria-label="Filter datasets">
+                    @foreach (var (key, label) in SegmentFilters)
+                    {
+                        var f = key;
+                        <button type="button" class="dl-seg-btn @(sourceFilter == f ? "is-active" : "")" @onclick="() => SetSourceFilter(f)">
+                            @label
+                            @if (!isLoading) { <span class="dl-seg-count">@CountFor(f)</span> }
+                        </button>
+                    }
+                </div>
+            </div>
+
+            @if (isLoading)
+            {
+                <div class="dl-table-wrap">
+                    <table class="dl-table" aria-busy="true">
+                        <colgroup>
+                            <col class="dl-col-name" /><col class="dl-col-source" /><col class="dl-col-tables" /><col class="dl-col-size" /><col class="dl-col-rows" />
+                            <col class="dl-col-status" /><col class="dl-col-access" /><col class="dl-col-created" /><col class="dl-col-actions" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="dl-th">Dataset</th>
+                                <th class="dl-th">Source</th>
+                                <th class="dl-th dl-th-num">Tables</th>
+                                <th class="dl-th dl-th-num">Size</th>
+                                <th class="dl-th dl-th-num">Rows</th>
+                                <th class="dl-th">Status</th>
+                                <th class="dl-th">Access</th>
+                                <th class="dl-th">Created</th>
+                                <th class="dl-th dl-th-actions"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < 5; i++)
+                            {
+                                <tr class="dl-row dl-row-skel">
+                                    <td class="dl-td">
+                                        <div class="dl-ident">
+                                            <span class="skeleton dl-skel-tile"></span>
+                                            <div class="dl-ident-text" style="flex:1;">
+                                                <div class="skeleton dl-skel" style="width:@(160 + (i * 23) % 80)px;"></div>
+                                                <div class="skeleton dl-skel" style="width:@(220 + (i * 41) % 120)px;margin-top:6px;height:10px;"></div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="dl-td"><div class="skeleton dl-skel" style="width:64px;height:18px;border-radius:999px;"></div></td>
+                                    <td class="dl-td dl-td-num"><div class="skeleton dl-skel" style="width:24px;margin-left:auto;"></div></td>
+                                    <td class="dl-td dl-td-num"><div class="skeleton dl-skel" style="width:48px;margin-left:auto;"></div></td>
+                                    <td class="dl-td dl-td-num"><div class="skeleton dl-skel" style="width:60px;margin-left:auto;"></div></td>
+                                    <td class="dl-td"><div class="skeleton dl-skel" style="width:56px;"></div></td>
+                                    <td class="dl-td"><div class="skeleton dl-skel" style="width:52px;"></div></td>
+                                    <td class="dl-td"><div class="skeleton dl-skel" style="width:78px;"></div></td>
+                                    <td class="dl-td dl-td-actions"></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else if (pagedItems?.Any() == true)
+            {
+                <div class="dl-table-wrap">
+                    <table class="dl-table">
+                        <colgroup>
+                            <col class="dl-col-name" /><col class="dl-col-source" /><col class="dl-col-tables" /><col class="dl-col-size" /><col class="dl-col-rows" />
+                            <col class="dl-col-status" /><col class="dl-col-access" /><col class="dl-col-created" /><col class="dl-col-actions" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="dl-th dl-th-sort @(sortField == "name" ? "is-active" : "")" aria-sort="@AriaSort("name")" @onclick='() => SetSort("name")'>
+                                    <span class="dl-th-inner"><span>Dataset</span>@SortIcon("name")</span>
+                                </th>
+                                <th class="dl-th">Source</th>
+                                <th class="dl-th dl-th-num dl-th-sort @(sortField == "tables" ? "is-active" : "")" aria-sort="@AriaSort("tables")" @onclick='() => SetSort("tables")'>
+                                    <span class="dl-th-inner"><span>Tables</span>@SortIcon("tables")</span>
+                                </th>
+                                <th class="dl-th dl-th-num dl-th-sort @(sortField == "size" ? "is-active" : "")" aria-sort="@AriaSort("size")" @onclick='() => SetSort("size")'>
+                                    <span class="dl-th-inner"><span>Size</span>@SortIcon("size")</span>
+                                </th>
+                                <th class="dl-th dl-th-num dl-th-sort @(sortField == "rows" ? "is-active" : "")" aria-sort="@AriaSort("rows")" @onclick='() => SetSort("rows")'>
+                                    <span class="dl-th-inner"><span>Rows</span>@SortIcon("rows")</span>
+                                </th>
+                                <th class="dl-th">Status</th>
+                                <th class="dl-th">Access</th>
+                                <th class="dl-th dl-th-sort @(sortField == "created" ? "is-active" : "")" aria-sort="@AriaSort("created")" @onclick='() => SetSort("created")'>
+                                    <span class="dl-th-inner"><span>Created</span>@SortIcon("created")</span>
+                                </th>
+                                <th class="dl-th dl-th-actions"><span class="dl-sr-only">Actions</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var dataset in pagedItems)
+                            {
+                                var item = dataset;
+                                var st = StatsFor(item.Id);
+                                var isExternal = item.SourceType == DatasetSourceType.External;
+                                var info = isExternal ? SourceInfo(item.SourceEntityId) : null;
+                                var pinned = IsPinned(item.Id);
+                                var isDefault = IsDefaultDataset(item.Id);
+
+                                <tr @key="item.Id" class="dl-row @(pinned ? "is-pinned" : "")" tabindex="0"
+                                    @onclick="() => OpenDataset(item)"
+                                    @onkeydown="e => OnRowKey(e, item)"
+                                    @oncontextmenu="e => OnRowContextMenu(e, item)" @oncontextmenu:preventDefault="true">
+
+                                    <td class="dl-td dl-td-name">
+                                        <div class="dl-ident">
+                                            <span class="dl-tile @(isExternal ? "dl-tile-ext" : "")" aria-hidden="true">
+                                                @if (isExternal)
+                                                {
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+                                                }
+                                                else
+                                                {
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>
+                                                }
+                                            </span>
+                                            <div class="dl-ident-text">
+                                                <div class="dl-name-row">
+                                                    <span class="dl-name" title="@item.Name">@item.Name</span>
+                                                    @if (pinned)
+                                                    {
+                                                        <svg class="dl-pin-mark" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Pinned"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+                                                    }
+                                                    @if (isDefault)
+                                                    {
+                                                        <span class="badge badge-warning dl-default-badge" title="Your default dataset">Default</span>
+                                                    }
+                                                </div>
+                                                <div class="dl-desc" title="@item.Description">@item.Description</div>
+                                            </div>
+                                        </div>
+                                    </td>
+
+                                    <td class="dl-td">
+                                        <div class="dl-source">
+                                            @if (isExternal)
+                                            {
+                                                <span class="badge badge-accent">@(info != null ? SourceLabel(info.DatabaseType) : "External")</span>
+                                                @if (!string.IsNullOrEmpty(item.SourceEntityId))
+                                                {
+                                                    <a class="dl-entity" href="@($"/status/entities/{item.SourceEntityId}?c={companyId}")"
+                                                       title="@(info?.Name ?? item.SourceEntityId) — open entity"
+                                                       @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                                        @(info?.Name ?? item.SourceEntityId)
+                                                    </a>
+                                                }
+                                            }
+                                            else
+                                            {
+                                                <span class="badge badge-neutral">Local</span>
+                                                <span class="dl-entity dl-entity-static">DuckDB file</span>
+                                            }
+                                        </div>
+                                    </td>
+
+                                    <td class="dl-td dl-td-num">
+                                        @if (st != null) { <span class="dl-num">@st.TableCount</span> } else { <span class="dl-na">—</span> }
+                                    </td>
+                                    <td class="dl-td dl-td-num">
+                                        @if (st != null && st.DatabaseExists)
+                                        {
+                                            var (num, unit) = FormatBytesParts(st.SizeBytes);
+                                            <span class="dl-num">@num<span class="dl-unit">@unit</span></span>
+                                        }
+                                        else { <span class="dl-na">—</span> }
+                                    </td>
+                                    <td class="dl-td dl-td-num">
+                                        @if (st != null) { <span class="dl-num" title="@st.TotalRows.ToString("N0") rows">@st.TotalRows.ToString("N0")</span> } else { <span class="dl-na">—</span> }
+                                    </td>
+
+                                    <td class="dl-td">
+                                        @if (st != null)
+                                        {
+                                            <span class="dl-status"><span class="dl-dot dl-dot-@StatusTone(st.Status)"></span>@st.Status</span>
+                                        }
+                                        else { <span class="dl-na">—</span> }
+                                    </td>
+
+                                    <td class="dl-td">
+                                        @if ((st?.SharedWith ?? 0) > 0)
+                                        {
+                                            <button type="button" class="dl-access"
+                                                    title="@($"Shared with {st!.SharedWith} {(st.SharedWith == 1 ? "person" : "people")} — click to manage")"
+                                                    @onclick="() => OpenSharedWith(item)" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                                <span>@st.SharedWith @(st.SharedWith == 1 ? "person" : "people")</span>
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <span class="dl-access dl-access-private">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                                <span>Private</span>
+                                            </span>
+                                        }
+                                    </td>
+
+                                    <td class="dl-td dl-td-date" title="@LocalTime(item.CreatedAt).ToString("dddd, dd MMMM yyyy HH:mm") · @RelativeTime(item.CreatedAt)">
+                                        @LocalTime(item.CreatedAt).ToString("dd MMM yyyy")
+                                    </td>
+
+                                    <td class="dl-td dl-td-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                        <div class="dl-actions">
+                                            <button type="button" class="dl-act @(pinned ? "is-on" : "")" title="@(pinned ? "Unpin" : "Pin to top")" @onclick="() => TogglePin(item)">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(pinned ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+                                            </button>
+                                            <button type="button" class="dl-act dl-act-star @(isDefault ? "is-on" : "")" title="@(isDefault ? "Default dataset (click to clear)" : "Set as default")" @onclick="() => ToggleDefault(item)">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(isDefault ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                            </button>
+                                            <button type="button" class="dl-act dl-act-more" title="More actions" @onclick="e => OpenActionsMenu(e, item)">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="dl-footer">
+                    <span class="dl-footer-text">
+                        Showing <strong>@(currentPage * pageSize + 1)–@Math.Min((currentPage + 1) * pageSize, filteredItems?.Count ?? 0)</strong>
+                        of <strong>@(filteredItems?.Count ?? 0)</strong>
+                    </span>
+                    @if (totalPages > 1)
+                    {
+                        <nav class="dl-pager" aria-label="Pagination">
+                            <button type="button" class="dl-page-btn" disabled="@(currentPage == 0)" @onclick="PrevPage" aria-label="Previous page">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                            </button>
+                            @foreach (var p in PageItems())
+                            {
+                                if (p < 0)
+                                {
+                                    <span class="dl-page-gap" aria-hidden="true">…</span>
+                                }
+                                else
+                                {
+                                    var pageIndex = p;
+                                    <button type="button" class="dl-page-btn @(currentPage == pageIndex ? "is-active" : "")"
+                                            aria-current="@(currentPage == pageIndex ? "page" : null)"
+                                            @onclick="() => GoToPage(pageIndex)">@(pageIndex + 1)</button>
+                                }
+                            }
+                            <button type="button" class="dl-page-btn" disabled="@(currentPage >= totalPages - 1)" @onclick="NextPage" aria-label="Next page">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                            </button>
+                        </nav>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="empty dl-empty">
+                    <div class="dl-empty-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/></svg>
+                    </div>
+                    <div class="empty-title">
+                        @if (!string.IsNullOrWhiteSpace(searchTerm) || sourceFilter != "all") { <text>Nothing matches</text> }
+                        else { <text>No datasets yet</text> }
+                    </div>
+                    <div class="empty-text">
+                        @if (!string.IsNullOrWhiteSpace(searchTerm))
+                        {
+                            <span>No datasets match “<strong>@searchTerm</strong>”@(sourceFilter != "all" ? $" in {FilterLabel(sourceFilter)}" : ""). Try a different search.</span>
+                        }
+                        else if (sourceFilter != "all")
+                        {
+                            <span>No @FilterLabel(sourceFilter).ToLowerInvariant() datasets to show.</span>
+                        }
+                        else if (string.IsNullOrEmpty(companyId))
+                        {
+                            <span>Company ID is required to load datasets.</span>
+                        }
+                        else
+                        {
+                            <span>Get started by creating your first dataset.</span>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(searchTerm) || sourceFilter != "all")
+                    {
+                        <button class="btn btn-secondary btn-sm" style="margin-top:6px;" @onclick="ClearFilters">Clear filters</button>
+                    }
+                    else if (canEdit && !string.IsNullOrEmpty(companyId))
+                    {
+                        <button class="btn btn-primary btn-sm" style="margin-top:6px;" @onclick="CreateDataset">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                            Create dataset
+                        </button>
+                    }
+                </div>
+            }
+        </div>
+    }
     </div>
 </div>
+
+@* ---------- row context menu (mirrors the row's own action buttons) ---------- *@
+@if (contextMenuDataset != null)
+{
+    var ds = contextMenuDataset;
+    <div class="ctx-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault="true"></div>
+    <div class="ctx-menu dl-ctx" style="left:@(contextMenuX)px; top:@(contextMenuY)px;">
+        <div class="dl-ctx-label" title="@ds.Name">@ds.Name</div>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = TogglePin(ds); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsPinned(ds.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+            @(IsPinned(ds.Id) ? "Unpin" : "Pin to top")
+        </button>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = ToggleDefault(ds); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsDefaultDataset(ds.Id) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            @(IsDefaultDataset(ds.Id) ? "Clear default" : "Set as default")
+        </button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); OpenDataset(ds); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
+            Open dataset
+        </button>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); ShareDataset(ds); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
+            Share dataset
+        </button>
+        @if (canEdit)
+        {
+            <div class="ctx-sep"></div>
+            <button class="ctx-item" @onclick="() => { CloseContextMenu(); EditDataset(ds); }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+                Edit dataset
+            </button>
+            <button class="ctx-item ctx-item-danger" @onclick="() => { CloseContextMenu(); _ = DeleteDataset(ds); }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                Delete dataset
+            </button>
+        }
+    </div>
 }
 
 <ShareDatasetModal IsVisible="@showShareModal"
@@ -273,40 +410,42 @@ else
                    DatasetName="@(selectedDatasetForSharing?.Name ?? string.Empty)"
                    CompanyId="@(companyId ?? string.Empty)" />
 
+@* ---------- "Shared with" popup ---------- *@
 @if (showSharedModal)
 {
-    <div class="ds-modal-backdrop" @onclick="() => showSharedModal = false">
-        <div class="ds-modal" @onclick:stopPropagation="true">
-            <div class="ds-modal-header">
-                <h2 class="ds-modal-title">Shared with <span style="color:#71717a;font-weight:400">— @sharedDatasetName</span></h2>
-                <button class="ds-modal-close" @onclick="() => showSharedModal = false" aria-label="Close">
+    <div class="fb-modal-backdrop" @onclick="() => showSharedModal = false">
+        <div class="fb-modal sc" role="dialog" aria-modal="true" aria-label="Shared with" @onclick:stopPropagation="true">
+            <div class="fb-modal-head">
+                <div class="fb-modal-title">Shared with <span class="dl-modal-sub">— @sharedDatasetName</span></div>
+                <button class="btn btn-ghost btn-icon" @onclick="() => showSharedModal = false" aria-label="Close">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
             </div>
-            <div class="ds-modal-body">
+            <div class="fb-modal-body">
                 @if (isLoadingShared)
                 {
-                    <div class="ds-loading"><div class="ds-spinner"></div><span>Loading…</span></div>
+                    <div class="skeleton dl-skel" style="width:60%;margin-bottom:10px;"></div>
+                    <div class="skeleton dl-skel" style="width:40%;"></div>
                 }
                 else if (!sharedUsers.Any())
                 {
-                    <span class="ds-dataset-desc">This dataset isn't shared with anyone.</span>
+                    <div class="empty-text">This dataset isn't shared with anyone.</div>
                 }
                 else
                 {
-                    <p class="ds-hint" style="margin-top:0">People with access to this dataset. Stopping sharing removes their access entirely.</p>
+                    <p class="field-help" style="margin:0 0 6px;">People with access to this dataset. Stopping sharing removes their access entirely.</p>
                     @foreach (var u in sharedUsers)
                     {
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.65rem 0;border-top:1px solid #f4f4f5">
-                            <div>
-                                <div style="font-weight:500;color:#18181b">@(string.IsNullOrEmpty(u.Email) ? u.UserId : u.Email)</div>
-                                <div style="font-size:0.75rem;color:#a1a1aa">
+                        <div class="dl-share-row">
+                            <div style="min-width:0;">
+                                <div class="dl-share-name">@(string.IsNullOrEmpty(u.Email) ? u.UserId : u.Email)</div>
+                                <div class="dl-share-meta">
                                     @u.Type · @(u.Tables.Any() ? $"{u.Tables.Count} table{(u.Tables.Count == 1 ? "" : "s")}" : "All tables")
                                 </div>
                             </div>
                             @if (canEdit)
                             {
-                                <button class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca"
+                                <button class="btn btn-secondary btn-sm dl-btn-danger-outline"
                                         @onclick="() => StopSharing(u.UserId)"
                                         disabled="@(isRemovingShare || sharedUsers.Count <= 1)"
                                         title="@(sharedUsers.Count <= 1 ? "Can't remove the only person this dataset is shared with." : "Stop sharing with this person")">Stop sharing</button>
@@ -320,22 +459,201 @@ else
 }
 
 <style>
-    /* Dark mode: override hardcoded light inline colors */
-    [data-theme="dark"] [style*="color:#18181b"]{color:#f3f4f6!important}
-    [data-theme="dark"] [style*="color:#71717a"]{color:#9aa1ac!important}
-    [data-theme="dark"] [style*="color:#a1a1aa"]{color:#9aa1ac!important}
-    [data-theme="dark"] [style*="color:#2563eb"]{color:#93c5fd!important}
-    [data-theme="dark"] [style*="color:#4f46e5"]{color:#818cf8!important}
-    [data-theme="dark"] [style*="color:#15803d"]{color:#4ade80!important}
-    [data-theme="dark"] [style*="color:#a16207"]{color:#fcd34d!important}
-    [data-theme="dark"] [style*="color:#b91c1c"]{color:#f87171!important}
-    [data-theme="dark"] [style*="background:#eef2ff"]{background:rgba(129,140,248,.15)!important}
-    [data-theme="dark"] [style*="background:#f4f4f5"]{background:#1e222b!important}
-    [data-theme="dark"] [style*="background:#dcfce7"]{background:rgba(34,197,94,.15)!important}
-    [data-theme="dark"] [style*="background:#fef9c3"]{background:rgba(245,158,11,.12)!important}
-    [data-theme="dark"] [style*="background:#fee2e2"]{background:rgba(239,68,68,.12)!important}
-    [data-theme="dark"] [style*="1px solid #f4f4f5"]{border-color:#23272f!important}
-    [data-theme="dark"] [style*="border-color:#fecaca"]{border-color:rgba(239,68,68,.4)!important}
+    /* ------------------------------------------------------------------------------------------------
+       Datasets list — `.dl-*`. Built on the shadcn tokens in shadcn.css (light + dark come from the
+       tokens, so there is no separate dark block except for the global ctx-menu, which app.css hard
+       codes to white). Class names are unique to this page, the same way pipeline.css uses `.pl-*`.
+       ------------------------------------------------------------------------------------------------ */
+    /* Full width: the table is the page, so it takes the whole content area instead of the page-wrap 1280px centre column. The .sc prefix is needed to out-rank `.sc .page-wrap`. */
+    .sc .dl-wrap { max-width: none; }
+    .dl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+    .dl-head .page-header { margin-bottom: 0; }
+    .dl-sep { color: var(--border-strong); margin: 0 7px; }
+    .dl-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+    /* ---- card + toolbar ---- */
+    .dl-card { overflow: hidden; }
+    .dl-toolbar {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface);
+    }
+    .dl-search { position: relative; flex: 1 1 220px; max-width: 340px; }
+    .dl-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+    .sc .dl-search .input { padding-left: 32px; }
+    .sc .dl-search .input::-webkit-search-cancel-button { cursor: pointer; }
+
+    .dl-seg {
+        display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+        background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);
+    }
+    .dl-seg-btn {
+        appearance: none; border: 0; background: transparent; font: inherit; font-size: 12.5px; font-weight: 500;
+        color: var(--text-muted); padding: 5px 10px; border-radius: 6px; cursor: pointer; line-height: 1;
+        display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+        transition: background .12s ease, color .12s ease, box-shadow .12s ease;
+    }
+    .dl-seg-btn:hover { color: var(--text-primary); }
+    .dl-seg-btn.is-active { background: var(--surface); color: var(--text-primary); box-shadow: var(--shadow-sm); }
+    .dl-seg-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .dl-seg-count {
+        font-size: 10.5px; font-weight: 600; line-height: 1; padding: 3px 5px; border-radius: 999px;
+        color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+        font-variant-numeric: tabular-nums;
+    }
+    .dl-seg-btn.is-active .dl-seg-count { color: var(--text-on-accent); background: var(--accent); }
+
+    /* ---- table ---- */
+    .dl-table-wrap { overflow-x: auto; }
+    /* Fixed layout: the fixed-width columns below take what they need and the Dataset column absorbs the
+       rest, so nothing is clipped on a normal screen; below the min-width the wrap scrolls sideways. */
+    .dl-table { width: 100%; min-width: 1040px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+    .dl-col-source { width: 164px; } .dl-col-tables { width: 64px; } .dl-col-size { width: 84px; } .dl-col-rows { width: 104px; }
+    .dl-col-status { width: 116px; } .dl-col-access { width: 100px; } .dl-col-created { width: 96px; } .dl-col-actions { width: 104px; }
+    .dl-th {
+        text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+        color: var(--text-muted); padding: 9px 12px; border-bottom: 1px solid var(--border);
+        background: var(--surface-subtle); white-space: nowrap; user-select: none;
+    }
+    .dl-th-inner { display: inline-flex; align-items: center; gap: 4px; }
+    .dl-th-sort { cursor: pointer; transition: color .12s ease; }
+    .dl-th-sort:hover, .dl-th-sort.is-active { color: var(--text-primary); }
+    .dl-sort-ico { opacity: 0; transition: opacity .12s ease; }
+    .dl-th-sort:hover .dl-sort-ico { opacity: .45; }
+    .dl-th-sort.is-active .dl-sort-ico { opacity: 1; }
+    .dl-th-num, .dl-td-num { text-align: right; }
+    .dl-th-num .dl-th-inner { flex-direction: row-reverse; }
+    .dl-th-actions, .dl-td-actions { white-space: nowrap; text-align: right; }
+
+    .dl-td { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-primary); vertical-align: middle; }
+    .dl-row { cursor: pointer; }
+    .dl-row .dl-td { transition: background .1s ease; }
+    .dl-row:hover .dl-td { background: var(--surface-muted); }
+    .dl-row:focus-visible { outline: none; }
+    .dl-row:focus-visible .dl-td { background: var(--accent-subtle); }
+    .dl-row:last-child .dl-td { border-bottom: 0; }
+    .dl-row.is-pinned .dl-td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+    .dl-row-skel { cursor: default; }
+    .dl-row-skel:hover .dl-td { background: transparent; }
+
+    /* ---- identity cell ---- */
+    .dl-ident { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .dl-tile {
+        flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid var(--border); background: var(--surface-subtle); color: var(--text-secondary);
+    }
+    .dl-tile-ext { background: var(--accent-subtle); border-color: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--accent); }
+    .dl-ident-text { min-width: 0; }
+    .dl-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .dl-name { font-weight: 600; font-size: 13.5px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dl-pin-mark { color: var(--accent); flex: 0 0 auto; }
+    .sc .dl-default-badge { padding: 0 6px; font-size: 10px; line-height: 1.5; letter-spacing: .02em; }
+    .dl-desc { font-size: 12px; color: var(--text-muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ---- source cell ---- */
+    .dl-source { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+    .sc .dl-entity {
+        font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); text-decoration: none;
+        display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .sc a.dl-entity:hover, .sc a.dl-entity:focus-visible { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; outline: none; }
+    .sc .dl-entity-static { cursor: default; }
+
+    /* ---- numbers / status / access ---- */
+    .dl-num { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+    .dl-unit { color: var(--text-muted); font-size: 11.5px; margin-left: 2px; }
+    .dl-na { color: var(--text-muted); }
+
+    .dl-status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; }
+    .dl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 18%, transparent); }
+    .dl-dot-success { background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent); }
+    .dl-dot-accent  { background: var(--accent);  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+    .dl-dot-warning { background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 24%, transparent); }
+    .dl-dot-danger  { background: var(--danger);  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent); }
+
+    .dl-access {
+        display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12.5px; font-weight: 500;
+        color: var(--text-secondary); background: none; border: 0; padding: 3px 7px; margin-left: -7px;
+        border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; transition: background .12s ease, color .12s ease;
+    }
+    .dl-access:hover, .dl-access:focus-visible { background: var(--accent-subtle); color: var(--accent); outline: none; }
+    .dl-access-private { color: var(--text-muted); cursor: default; font-weight: 400; }
+    .dl-access-private:hover { background: none; color: var(--text-muted); }
+
+    .dl-td-date { color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+    /* ---- row actions: quiet until the row is hovered or focused; active states always show ---- */
+    .dl-actions { display: inline-flex; align-items: center; gap: 2px; }
+    .dl-act {
+        appearance: none; width: 28px; height: 28px; border-radius: 6px; border: 0; background: transparent;
+        color: var(--text-muted); display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+        opacity: 0; transition: opacity .12s ease, background .12s ease, color .12s ease;
+    }
+    .dl-row:hover .dl-act, .dl-row:focus-within .dl-act, .dl-act.is-on, .dl-act-more { opacity: 1; }
+    .dl-act:hover { background: var(--surface-subtle); color: var(--text-primary); }
+    .dl-act.is-on { color: var(--accent); }
+    .dl-act-star.is-on { color: var(--warning); }
+    .dl-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
+    @@media (hover: none) { .dl-act { opacity: 1; } }
+
+    /* ---- skeleton ---- */
+    .dl-skel { height: 12px; }
+    .dl-skel-tile { width: 34px; height: 34px; border-radius: 8px; flex: 0 0 auto; }
+    /* The shared recipe is nearly invisible on the light table surface; step it up one token. */
+    .dl-row-skel .skeleton { background-image: linear-gradient(90deg, var(--border) 25%, var(--border-strong) 37%, var(--border) 63%); }
+
+    /* ---- footer / pager ---- */
+    .dl-footer {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+        padding: 10px 14px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-muted);
+    }
+    .dl-footer-text strong { font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+    .dl-pager { display: inline-flex; align-items: center; gap: 2px; }
+    .dl-page-btn {
+        appearance: none; min-width: 30px; height: 30px; padding: 0 8px; border-radius: 6px;
+        border: 1px solid transparent; background: transparent; color: var(--text-secondary);
+        font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; cursor: pointer;
+        display: inline-flex; align-items: center; justify-content: center;
+        transition: background .12s ease, color .12s ease;
+    }
+    .dl-page-btn:hover:not(:disabled) { background: var(--surface-subtle); color: var(--text-primary); }
+    .dl-page-btn.is-active { background: var(--accent); color: var(--text-on-accent); border-color: var(--accent); }
+    .dl-page-btn:disabled { opacity: .4; cursor: default; }
+    .dl-page-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .dl-page-gap { min-width: 22px; text-align: center; color: var(--text-muted); }
+
+    /* ---- empty state ---- */
+    .dl-empty-icon {
+        width: 44px; height: 44px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center;
+        background: var(--surface-subtle); border: 1px solid var(--border); color: var(--text-muted); margin-bottom: 6px;
+    }
+
+    /* ---- context menu: app.css hard codes it to light; retheme through the tokens ---- */
+    .dl-ctx-label {
+        padding: 0.3rem 0.6rem 0.35rem; font-size: 0.6875rem; font-weight: 600; letter-spacing: .04em;
+        text-transform: uppercase; color: var(--text-muted); max-width: 240px;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    [data-theme="dark"] .dl-ctx { background: var(--surface); border-color: var(--border); box-shadow: var(--shadow-md); }
+    [data-theme="dark"] .dl-ctx .ctx-item { color: var(--text-primary); }
+    [data-theme="dark"] .dl-ctx .ctx-item:hover { background: var(--surface-subtle); }
+    [data-theme="dark"] .dl-ctx .ctx-item svg { color: var(--text-muted); }
+    [data-theme="dark"] .dl-ctx .ctx-item-danger, [data-theme="dark"] .dl-ctx .ctx-item-danger svg { color: var(--danger); }
+    [data-theme="dark"] .dl-ctx .ctx-item-danger:hover { background: var(--danger-subtle); }
+    [data-theme="dark"] .dl-ctx .ctx-sep { background: var(--border); }
+
+    /* ---- "shared with" modal ---- */
+    .dl-modal-sub { color: var(--text-muted); font-weight: 400; }
+    .dl-share-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+    .dl-share-row:first-of-type { border-top: 0; }
+    .dl-share-name { font-weight: 500; font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dl-share-meta { font-size: 12px; color: var(--text-muted); }
+    .sc .dl-btn-danger-outline { color: var(--danger); border-color: var(--danger-border) !important; }
+    .sc .dl-btn-danger-outline:hover:not(:disabled) { background: var(--danger-subtle); }
+
+    @@media (max-width: 720px) {
+        .dl-head { flex-direction: column; align-items: stretch; }
+    }
 </style>
 
 @code {
@@ -354,6 +672,14 @@ else
     private string? companyId;
     private bool showShareModal = false;
     private Dataset? selectedDatasetForSharing;
+
+    // Quick filter in the toolbar. "all" | "local" | "external" | "pinned".
+    private string sourceFilter = "all";
+    private static readonly (string key, string label)[] SegmentFilters =
+    {
+        ("all", "All"), ("local", "Local"), ("external", "External"), ("pinned", "Pinned"),
+    };
+    private static string FilterLabel(string key) => SegmentFilters.FirstOrDefault(s => s.key == key).label ?? "All";
 
     // Lookup of connected Database entities (id → name/type) to label external datasets' source.
     private Dictionary<string, DatabaseEntityOptionDto> sourceDbLookup = new();
@@ -377,25 +703,49 @@ else
         public string? DefaultDatasetId { get; set; }
     }
 
-    private static string FormatBytes(long bytes)
+    private static (string num, string unit) FormatBytesParts(long bytes)
     {
-        if (bytes <= 0) return "0 B";
+        if (bytes <= 0) return ("0", "B");
         string[] units = { "B", "KB", "MB", "GB", "TB" };
         double size = bytes;
         int u = 0;
         while (size >= 1024 && u < units.Length - 1) { size /= 1024; u++; }
-        return $"{size:0.#} {units[u]}";
+        return ($"{size:0.#}", units[u]);
     }
 
-    private static (string bg, string fg) StatusColors(string status) => status switch
+    private static string StatusTone(string status) => status switch
     {
-        "In use" => ("#dcfce7", "#15803d"),
-        "External" => ("#eef2ff", "#4f46e5"),
-        "Empty" => ("#fef9c3", "#a16207"),
-        "No database" => ("#fee2e2", "#b91c1c"),
-        _ => ("#f4f4f5", "#71717a"),
+        "In use" => "success",
+        "External" => "accent",
+        "Empty" => "warning",
+        "No database" => "danger",
+        _ => "neutral",
     };
 
+    private static string SourceLabel(DataSourceType type) => type switch
+    {
+        DataSourceType.SQLServer => "SQL Server",
+        DataSourceType.PostgreSQL => "PostgreSQL",
+        DataSourceType.MySQL => "MySQL",
+        DataSourceType.ClickHouse => "ClickHouse",
+        DataSourceType.DuckDB => "DuckDB",
+        _ => type.ToString(),
+    };
+
+    // CreatedAt is written as DateTime.UtcNow; over JSON it arrives Unspecified, so pin it before converting.
+    private static DateTime LocalTime(DateTime utc) =>
+        DateTime.SpecifyKind(utc, DateTimeKind.Utc).ToLocalTime();
+
+    private static string RelativeTime(DateTime utc)
+    {
+        var span = DateTime.UtcNow - DateTime.SpecifyKind(utc, DateTimeKind.Utc);
+        if (span.TotalSeconds < 60) return "just now";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes} min ago";
+        if (span.TotalHours < 24) return $"{(int)span.TotalHours} h ago";
+        if (span.TotalDays < 30) return $"{(int)span.TotalDays} d ago";
+        if (span.TotalDays < 365) return $"{(int)(span.TotalDays / 30)} mo ago";
+        return $"{(int)(span.TotalDays / 365)} y ago";
+    }
 
     [SupplyParameterFromQuery]
     public string? c { get; set; }
@@ -557,7 +907,9 @@ else
             {
                 var stats = await response.Content.ReadFromJsonAsync<List<DatasetStats>>() ?? new();
                 statsLookup = stats.ToDictionary(s => s.DatasetId, s => s);
-                StateHasChanged();
+                // Re-sort: the tables/size/rows orderings read from these stats, and the user may
+                // already have picked one before they arrived.
+                ApplyFilterAndSort();
             }
         }
         catch { /* stats are supplementary — the list still renders without them */ }
@@ -571,15 +923,44 @@ else
             _ = _activityLog.LogAsync(companyId, "dataset.search", "dataset", route: "/data/datasets", details: searchTerm);
     }
 
+    private void SetSourceFilter(string filter)
+    {
+        if (sourceFilter == filter) return;
+        sourceFilter = filter;
+        currentPage = 0;
+        ApplyFilterAndSort();
+    }
+
+    private void ClearFilters()
+    {
+        searchTerm = string.Empty;
+        sourceFilter = "all";
+        currentPage = 0;
+        ApplyFilterAndSort();
+    }
+
+    private bool MatchesFilter(Dataset d, string filter) => filter switch
+    {
+        "local" => d.SourceType == DatasetSourceType.Local,
+        "external" => d.SourceType == DatasetSourceType.External,
+        "pinned" => IsPinned(d.Id),
+        _ => true,
+    };
+
+    private int CountFor(string filter) => allItems?.Count(d => MatchesFilter(d, filter)) ?? 0;
+
     private void SetSort(string field)
     {
         if (sortField == field) sortAsc = !sortAsc;
-        else { sortField = field; sortAsc = true; }
+        else { sortField = field; sortAsc = field is not ("tables" or "size" or "rows" or "created"); }
         currentPage = 0;
         ApplyFilterAndSort();
         _ = _activityLog.LogAsync(companyId, "dataset.sort", "dataset", route: "/data/datasets",
             details: $"{sortField} {(sortAsc ? "asc" : "desc")}");
     }
+
+    private string AriaSort(string field) =>
+        sortField != field ? "none" : (sortAsc ? "ascending" : "descending");
 
     private void ApplyFilterAndSort()
     {
@@ -588,16 +969,22 @@ else
             query = query.Where(d =>
                 (d.Name?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) == true) ||
                 (d.Description?.Contains(searchTerm, StringComparison.OrdinalIgnoreCase) == true));
+        if (sourceFilter != "all")
+            query = query.Where(d => MatchesFilter(d, sourceFilter));
 
+        // Datasets without stats yet sort as -1 so they sit together at one end instead of interleaving.
         query = sortField switch
         {
-            "description" => sortAsc ? query.OrderBy(d => d.Description) : query.OrderByDescending(d => d.Description),
             "created" => sortAsc ? query.OrderBy(d => d.CreatedAt) : query.OrderByDescending(d => d.CreatedAt),
-            _ => sortAsc ? query.OrderBy(d => d.Name) : query.OrderByDescending(d => d.Name),
+            "tables" => sortAsc ? query.OrderBy(d => StatsFor(d.Id)?.TableCount ?? -1) : query.OrderByDescending(d => StatsFor(d.Id)?.TableCount ?? -1),
+            "size" => sortAsc ? query.OrderBy(d => StatsFor(d.Id)?.SizeBytes ?? -1) : query.OrderByDescending(d => StatsFor(d.Id)?.SizeBytes ?? -1),
+            "rows" => sortAsc ? query.OrderBy(d => StatsFor(d.Id)?.TotalRows ?? -1) : query.OrderByDescending(d => StatsFor(d.Id)?.TotalRows ?? -1),
+            _ => sortAsc ? query.OrderBy(d => d.Name, StringComparer.OrdinalIgnoreCase) : query.OrderByDescending(d => d.Name, StringComparer.OrdinalIgnoreCase),
         };
 
         // Pinned datasets float to the top (OrderByDescending is stable, so the sort above holds within groups).
         filteredItems = query.OrderByDescending(d => d.Id != null && pinnedIds.Contains(d.Id)).ToList();
+        if (currentPage > 0 && currentPage >= totalPages) currentPage = Math.Max(0, totalPages - 1);
         pagedItems = filteredItems.Skip(currentPage * pageSize).Take(pageSize);
         StateHasChanged();
     }
@@ -656,22 +1043,50 @@ else
         {
             if (sortAsc)
             {
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                <svg class="dl-sort-ico" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
             }
             else
             {
-                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                <svg class="dl-sort-ico" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
             }
         }
         else
         {
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3"><path d="m18 15-6-6-6 6"/></svg>
+            <svg class="dl-sort-ico" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
         }
     };
+
+    // Page numbers for the pager: every page when there are few, otherwise the first, the last and a
+    // window around the current page, with -1 standing in for a gap.
+    private IEnumerable<int> PageItems()
+    {
+        var pages = totalPages;
+        if (pages <= 7)
+        {
+            for (int i = 0; i < pages; i++) yield return i;
+            yield break;
+        }
+        var keep = new SortedSet<int> { 0, pages - 1 };
+        for (int i = currentPage - 1; i <= currentPage + 1; i++)
+            if (i >= 0 && i < pages) keep.Add(i);
+        int prev = -1;
+        foreach (var p in keep)
+        {
+            if (prev >= 0 && p - prev == 2) yield return prev + 1;   // a one-page gap: just show the page
+            else if (prev >= 0 && p - prev > 2) yield return -1;
+            yield return p;
+            prev = p;
+        }
+    }
 
     private void PrevPage() { if (currentPage > 0) { currentPage--; ApplyFilterAndSort(); } }
     private void NextPage() { if (currentPage < totalPages - 1) { currentPage++; ApplyFilterAndSort(); } }
     private void GoToPage(int page) { currentPage = page; ApplyFilterAndSort(); }
+
+    private void OnRowKey(KeyboardEventArgs e, Dataset dataset)
+    {
+        if (e.Key == "Enter") OpenDataset(dataset);
+    }
 
     // ---- Right-click context menu (mirrors the row's own action buttons) ----
     private Dataset? contextMenuDataset;
