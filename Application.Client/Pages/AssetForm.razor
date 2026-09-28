@@ -1,756 +1,315 @@
 @page "/status/entities/create"
 @page "/status/entities/{AssetId}/edit"
-@using Application.Shared.Models
 @using Application.Shared.Enums
-@using Application.Client.Services
-@using Microsoft.AspNetCore.Authorization
-@using Microsoft.AspNetCore.Components.Forms
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
 @inject MonitoredAssetClientService EntityService
 @inject StateContainer StateContainer
 @attribute [Authorize(Policy = PolicyNames.StatusWrite)]
 
-<PageTitle>@(IsEditMode ? $"Edit {entity?.Name}" : "Create Entity")</PageTitle>
+<PageTitle>@(IsEditMode ? $"Edit {entity?.Name}" : "New entity") · Status</PageTitle>
 
-<style>
-    /* ── Dark theme (data-theme="dark") — override hardcoded Tailwind light colors ── */
-    [data-theme="dark"] .sd-scope.min-h-screen { background-color: #0e1117; }
-    [data-theme="dark"] .sd-scope.bg-white { background-color: #181a20; }
-
-    [data-theme="dark"] .sd-scope .bg-white { background-color: #181a20; }
-    [data-theme="dark"] .sd-scope .bg-white\/60 { background-color: rgba(24,26,32,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-50 { background-color: #1e222b; }
-    [data-theme="dark"] .sd-scope .bg-gray-50\/60 { background-color: rgba(30,34,43,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-100 { background-color: #20242c; }
-
-    [data-theme="dark"] .sd-scope .text-gray-900 { color: #f3f4f6; }
-    [data-theme="dark"] .sd-scope .text-gray-800 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-700 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-600 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-500 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-400 { color: #767d89; }
-    [data-theme="dark"] .sd-scope .text-gray-300 { color: #4b515e; }
-
-    [data-theme="dark"] .sd-scope .border-gray-100 { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .border-gray-200 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-200\/80 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-300 { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-50:hover { background-color: #20242c; }
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-100:hover { background-color: #262b34; }
-    [data-theme="dark"] .sd-scope .hover\:bg-red-50:hover { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .hover\:bg-indigo-100:hover { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .hover\:border-gray-400:hover { border-color: #3a4150; }
-    [data-theme="dark"] .sd-scope .hover\:border-red-200:hover { border-color: rgba(239,68,68,0.30); }
-
-    [data-theme="dark"] .sd-scope input:not([type="checkbox"]):not([type="radio"]),
-    [data-theme="dark"] .sd-scope select,
-    [data-theme="dark"] .sd-scope textarea {
-        background-color: #12141a !important;
-        border-color: #2b303b !important;
-        color: #e6e9ef !important;
-    }
-    [data-theme="dark"] .sd-scope input::placeholder,
-    [data-theme="dark"] .sd-scope textarea::placeholder { color: #767d89 !important; }
-
-    [data-theme="dark"] .sd-scope .bg-red-50 { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .bg-red-100 { background-color: rgba(239,68,68,0.15); }
-    [data-theme="dark"] .sd-scope .border-red-200 { border-color: rgba(239,68,68,0.30); }
-    [data-theme="dark"] .sd-scope .text-red-400,
-    [data-theme="dark"] .sd-scope .text-red-500,
-    [data-theme="dark"] .sd-scope .text-red-600,
-    [data-theme="dark"] .sd-scope .text-red-700,
-    [data-theme="dark"] .sd-scope .text-red-800 { color: #f87171; }
-    [data-theme="dark"] .sd-scope .hover\:text-red-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-red-800:hover { color: #fca5a5; }
-
-    [data-theme="dark"] .sd-scope .bg-green-50 { background-color: rgba(34,197,94,0.12); }
-    [data-theme="dark"] .sd-scope .bg-green-100 { background-color: rgba(34,197,94,0.15); }
-    [data-theme="dark"] .sd-scope .border-green-200 { border-color: rgba(34,197,94,0.30); }
-    [data-theme="dark"] .sd-scope .text-green-500,
-    [data-theme="dark"] .sd-scope .text-green-600,
-    [data-theme="dark"] .sd-scope .text-green-700,
-    [data-theme="dark"] .sd-scope .text-green-800 { color: #4ade80; }
-
-    [data-theme="dark"] .sd-scope .bg-yellow-50 { background-color: rgba(245,158,11,0.10); }
-    [data-theme="dark"] .sd-scope .bg-yellow-100 { background-color: rgba(245,158,11,0.15); }
-    [data-theme="dark"] .sd-scope .border-yellow-200 { border-color: rgba(245,158,11,0.30); }
-    [data-theme="dark"] .sd-scope .text-yellow-700,
-    [data-theme="dark"] .sd-scope .text-yellow-800 { color: #fcd34d; }
-
-    [data-theme="dark"] .sd-scope .bg-orange-50 { background-color: rgba(249,115,22,0.10); }
-    [data-theme="dark"] .sd-scope .bg-orange-100 { background-color: rgba(249,115,22,0.15); }
-    [data-theme="dark"] .sd-scope .border-orange-200 { border-color: rgba(249,115,22,0.30); }
-    [data-theme="dark"] .sd-scope .text-orange-600,
-    [data-theme="dark"] .sd-scope .text-orange-700,
-    [data-theme="dark"] .sd-scope .text-orange-800 { color: #fdba74; }
-
-    [data-theme="dark"] .sd-scope .bg-blue-50 { background-color: rgba(59,130,246,0.10); }
-    [data-theme="dark"] .sd-scope .bg-blue-100 { background-color: rgba(59,130,246,0.15); }
-    [data-theme="dark"] .sd-scope .border-blue-200 { border-color: rgba(59,130,246,0.30); }
-    [data-theme="dark"] .sd-scope .text-blue-600,
-    [data-theme="dark"] .sd-scope .text-blue-700,
-    [data-theme="dark"] .sd-scope .text-blue-800 { color: #93c5fd; }
-    [data-theme="dark"] .sd-scope .text-blue-900 { color: #bfdbfe; }
-
-    [data-theme="dark"] .sd-scope .bg-purple-50 { background-color: rgba(168,85,247,0.12); }
-    [data-theme="dark"] .sd-scope .bg-purple-100 { background-color: rgba(168,85,247,0.18); }
-    [data-theme="dark"] .sd-scope .text-purple-700,
-    [data-theme="dark"] .sd-scope .text-purple-800 { color: #d8b4fe; }
-
-    [data-theme="dark"] .sd-scope .bg-indigo-50 { background-color: rgba(129,140,248,0.14); }
-    [data-theme="dark"] .sd-scope .bg-indigo-100 { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .border-indigo-200 { border-color: rgba(129,140,248,0.30); }
-    [data-theme="dark"] .sd-scope .text-indigo-600,
-    [data-theme="dark"] .sd-scope .text-indigo-700 { color: #a5b4fc; }
-    [data-theme="dark"] .sd-scope .text-indigo-800 { color: #c7d2fe; }
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-800:hover { color: #c7d2fe; }
-
-    [data-theme="dark"] .sd-scope .bg-gray-200 { background-color: #23272f; }
-    [data-theme="dark"] .sd-scope .bg-gray-300 { background-color: #363c48; }
-
-    [data-theme="dark"] .sd-scope .ring-white { --tw-ring-color: #181a20; }
-    [data-theme="dark"] .sd-scope .ring-offset-1 { --tw-ring-offset-color: #181a20; }
-</style>
-
-<div class="min-h-screen bg-gray-50 sd-scope">
-    @if (isLoading)
-    {
-        <div class="flex justify-center items-center h-64">
-            <div class="animate-spin rounded-full h-10 w-10 border-2 border-indigo-600 border-t-transparent"></div>
+@* Styles: Application/wwwroot/status.css (.st-form*). Dependencies are edited on their own page
+   (/status/entities/{id}/dependencies) so the impact tree stays in view; this form only links there. *@
+<div class="sc">
+    <div class="page-wrap st-wrap st-wrap-narrow">
+        <div class="st-head">
+            <div class="st-head-left">
+                <a class="st-back" href="@BackHref" title="Back" aria-label="Back">@StatusUi.Icon("arrow-left", 16)</a>
+                <div class="st-head-main">
+                    <div class="st-crumbs">
+                        <a href="@($"status/entities{queryParam}")">Entities</a>
+                        @if (IsEditMode && entity is not null)
+                        {
+                            @StatusUi.Icon("chev-right", 12)<a href="@BackHref">@entity.Name</a>
+                        }
+                        @StatusUi.Icon("chev-right", 12)<span>@(IsEditMode ? "Edit" : "New")</span>
+                    </div>
+                    <div class="st-title-row">
+                        <h1 class="page-title">@(IsEditMode ? "Edit entity" : "New entity")</h1>
+                        <span class="badge badge-neutral">@StatusUi.TypeLabel(formModel.EntityType)</span>
+                    </div>
+                </div>
+            </div>
         </div>
-    }
-    else
-    {
-        <div class="w-full px-4 sm:px-6 py-6">
-            <!-- Back link -->
-            <button @onclick="BackToEntities"
-                    class="inline-flex items-center text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors mb-4" style="border:none;background:none;">
-                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-                </svg>
-                Entities
-            </button>
 
-            <form @onsubmit="HandleValidSubmit" @onsubmit:preventDefault="true">
-                <!-- Header card -->
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-5">
-                    <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-                        <div class="flex items-start gap-4 min-w-0">
-                            <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center text-2xl">
-                                @formModel.GetEntityTypeIcon()
+        @if (isLoading)
+        {
+            <div class="card"><div class="st-loading"><span class="spin"></span> Loading…</div></div>
+        }
+        else if (IsEditMode && entity is null)
+        {
+            <div class="card">
+                <div class="empty">
+                    <div class="empty-title">Entity not found</div>
+                    <a class="btn btn-secondary btn-sm" href="@($"status/entities{queryParam}")">Back to entities</a>
+                </div>
+            </div>
+        }
+        else
+        {
+            <form class="st-form" @onsubmit="HandleSubmit" @onsubmit:preventDefault="true" novalidate>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="st-section-title">Identity</div>
+                        <div class="st-form-grid">
+                            <div class="field">
+                                <label class="field-label" for="f-name">Name <b>*</b></label>
+                                <input class="input @(showErrors && string.IsNullOrWhiteSpace(formModel.Name) ? "invalid" : "")" id="f-name" maxlength="200" @bind="formModel.Name" @bind:event="oninput" />
+                                @if (showErrors && string.IsNullOrWhiteSpace(formModel.Name)) { <span class="field-error">Give the entity a name.</span> }
                             </div>
-                            <div class="min-w-0">
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <h1 class="text-2xl font-bold text-gray-900 truncate">
-                                        @(IsEditMode ? (entity?.Name ?? "Edit Entity") : "New Entity")
-                                    </h1>
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium @formModel.GetEntityTypeClass()">
-                                        @formModel.EntityType.ToString()
-                                    </span>
-                                    @if (formModel.IsCritical)
+                            <div class="field">
+                                <label class="field-label" for="f-type">Type <b>*</b></label>
+                                <select class="select" id="f-type" @bind="formModel.EntityType">
+                                    @foreach (var t in Enum.GetValues<AssetType>())
                                     {
-                                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                                <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
-                                            </svg>
-                                            Critical
-                                        </span>
+                                        <option value="@t">@StatusUi.TypeLabel(t)</option>
                                     }
-                                </div>
-                                <p class="mt-1.5 text-sm text-gray-500">
-                                    @(IsEditMode ? "Update the details below." : "Fill in the details to create a new entity.")
-                                </p>
+                                </select>
+                            </div>
+                            <div class="field is-span">
+                                <label class="field-label" for="f-desc">Description</label>
+                                <textarea class="textarea" id="f-desc" rows="2" maxlength="1000" @bind="formModel.Description"></textarea>
+                                <span class="field-help">Shown under the name on lists and the status board.</span>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="f-group">Group</label>
+                                <input class="input" id="f-group" list="st-groups" maxlength="200" @bind="formModel.Group" />
+                                <datalist id="st-groups">
+                                    @foreach (var g in groups) { <option value="@g"></option> }
+                                </datalist>
+                                <span class="field-help">Pick an existing group or type a new one.</span>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="f-owner">Owner</label>
+                                <input class="input" id="f-owner" maxlength="200" @bind="formModel.Owner" placeholder="Team or person" />
                             </div>
                         </div>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                            <button type="button" @onclick="Cancel"
-                                    class="inline-flex items-center px-3.5 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 transition-colors">
-                                Cancel
-                            </button>
-                            <button type="submit" disabled="@isSubmitting"
-                                    class="inline-flex items-center px-3.5 py-2 text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 transition-colors">
-                                @if (isSubmitting)
-                                {
-                                    <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                    </svg>
-                                    <span>@(IsEditMode ? "Saving…" : "Creating…")</span>
-                                }
-                                else
-                                {
-                                    <span>@(IsEditMode ? "Save Changes" : "Create Entity")</span>
-                                }
-                            </button>
+
+                        <div class="st-section-title">Where it runs</div>
+                        <div class="st-form-grid">
+                            <div class="field is-span">
+                                <label class="field-label" for="f-url">URL or host</label>
+                                <input class="input input-mono" id="f-url" maxlength="500" @bind="formModel.Url" placeholder="https://… or host:port" />
+                                <span class="field-help">Used by the ping job for health checks. Power BI dataset URLs also enable the refresh panel.</span>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="f-version">Version</label>
+                                <input class="input" id="f-version" maxlength="100" @bind="formModel.Version" />
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="f-loc">Location</label>
+                                <input class="input" id="f-loc" maxlength="500" @bind="formModel.Location" placeholder="Data centre, region or rack" />
+                            </div>
                         </div>
+
+                        <div class="st-section-title">Metadata</div>
+                        <div class="field" style="margin-bottom:0">
+                            <label class="field-label" for="f-meta">JSON</label>
+                            <textarea class="textarea textarea-mono @(MetadataError is not null && showErrors ? "invalid" : "")" id="f-meta" rows="5" maxlength="4000"
+                                      placeholder="@("{ \"key\": \"value\" }")" @bind="formModel.Metadata" @bind:event="oninput"></textarea>
+                            @if (MetadataError is not null && showErrors)
+                            {
+                                <span class="field-error">@MetadataError</span>
+                            }
+                            else
+                            {
+                                <span class="field-help">Optional and free-form. Checked as JSON before saving.</span>
+                            }
+                        </div>
+
+                        @if (errorMessage is not null)
+                        {
+                            <div class="form-error" role="alert">@errorMessage</div>
+                        }
+                    </div>
+                    <div class="st-form-foot">
+                        <span class="st-form-hint">
+                            @if (IsEditMode && entity?.ModifiedOn is not null) { <span>Last saved @StatusUi.FullWhen(entity.ModifiedOn)</span> }
+                            else if (!IsEditMode) { <span>You can add dependencies and people after creating it.</span> }
+                        </span>
+                        <a class="btn btn-ghost" href="@BackHref">Cancel</a>
+                        <button class="btn btn-primary" type="submit" disabled="@isSubmitting">
+                            @if (isSubmitting) { <span class="spin"></span> }
+                            @(isSubmitting ? (IsEditMode ? "Saving…" : "Creating…") : (IsEditMode ? "Save changes" : "Create entity"))
+                        </button>
                     </div>
                 </div>
 
-                <!-- Main content -->
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
-                    <!-- Left column -->
-                    <div class="lg:col-span-2 space-y-5">
-                        <!-- Details -->
-                        <section class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                            <h3 class="text-base font-semibold text-gray-900 mb-5">Details</h3>
-                            <div class="grid grid-cols-1 sm:grid-cols-6 gap-4">
-                                <div class="sm:col-span-4">
-                                    <label for="name" class="block text-sm font-medium text-gray-700">Name <span class="text-red-500">*</span></label>
-                                    <input @bind="formModel.Name" id="name" required placeholder="Enter entity name"
-                                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                                </div>
-                                <div class="sm:col-span-2">
-                                    <label for="entityType" class="block text-sm font-medium text-gray-700">Type <span class="text-red-500">*</span></label>
-                                    <select @bind="formModel.EntityType" id="entityType" required
-                                            class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                                        @foreach (var assetType in Enum.GetValues<AssetType>())
-                                        {
-                                            <option value="@assetType">@assetType.ToString()</option>
-                                        }
-                                    </select>
-                                </div>
+                <div class="st-col">
+                    <div class="card">
+                        <div class="card-head"><h3 class="card-title">Monitoring</h3></div>
+                        <div class="card-body">
+                            <button type="button" class="st-check" role="switch" aria-checked="@(formModel.IsActive ? "true" : "false")" @onclick="() => formModel.IsActive = !formModel.IsActive">
+                                <span class="switch @(formModel.IsActive ? "is-on" : "")"></span>
+                                <span><b>Active</b><small>Checked by the ping job and shown on the status board. Turn off to keep the entity without monitoring it.</small></span>
+                            </button>
+                            <button type="button" class="st-check" style="margin-bottom:0" role="switch" aria-checked="@(formModel.IsCritical ? "true" : "false")" @onclick="() => formModel.IsCritical = !formModel.IsCritical">
+                                <span class="switch @(formModel.IsCritical ? "is-on" : "")"></span>
+                                <span><b>Critical</b><small>Marked critical on every list and counted first on the overview and in impact summaries.</small></span>
+                            </button>
+                        </div>
+                    </div>
 
-                                <div class="sm:col-span-6">
-                                    <label for="description" class="block text-sm font-medium text-gray-700">Description</label>
-                                    <textarea @bind="formModel.Description" id="description" rows="2" placeholder="What is this entity?"
-                                              class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"></textarea>
-                                </div>
-
-                                <div class="sm:col-span-4">
-                                    <label for="url" class="block text-sm font-medium text-gray-700">URL / Host</label>
-                                    <input @bind="formModel.Url" id="url" placeholder="https://example.com or host/IP"
-                                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                                </div>
-                                <div class="sm:col-span-2">
-                                    <label for="version" class="block text-sm font-medium text-gray-700">Version</label>
-                                    <input @bind="formModel.Version" id="version" placeholder="1.0.0"
-                                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                                </div>
-
-                                <div class="sm:col-span-3">
-                                    <label for="owner" class="block text-sm font-medium text-gray-700">Owner</label>
-                                    <input @bind="formModel.Owner" id="owner" placeholder="Team or person"
-                                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                                </div>
-                                <div class="sm:col-span-3">
-                                    <label for="location" class="block text-sm font-medium text-gray-700">Location</label>
-                                    <input @bind="formModel.Location" id="location" placeholder="Region or datacenter"
-                                           class="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                                </div>
+                    @if (IsEditMode)
+                    {
+                        <div class="card">
+                            <div class="card-head">
+                                <h3 class="card-title">Dependencies</h3>
+                                <span class="tab-count">@dependencies.Count</span>
+                                <span class="st-card-spacer"></span>
+                                <a class="st-link" href="@($"status/entities/{AssetId}/dependencies{queryParam}")">Manage</a>
                             </div>
-                        </section>
-
-                        <!-- Dependencies -->
-                        <section class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                            <div class="flex items-center justify-between mb-4">
-                                <h3 class="text-base font-semibold text-gray-900">Dependencies</h3>
-                                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                                    @selectedDependencies.Count
-                                </span>
-                            </div>
-
-                            <!-- Add row -->
-                            <div class="rounded-lg bg-gray-50 border border-gray-200 p-4 space-y-3">
-                                <div class="grid grid-cols-1 sm:grid-cols-12 gap-3">
-                                    <div class="sm:col-span-3">
-                                        <label class="block text-xs font-medium text-gray-500 mb-1">Type</label>
-                                        <select @bind="dependencyType" @bind:after="OnDependencyTypeChanged"
-                                                class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                                            @foreach (var assetType in Enum.GetValues<AssetType>())
-                                            {
-                                                <option value="@assetType">@assetType.ToString()</option>
-                                            }
-                                        </select>
-                                    </div>
-                                    <div class="sm:col-span-5">
-                                        <label class="block text-xs font-medium text-gray-500 mb-1">Depends on</label>
-                                        <div class="relative">
-                                            <!-- Trigger -->
-                                            <button type="button" @onclick="ToggleDependencyDropdown"
-                                                    class="flex w-full items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm shadow-sm outline-none transition-colors hover:border-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                                                @if (SelectedDependencyEntity is { } sel)
-                                                {
-                                                    <span class="text-base leading-none">@sel.GetEntityTypeIcon()</span>
-                                                    <span class="min-w-0 flex-1 truncate font-medium text-gray-900">@sel.Name</span>
-                                                    @if (!string.IsNullOrWhiteSpace(DependencySubtitle(sel)))
-                                                    {
-                                                        <span class="hidden sm:block max-w-[40%] truncate text-xs text-gray-400">@DependencySubtitle(sel)</span>
-                                                    }
-                                                }
-                                                else
-                                                {
-                                                    <span class="flex-1 text-gray-400">Choose an entity…</span>
-                                                }
-                                                <svg class="h-4 w-4 shrink-0 text-gray-400 transition-transform @(dependencyDropdownOpen ? "rotate-180" : "")" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                                </svg>
-                                            </button>
-
-                                            @if (dependencyDropdownOpen)
-                                            {
-                                                <!-- Outside-click backdrop -->
-                                                <div class="fixed inset-0 z-10" @onclick="CloseDependencyDropdown"></div>
-
-                                                <!-- Panel -->
-                                                <div class="absolute z-20 mt-1.5 w-full overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
-                                                    <!-- Search -->
-                                                    <div class="p-2">
-                                                        <div class="relative">
-                                                            <svg class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"></path>
-                                                            </svg>
-                                                            <input @bind="dependencySearch" @bind:event="oninput" placeholder="Search @dependencyType.ToString().ToLower()s…"
-                                                                   class="w-full rounded-lg border-0 bg-gray-100 py-2 pl-8 pr-3 text-sm text-gray-900 outline-none ring-1 ring-transparent transition focus:bg-white focus:ring-indigo-500" />
-                                                        </div>
-                                                    </div>
-
-                                                    <!-- Options -->
-                                                    <ul class="max-h-64 overflow-y-auto px-1.5 pb-1.5">
-                                                        @if (!SearchedDependencyEntities.Any())
-                                                        {
-                                                            <li class="px-3 py-6 text-center text-sm text-gray-400">
-                                                                No matching @dependencyType.ToString().ToLower()s
-                                                            </li>
-                                                        }
-                                                        else
-                                                        {
-                                                            @foreach (var availableEntity in SearchedDependencyEntities)
-                                                            {
-                                                                var isSelected = availableEntity.Id == selectedDependencyEntityId;
-                                                                <li>
-                                                                    <button type="button" @onclick="() => SelectDependencyEntity(availableEntity.Id)"
-                                                                            style="border:none;"
-                                                                            class="flex w-full items-center gap-3 rounded-lg bg-transparent px-2.5 py-2 text-left outline-none transition-colors hover:bg-gray-100 @(isSelected ? "bg-indigo-50" : "")">
-                                                                        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-base">@availableEntity.GetEntityTypeIcon()</span>
-                                                                        <span class="min-w-0 flex-1">
-                                                                            <span class="flex items-center gap-1.5">
-                                                                                <span class="truncate text-sm font-medium text-gray-900">@availableEntity.Name</span>
-                                                                                @if (availableEntity.IsCritical)
-                                                                                {
-                                                                                    <span class="inline-flex shrink-0 items-center rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">Critical</span>
-                                                                                }
-                                                                            </span>
-                                                                            @if (!string.IsNullOrWhiteSpace(DependencySubtitle(availableEntity)))
-                                                                            {
-                                                                                <span class="block truncate text-xs text-gray-400">@DependencySubtitle(availableEntity)</span>
-                                                                            }
-                                                                        </span>
-                                                                        @if (isSelected)
-                                                                        {
-                                                                            <svg class="h-4 w-4 shrink-0 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                                                            </svg>
-                                                                        }
-                                                                    </button>
-                                                                </li>
-                                                            }
-                                                        }
-                                                    </ul>
-                                                </div>
-                                            }
-                                        </div>
-                                    </div>
-                                    <div class="sm:col-span-2">
-                                        <label class="block text-xs font-medium text-gray-500 mb-1">Order</label>
-                                        <input @bind="dependencyOrder" type="number" min="0"
-                                               class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                                    </div>
-                                    <div class="sm:col-span-2 flex items-end">
-                                        <label class="inline-flex items-center gap-2 text-sm text-gray-700 pb-2">
-                                            <input @bind="isDependencyCritical" type="checkbox" class="h-4 w-4 rounded text-red-600 border-gray-300 focus:ring-red-500" />
-                                            Critical
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="flex gap-3">
-                                    <input @bind="dependencyDescription" placeholder="Note (optional)"
-                                           class="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                                    <button type="button" @onclick="AddDependency" disabled="@(string.IsNullOrEmpty(selectedDependencyEntityId))"
-                                            class="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:cursor-not-allowed">
-                                        Add
-                                    </button>
-                                </div>
-                            </div>
-
-                            <!-- List -->
-                            @if (selectedDependencies.Any())
+                            @if (!dependencies.Any())
                             {
-                                <ul class="mt-4 divide-y divide-gray-100 border border-gray-100 rounded-lg">
-                                    @foreach (var dependency in selectedDependencies.OrderBy(d => d.Order))
+                                <div class="st-deps-empty">No dependencies yet.</div>
+                            }
+                            else
+                            {
+                                <ul class="st-deps">
+                                    @foreach (var d in dependencies.OrderBy(d => d.Order))
                                     {
-                                        <li class="flex items-center gap-3 px-4 py-3">
-                                            <span class="inline-flex items-center justify-center w-6 h-6 shrink-0 bg-gray-100 text-gray-600 text-xs font-medium rounded-full">@dependency.Order</span>
-                                            <div class="flex-1 min-w-0">
-                                                <div class="flex items-center gap-2 flex-wrap">
-                                                    <span class="font-medium text-gray-900 truncate">
-                                                        @(availableEntities.FirstOrDefault(e => e.Id == dependency.DependsOnEntityId)?.Name ?? "Unknown Entity")
-                                                    </span>
-                                                    @if (dependency.DependencyType.HasValue)
-                                                    {
-                                                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">@dependency.DependencyType</span>
-                                                    }
-                                                    @if (dependency.IsCritical)
-                                                    {
-                                                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">Critical</span>
-                                                    }
-                                                </div>
-                                                @if (!string.IsNullOrEmpty(dependency.Description))
-                                                {
-                                                    <p class="text-xs text-gray-500 mt-0.5 truncate">@dependency.Description</p>
-                                                }
+                                        var target = allEntities.FirstOrDefault(e => e.Id == d.DependsOnEntityId);
+                                        <li>
+                                            <span class="st-tile-sm">@StatusUi.TypeSvg(target?.EntityType ?? d.DependencyType ?? AssetType.Server, 12)</span>
+                                            <div class="st-deps-name">
+                                                <a href="@($"status/entities/{d.DependsOnEntityId}{queryParam}")">@(target?.Name ?? d.DependsOnEntity?.Name ?? "Unknown entity")</a>
+                                                <small>@(string.IsNullOrWhiteSpace(d.Description) ? (target is null ? "" : StatusUi.TypeLabel(target.EntityType)) : d.Description)</small>
                                             </div>
-                                            <button type="button" @onclick="() => RemoveDependency(dependency)" title="Remove"
-                                                    class="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg" style="border:none;background:none;">
-                                                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                                </svg>
-                                            </button>
+                                            @if (d.IsCritical) { <span class="badge badge-danger dl-mini-badge">Critical</span> }
                                         </li>
                                     }
                                 </ul>
                             }
-                            else
-                            {
-                                <p class="mt-4 text-center text-sm text-gray-400 py-6">No dependencies added.</p>
-                            }
-                        </section>
-                    </div>
+                        </div>
 
-                    <!-- Right column - sidebar -->
-                    <div class="space-y-5">
-                        <!-- Settings -->
-                        <section class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                            <h3 class="text-base font-semibold text-gray-900 mb-4">Settings</h3>
-                            <div class="space-y-3">
-                                <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-3 cursor-pointer hover:bg-gray-50">
-                                    <input @bind="formModel.IsActive" type="checkbox" class="mt-0.5 h-4 w-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500" />
-                                    <span class="text-sm">
-                                        <span class="block font-medium text-gray-800">Active</span>
-                                        <span class="text-gray-500">Entity is currently operational</span>
-                                    </span>
-                                </label>
-                                <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-3 cursor-pointer hover:bg-gray-50">
-                                    <input @bind="formModel.IsCritical" type="checkbox" class="mt-0.5 h-4 w-4 rounded text-red-600 border-gray-300 focus:ring-red-500" />
-                                    <span class="text-sm">
-                                        <span class="block font-medium text-gray-800">Critical</span>
-                                        <span class="text-gray-500">Entity is business-critical</span>
-                                    </span>
-                                </label>
+                        <div class="card">
+                            <div class="card-head"><h3 class="card-title">Danger zone</h3></div>
+                            <div class="card-body st-btn-stack">
+                                <button class="btn btn-secondary st-btn-danger-outline" type="button" @onclick="DeleteEntity">@StatusUi.Icon("trash", 14) Delete entity…</button>
+                                <span class="field-help">Removes it from monitoring and the status board. Its history and incidents stay in the database.</span>
                             </div>
-                        </section>
-
-                        <!-- Metadata -->
-                        <section class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                            <h3 class="text-base font-semibold text-gray-900 mb-1">Metadata</h3>
-                            <p class="text-xs text-gray-500 mb-3">Optional JSON for extra configuration.</p>
-                            <textarea @bind="formModel.Metadata" rows="4" placeholder='{"environment": "production"}'
-                                      class="block w-full font-mono text-sm rounded-lg border border-gray-300 px-3 py-2 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"></textarea>
-                        </section>
-                    </div>
+                        </div>
+                    }
                 </div>
             </form>
-        </div>
-    }
+        }
+    </div>
+
+    <StatusConfirm @ref="confirm" />
+    <StatusToast @ref="toast" />
 </div>
 
 @code {
     [Parameter] public string? AssetId { get; set; }
 
-    private MonitoredAsset formModel = new();
+    private MonitoredAsset formModel = new() { IsActive = true, IsCritical = false, EntityType = AssetType.Server, Group = null };
     private MonitoredAsset? entity;
+    private List<MonitoredAsset> allEntities = new();
+    private List<AssetDependency> dependencies = new();
+    private List<string> groups = new();
     private bool isLoading = true;
-    private bool isSubmitting = false;
+    private bool isSubmitting;
+    private bool showErrors;
+    private string? errorMessage;
 
-    private List<MonitoredAsset> availableEntities = new();
-    private List<AssetDependency> selectedDependencies = new();
-    private string selectedDependencyEntityId = string.Empty;
-    private string dependencyDescription = string.Empty;
-    private AssetType dependencyType = AssetType.Dataset;
-    private bool isDependencyCritical = false;
-    private int dependencyOrder = 0;
+    private StatusConfirm confirm = default!;
+    private StatusToast toast = default!;
 
     private bool IsEditMode => !string.IsNullOrEmpty(AssetId);
     private string queryParam => StateContainer.Company is null ? "" : $"?c={StateContainer.Company.Id}";
+    private string BackHref => IsEditMode ? $"status/entities/{AssetId}{queryParam}" : $"status/entities{queryParam}";
+
+    private string? MetadataError
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(formModel.Metadata)) return null;
+            try { using var _ = JsonDocument.Parse(formModel.Metadata); return null; }
+            catch (JsonException ex) { return $"Not valid JSON: {ex.Message.Split('.').FirstOrDefault()}."; }
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
         var companyId = StateContainer.Company?.Id ?? "";
-        await LoadAvailableEntities(companyId);
-
-        if (IsEditMode && !string.IsNullOrEmpty(AssetId))
-        {
-            await LoadEntity();
-            await LoadEntityDependencies();
-            dependencyOrder = selectedDependencies.Count > 0 ? selectedDependencies.Max(d => d.Order) + 1 : 1;
-        }
-        else
-        {
-            formModel = new MonitoredAsset
-            {
-                IsActive = true,
-                IsCritical = false
-            };
-            dependencyOrder = 1;
-        }
-        isLoading = false;
-    }
-
-    private async Task LoadEntity()
-    {
         try
         {
-            entity = await EntityService.GetEntityAsync(AssetId!);
-            if (entity != null)
+            var groupsTask = EntityService.GetEntityGroupsAsync(companyId);
+            var entitiesTask = EntityService.GetEntitiesAsync(companyId);
+            if (IsEditMode)
             {
-                formModel = new MonitoredAsset
+                entity = await EntityService.GetEntityAsync(AssetId!);
+                if (entity != null)
                 {
-                    Id = entity.Id,
-                    Name = entity.Name,
-                    Description = entity.Description,
-                    EntityType = entity.EntityType,
-                    Url = entity.Url,
-                    Version = entity.Version,
-                    Owner = entity.Owner,
-                    Location = entity.Location,
-                    IsActive = entity.IsActive,
-                    IsCritical = entity.IsCritical,
-                    Metadata = entity.Metadata,
-                    CompanyId = entity.CompanyId
-                };
+                    formModel = new MonitoredAsset
+                    {
+                        Id = entity.Id,
+                        Name = entity.Name,
+                        Description = entity.Description,
+                        EntityType = entity.EntityType,
+                        Url = entity.Url,
+                        Version = entity.Version,
+                        Owner = entity.Owner,
+                        Location = entity.Location,
+                        Group = entity.Group,
+                        IsActive = entity.IsActive,
+                        IsCritical = entity.IsCritical,
+                        Metadata = entity.Metadata,
+                        CompanyId = entity.CompanyId
+                    };
+                    dependencies = await EntityService.GetEntityDependenciesAsync(AssetId!);
+                }
             }
+            await Task.WhenAll(groupsTask, entitiesTask);
+            groups = groupsTask.Result.Where(g => !string.IsNullOrWhiteSpace(g)).OrderBy(g => g).ToList();
+            allEntities = entitiesTask.Result;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error loading entity: {ex.Message}");
-            await JSRuntime.InvokeVoidAsync("alert", "Error loading entity. Please try again.");
+            Console.WriteLine($"Error loading entity form: {ex.Message}");
+            errorMessage = "Could not load the entity. Reload the page to try again.";
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
-    private async Task LoadAvailableEntities(string companyId)
-    {
-        try
-        {
-            availableEntities = await EntityService.GetEntitiesAsync(companyId);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error loading available entities: {ex.Message}");
-            availableEntities = new List<MonitoredAsset>();
-        }
-    }
-
-    private async Task LoadEntityDependencies()
-    {
-        try
-        {
-            if (!string.IsNullOrEmpty(AssetId))
-            {
-                selectedDependencies = await EntityService.GetEntityDependenciesAsync(AssetId);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error loading entity dependencies: {ex.Message}");
-            selectedDependencies = new List<AssetDependency>();
-        }
-    }
-
-    private bool dependencyDropdownOpen = false;
-    private string dependencySearch = string.Empty;
-
-    // Entities selectable as a dependency target, narrowed to the chosen dependency type.
-    private IEnumerable<MonitoredAsset> FilteredDependencyEntities =>
-        availableEntities.Where(e => e.Id != formModel.Id && e.EntityType == dependencyType);
-
-    // The filtered list further narrowed by the dropdown's search box (name + secondary details).
-    private IEnumerable<MonitoredAsset> SearchedDependencyEntities
-    {
-        get
-        {
-            var q = dependencySearch?.Trim();
-            if (string.IsNullOrEmpty(q)) return FilteredDependencyEntities;
-            return FilteredDependencyEntities.Where(e =>
-                (e.Name?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (e.Owner?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (e.Location?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (e.Url?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false));
-        }
-    }
-
-    private MonitoredAsset? SelectedDependencyEntity =>
-        availableEntities.FirstOrDefault(e => e.Id == selectedDependencyEntityId);
-
-    // Muted secondary line for a dependency row/trigger: owner · location · version · url.
-    private static string DependencySubtitle(MonitoredAsset e)
-    {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(e.Owner)) parts.Add(e.Owner!);
-        if (!string.IsNullOrWhiteSpace(e.Location)) parts.Add(e.Location!);
-        if (!string.IsNullOrWhiteSpace(e.Version)) parts.Add($"v{e.Version}");
-        if (!string.IsNullOrWhiteSpace(e.Url)) parts.Add(e.Url!);
-        return string.Join(" · ", parts);
-    }
-
-    private void ToggleDependencyDropdown()
-    {
-        dependencyDropdownOpen = !dependencyDropdownOpen;
-        if (dependencyDropdownOpen) dependencySearch = string.Empty;
-    }
-
-    private void CloseDependencyDropdown() => dependencyDropdownOpen = false;
-
-    private void SelectDependencyEntity(string id)
-    {
-        selectedDependencyEntityId = id;
-        dependencyDropdownOpen = false;
-        dependencySearch = string.Empty;
-    }
-
-    private void OnDependencyTypeChanged()
-    {
-        // Clear the selection if the previously chosen entity is no longer in the filtered list.
-        if (!FilteredDependencyEntities.Any(e => e.Id == selectedDependencyEntityId))
-            selectedDependencyEntityId = string.Empty;
-        dependencySearch = string.Empty;
-    }
-
-    private async Task AddDependency()
-    {
-        if (string.IsNullOrEmpty(selectedDependencyEntityId))
-        {
-            await JSRuntime.InvokeVoidAsync("alert", "Please select an entity to depend on.");
-            return;
-        }
-
-        if (selectedDependencies.Any(d => d.DependsOnEntityId == selectedDependencyEntityId))
-        {
-            await JSRuntime.InvokeVoidAsync("alert", "This dependency already exists.");
-            return;
-        }
-
-        if (dependencyOrder == 0)
-        {
-            dependencyOrder = selectedDependencies.Count > 0 ? selectedDependencies.Max(d => d.Order) + 1 : 1;
-        }
-
-        var newDependency = new AssetDependency
-        {
-            Id = Guid.NewGuid().ToString(),
-            EntityId = formModel.Id ?? Guid.NewGuid().ToString(),
-            DependsOnEntityId = selectedDependencyEntityId,
-            Description = dependencyDescription,
-            DependencyType = dependencyType,
-            Order = dependencyOrder,
-            IsCritical = isDependencyCritical,
-            IsActive = true
-        };
-
-        selectedDependencies.Add(newDependency);
-
-        selectedDependencyEntityId = string.Empty;
-        dependencyDescription = string.Empty;
-        dependencyType = AssetType.Dataset;
-        dependencyOrder = selectedDependencies.Count > 0 ? selectedDependencies.Max(d => d.Order) + 1 : 1;
-        isDependencyCritical = false;
-
-        StateHasChanged();
-    }
-
-    private async Task RemoveDependency(AssetDependency dependency)
-    {
-        var entityName = availableEntities.FirstOrDefault(e => e.Id == dependency.DependsOnEntityId)?.Name ?? "Unknown Entity";
-        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", $"Are you sure you want to remove the dependency on '{entityName}'?");
-
-        if (confirmed)
-        {
-            selectedDependencies.Remove(dependency);
-            StateHasChanged();
-        }
-    }
-
-    private async Task<bool> SaveDependencies()
-    {
-        if (string.IsNullOrEmpty(formModel.Id)) return true;
-
-        var companyId = StateContainer.Company?.Id;
-        try
-        {
-            var currentDependencies = await EntityService.GetEntityDependenciesAsync(formModel.Id);
-
-            foreach (var currentDependency in currentDependencies)
-            {
-                await EntityService.RemoveDependencyAsync(currentDependency.Id);
-            }
-
-            var failures = 0;
-            foreach (var dependency in selectedDependencies)
-            {
-                dependency.EntityId = formModel.Id;
-                dependency.CompanyId = companyId;
-                var created = await EntityService.AddDependencyAsync(formModel.Id, dependency);
-                if (created == null) failures++;
-            }
-
-            return failures == 0;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error saving dependencies: {ex.Message}");
-            return false;
-        }
-    }
-
-    private async Task HandleValidSubmit()
+    private async Task HandleSubmit()
     {
         if (isSubmitting) return;
+        showErrors = true;
+        errorMessage = null;
+        if (string.IsNullOrWhiteSpace(formModel.Name) || MetadataError is not null) return;
 
         isSubmitting = true;
         var companyId = StateContainer.Company?.Id ?? "";
-
+        formModel.Name = formModel.Name.Trim();
+        formModel.Group = string.IsNullOrWhiteSpace(formModel.Group) ? "Default" : formModel.Group.Trim();
         try
         {
             if (IsEditMode)
             {
-                var updated = await EntityService.UpdateEntityAsync(formModel);
-                if (!updated)
-                {
-                    await JSRuntime.InvokeVoidAsync("alert", "Failed to update entity. Please try again.");
-                    return;
-                }
-                var depsOk = await SaveDependencies();
-                await JSRuntime.InvokeVoidAsync("alert", depsOk
-                    ? "Entity updated successfully!"
-                    : "Entity updated, but some dependencies could not be saved. Please review them.");
-                Navigation.NavigateTo($"/status/entities/{formModel.Id}{queryParam}");
+                if (await EntityService.UpdateEntityAsync(formModel))
+                    Navigation.NavigateTo($"/status/entities/{formModel.Id}{queryParam}");
+                else
+                    errorMessage = "The entity could not be saved. Check the fields and try again.";
             }
             else
             {
                 formModel.CompanyId = companyId;
-                var createdEntity = await EntityService.CreateEntityAsync(companyId, formModel);
-                var depsOk = true;
-                if (createdEntity != null)
-                {
-                    formModel.Id = createdEntity.Id;
-                    depsOk = await SaveDependencies();
-                }
-
-                await JSRuntime.InvokeVoidAsync("alert", depsOk
-                    ? "Entity created successfully!"
-                    : "Entity created, but some dependencies could not be saved. Please review them.");
-                Navigation.NavigateTo($"/status/entities{queryParam}");
+                var created = await EntityService.CreateEntityAsync(companyId, formModel);
+                if (created != null)
+                    Navigation.NavigateTo($"/status/entities/{created.Id}{queryParam}");
+                else
+                    errorMessage = "The entity could not be created. Check the fields and try again.";
             }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error saving entity: {ex.Message}");
-            await JSRuntime.InvokeVoidAsync("alert", $"Error saving entity: {ex.Message}");
+            errorMessage = $"The entity could not be saved: {ex.Message}";
         }
         finally
         {
@@ -758,20 +317,13 @@
         }
     }
 
-    private void BackToEntities()
+    private async Task DeleteEntity()
     {
-        Navigation.NavigateTo($"/status/entities{queryParam}");
-    }
-
-    private void Cancel()
-    {
-        if (IsEditMode && !string.IsNullOrEmpty(AssetId))
-        {
-            Navigation.NavigateTo($"/status/entities/{AssetId}{queryParam}");
-        }
-        else
-        {
+        if (entity is null) return;
+        if (!await confirm.Ask($"Delete {entity.Name}?", "It is removed from monitoring and the status board. Its history and incidents stay in the database.")) return;
+        if (await EntityService.DeleteEntityAsync(entity.Id))
             Navigation.NavigateTo($"/status/entities{queryParam}");
-        }
+        else
+            toast.Show("Could not delete the entity. Try again.", error: true);
     }
 }

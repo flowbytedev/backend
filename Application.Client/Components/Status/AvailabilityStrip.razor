@@ -1,0 +1,44 @@
+@using Application.Shared.Enums
+@* One cell per day, oldest first. Hatched = no data. Interactive strips render buttons and raise OnDayClick. *@
+
+<div class="st-strip @SizeClass" role="@(Interactive ? "group" : "img")" aria-label="@AriaLabel">
+    @for (var i = 0; i < Days.Count; i++)
+    {
+        var day = Days[i];
+        var cls = $"st-cell {StatusUi.Cls(day.Status)}{(MarkToday && i == Days.Count - 1 ? " is-today" : "")}{(SelectedDate.HasValue && SelectedDate.Value.Date == day.Date.Date ? " is-open" : "")}";
+        var tip = $"{day.Date:d MMM} — {(day.Status.HasValue ? StatusUi.Label(day.Status.Value) : "No data")}";
+        if (Interactive)
+        {
+            var d = day.Date;
+            <button type="button" class="@cls" title="@tip" aria-label="@tip" @onclick="() => OnDayClick.InvokeAsync(d)"></button>
+        }
+        else
+        {
+            <span class="@cls" title="@tip"></span>
+        }
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<StatusOverviewDay> Days { get; set; } = Array.Empty<StatusOverviewDay>();
+    /// <summary>"xs", "sm", "" or "lg".</summary>
+    [Parameter] public string Size { get; set; } = "";
+    [Parameter] public bool Interactive { get; set; }
+    [Parameter] public bool MarkToday { get; set; }
+    [Parameter] public DateTime? SelectedDate { get; set; }
+    [Parameter] public string? Name { get; set; }
+    [Parameter] public EventCallback<DateTime> OnDayClick { get; set; }
+
+    private string SizeClass => string.IsNullOrEmpty(Size) ? "" : $"is-{Size}";
+
+    private string AriaLabel
+    {
+        get
+        {
+            var withData = Days.Count(d => d.Status.HasValue);
+            var online = Days.Count(d => d.Status == AssetStatus.Online);
+            var prefix = string.IsNullOrEmpty(Name) ? "" : Name + ": ";
+            return $"{prefix}last {Days.Count} days, {online} of {withData} days with data fully online";
+        }
+    }
+}

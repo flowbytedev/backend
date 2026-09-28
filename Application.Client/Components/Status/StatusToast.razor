@@ -1,0 +1,36 @@
+@using Application.Shared.Enums
+@implements IDisposable
+@* Replaces alert() on the status pages. Hold a @ref and call Show("Saved") / Show("Could not save", error: true). *@
+
+@if (message is not null)
+{
+    <div class="st-toast @(isError ? "is-error" : "")" role="status" aria-live="polite">
+        @StatusUi.Icon(isError ? "alert" : "check", 14)
+        <span>@message</span>
+    </div>
+}
+
+@code {
+    private string? message;
+    private bool isError;
+    private CancellationTokenSource? cts;
+
+    public async void Show(string text, bool error = false)
+    {
+        cts?.Cancel();
+        cts = new CancellationTokenSource();
+        var token = cts.Token;
+        message = text;
+        isError = error;
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(error ? 5000 : 2600, token);
+            message = null;
+            StateHasChanged();
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    public void Dispose() => cts?.Cancel();
+}

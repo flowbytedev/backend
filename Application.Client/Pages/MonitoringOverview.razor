@@ -1,274 +1,281 @@
 @page "/status"
-@using Application.Shared.Models
 @using Application.Shared.Enums
-@using Application.Client.Services
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @inject MonitoredAssetClientService EntityService
 @inject IncidentClientService IncidentService
+@inject StatusOverviewClientService OverviewService
 @inject NavigationManager Navigation
 @inject StateContainer StateContainer
 @attribute [Authorize(Policy = PolicyNames.StatusRead)]
 
 <PageTitle>Status Overview</PageTitle>
 
-<style>
-    /* ── Dark theme (data-theme="dark") — override hardcoded Tailwind light colors ── */
-    [data-theme="dark"] .sd-scope.min-h-screen { background-color: #0e1117; }
-    [data-theme="dark"] .sd-scope.bg-white { background-color: #181a20; }
-
-    [data-theme="dark"] .sd-scope .bg-white { background-color: #181a20; }
-    [data-theme="dark"] .sd-scope .bg-white\/60 { background-color: rgba(24,26,32,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-50 { background-color: #1e222b; }
-    [data-theme="dark"] .sd-scope .bg-gray-50\/60 { background-color: rgba(30,34,43,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-100 { background-color: #20242c; }
-
-    [data-theme="dark"] .sd-scope .text-gray-900 { color: #f3f4f6; }
-    [data-theme="dark"] .sd-scope .text-gray-800 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-700 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-600 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-500 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-400 { color: #767d89; }
-    [data-theme="dark"] .sd-scope .text-gray-300 { color: #4b515e; }
-
-    [data-theme="dark"] .sd-scope .border-gray-100 { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .border-gray-200 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-200\/80 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-300 { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-50:hover { background-color: #20242c; }
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-100:hover { background-color: #262b34; }
-    [data-theme="dark"] .sd-scope .hover\:bg-red-50:hover { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .hover\:bg-indigo-100:hover { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .hover\:border-gray-400:hover { border-color: #3a4150; }
-    [data-theme="dark"] .sd-scope .hover\:border-red-200:hover { border-color: rgba(239,68,68,0.30); }
-
-    [data-theme="dark"] .sd-scope input:not([type="checkbox"]):not([type="radio"]),
-    [data-theme="dark"] .sd-scope select,
-    [data-theme="dark"] .sd-scope textarea {
-        background-color: #12141a !important;
-        border-color: #2b303b !important;
-        color: #e6e9ef !important;
-    }
-    [data-theme="dark"] .sd-scope input::placeholder,
-    [data-theme="dark"] .sd-scope textarea::placeholder { color: #767d89 !important; }
-
-    [data-theme="dark"] .sd-scope .bg-red-50 { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .bg-red-100 { background-color: rgba(239,68,68,0.15); }
-    [data-theme="dark"] .sd-scope .border-red-200 { border-color: rgba(239,68,68,0.30); }
-    [data-theme="dark"] .sd-scope .text-red-400,
-    [data-theme="dark"] .sd-scope .text-red-500,
-    [data-theme="dark"] .sd-scope .text-red-600,
-    [data-theme="dark"] .sd-scope .text-red-700,
-    [data-theme="dark"] .sd-scope .text-red-800 { color: #f87171; }
-    [data-theme="dark"] .sd-scope .hover\:text-red-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-red-800:hover { color: #fca5a5; }
-
-    [data-theme="dark"] .sd-scope .bg-green-50 { background-color: rgba(34,197,94,0.12); }
-    [data-theme="dark"] .sd-scope .bg-green-100 { background-color: rgba(34,197,94,0.15); }
-    [data-theme="dark"] .sd-scope .border-green-200 { border-color: rgba(34,197,94,0.30); }
-    [data-theme="dark"] .sd-scope .text-green-500,
-    [data-theme="dark"] .sd-scope .text-green-600,
-    [data-theme="dark"] .sd-scope .text-green-700,
-    [data-theme="dark"] .sd-scope .text-green-800 { color: #4ade80; }
-
-    [data-theme="dark"] .sd-scope .bg-yellow-50 { background-color: rgba(245,158,11,0.10); }
-    [data-theme="dark"] .sd-scope .bg-yellow-100 { background-color: rgba(245,158,11,0.15); }
-    [data-theme="dark"] .sd-scope .border-yellow-200 { border-color: rgba(245,158,11,0.30); }
-    [data-theme="dark"] .sd-scope .text-yellow-700,
-    [data-theme="dark"] .sd-scope .text-yellow-800 { color: #fcd34d; }
-
-    [data-theme="dark"] .sd-scope .bg-orange-50 { background-color: rgba(249,115,22,0.10); }
-    [data-theme="dark"] .sd-scope .bg-orange-100 { background-color: rgba(249,115,22,0.15); }
-    [data-theme="dark"] .sd-scope .border-orange-200 { border-color: rgba(249,115,22,0.30); }
-    [data-theme="dark"] .sd-scope .text-orange-600,
-    [data-theme="dark"] .sd-scope .text-orange-700,
-    [data-theme="dark"] .sd-scope .text-orange-800 { color: #fdba74; }
-
-    [data-theme="dark"] .sd-scope .bg-blue-50 { background-color: rgba(59,130,246,0.10); }
-    [data-theme="dark"] .sd-scope .bg-blue-100 { background-color: rgba(59,130,246,0.15); }
-    [data-theme="dark"] .sd-scope .border-blue-200 { border-color: rgba(59,130,246,0.30); }
-    [data-theme="dark"] .sd-scope .text-blue-600,
-    [data-theme="dark"] .sd-scope .text-blue-700,
-    [data-theme="dark"] .sd-scope .text-blue-800 { color: #93c5fd; }
-    [data-theme="dark"] .sd-scope .text-blue-900 { color: #bfdbfe; }
-
-    [data-theme="dark"] .sd-scope .bg-purple-50 { background-color: rgba(168,85,247,0.12); }
-    [data-theme="dark"] .sd-scope .bg-purple-100 { background-color: rgba(168,85,247,0.18); }
-    [data-theme="dark"] .sd-scope .text-purple-700,
-    [data-theme="dark"] .sd-scope .text-purple-800 { color: #d8b4fe; }
-
-    [data-theme="dark"] .sd-scope .bg-indigo-50 { background-color: rgba(129,140,248,0.14); }
-    [data-theme="dark"] .sd-scope .bg-indigo-100 { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .border-indigo-200 { border-color: rgba(129,140,248,0.30); }
-    [data-theme="dark"] .sd-scope .text-indigo-600,
-    [data-theme="dark"] .sd-scope .text-indigo-700 { color: #a5b4fc; }
-    [data-theme="dark"] .sd-scope .text-indigo-800 { color: #c7d2fe; }
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-800:hover { color: #c7d2fe; }
-
-    [data-theme="dark"] .sd-scope .bg-gray-200 { background-color: #23272f; }
-    [data-theme="dark"] .sd-scope .bg-gray-300 { background-color: #363c48; }
-
-    [data-theme="dark"] .sd-scope .ring-white { --tw-ring-color: #181a20; }
-    [data-theme="dark"] .sd-scope .ring-offset-1 { --tw-ring-offset-color: #181a20; }
-</style>
-
-<div class="min-h-screen bg-gray-50 p-6 sd-scope">
-    <!-- Header -->
-    <div class="mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">Status Overview</h1>
-        <p class="mt-1 text-sm text-gray-500">Monitor the health and status of all your entities</p>
-    </div>
-
-    @if (isLoading)
-    {
-        <div class="flex justify-center items-center h-64">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-        </div>
-    }
-    else
-    {
-        <!-- Summary Cards -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-white rounded-lg border border-gray-200 p-4">
-                <div class="text-sm font-medium text-gray-500">Total Entities</div>
-                <div class="mt-1 text-2xl font-semibold text-gray-900">@entities.Count</div>
-            </div>
-            <div class="bg-white rounded-lg border border-green-200 p-4">
-                <div class="text-sm font-medium text-green-600">Online</div>
-                <div class="mt-1 text-2xl font-semibold text-green-700">@statusSummary.GetValueOrDefault("Online", 0)</div>
-            </div>
-            <div class="bg-white rounded-lg border border-red-200 p-4">
-                <div class="text-sm font-medium text-red-600">Offline / Error</div>
-                <div class="mt-1 text-2xl font-semibold text-red-700">@(statusSummary.GetValueOrDefault("Offline", 0) + statusSummary.GetValueOrDefault("Error", 0))</div>
-            </div>
-            <div class="bg-white rounded-lg border border-orange-200 p-4">
-                <div class="text-sm font-medium text-orange-600">Active Incidents</div>
-                <div class="mt-1 text-2xl font-semibold text-orange-700">@activeIncidents.Count</div>
-            </div>
-        </div>
-
-        <!-- Active Incidents -->
-        @if (activeIncidents.Any())
-        {
-            <div class="bg-white rounded-lg border border-red-200 mb-6">
-                <div class="px-4 py-3 border-b border-red-200 flex items-center justify-between">
-                    <h2 class="text-base font-semibold text-red-700">🔴 Active Incidents</h2>
-                    <button @onclick='() => Navigation.NavigateTo($"status/incidents{queryParam}")' class="text-sm text-red-600 hover:text-red-800">View all →</button>
-                </div>
-                <ul class="divide-y divide-gray-100">
-                    @foreach (var incident in activeIncidents.Take(5))
+@* Ops console for the status module. Styles: Application/wwwroot/status.css (.st-*). *@
+<div class="sc">
+    <div class="page-wrap st-wrap">
+        <div class="st-head">
+            <div class="page-header">
+                <h1 class="page-title">Status overview</h1>
+                <p class="page-subtitle">
+                    @if (isLoading)
                     {
-                        <li class="px-4 py-3 hover:bg-gray-50 cursor-pointer" @onclick='() => Navigation.NavigateTo($"status/incidents/{incident.Id}{queryParam}")'>
-                            <div class="flex items-center justify-between">
-                                <div>
-                                    <span class="text-sm font-medium text-gray-900">@incident.Title</span>
-                                    <span class="ml-2 text-xs text-gray-500">@incident.Entity?.Name</span>
-                                </div>
-                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium @incident.GetSeverityClass()">@incident.Severity</span>
-                            </div>
-                        </li>
+                        <span class="skeleton st-skel-line" style="display:inline-block;width:220px;vertical-align:middle"></span>
                     }
-                </ul>
+                    else
+                    {
+                        <span>@StatusUi.Plural(activeEntities.Count, "entity", "entities") monitored</span>
+                        <span class="dl-sep">·</span>
+                        <span>@StatusUi.Plural(attention.Count, "needs attention", "need attention")</span>
+                        @if (overview is not null)
+                        {
+                            <span class="dl-sep">·</span><span>updated @StatusUi.When(overview.GeneratedAtUtc)</span>
+                        }
+                    }
+                </p>
+            </div>
+            <div class="st-head-actions">
+                <a class="btn btn-secondary" href="@($"status/board{queryParam}")">@StatusUi.Icon("activity", 14) Status board</a>
+                <AuthorizeView Roles="@writeRoles">
+                    <Authorized>
+                        <a class="btn btn-primary" href="@($"status/incidents/create{queryParam}")">@StatusUi.Icon("plus", 14) Report incident</a>
+                    </Authorized>
+                </AuthorizeView>
+            </div>
+        </div>
+
+        @if (isLoading)
+        {
+            <div class="st-kpis">
+                @for (var i = 0; i < 6; i++)
+                {
+                    <div class="st-kpi"><div class="skeleton st-skel-line" style="width:60%"></div><div class="skeleton" style="height:22px;width:40%;margin-top:10px"></div></div>
+                }
             </div>
         }
+        else
+        {
+            var online = activeEntities.Count(e => StatusUi.Current(e) == AssetStatus.Online);
+            var degraded = activeEntities.Count(e => StatusUi.Current(e) == AssetStatus.Degraded);
+            var downList = activeEntities.Where(e => StatusUi.IsDown(StatusUi.Current(e))).ToList();
+            var maint = activeEntities.Count(e => StatusUi.Current(e) == AssetStatus.Maintenance);
+            var unknown = activeEntities.Count - online - degraded - downList.Count - maint;
+            var critIncidents = activeIncidents.Count(i => i.Severity == IncidentSeverity.Critical);
+            var oldest = activeIncidents.OrderBy(i => i.StartedAt).FirstOrDefault();
+            var withData = overview?.Groups.SelectMany(g => g.Entities).Where(StatusUi.HasData).ToList() ?? new();
+            var groupCount = activeEntities.Select(e => e.Group).Where(g => !string.IsNullOrWhiteSpace(g)).Distinct().Count();
 
-        <!-- Entities Grid -->
-        <div class="bg-white rounded-lg border border-gray-200">
-            <div class="px-4 py-3 border-b border-gray-200 flex items-center justify-between">
-                <h2 class="text-base font-semibold text-gray-900">Entities</h2>
-                <button @onclick='() => Navigation.NavigateTo($"status/entities{queryParam}")' class="text-sm text-indigo-600 hover:text-indigo-800">Manage →</button>
-            </div>
-            @if (entities.Any())
-            {
-                <div class="divide-y divide-gray-100">
-                    @foreach (var entity in entities.Take(20))
+            <div class="st-kpis">
+                <div class="st-kpi">
+                    <div class="st-kpi-label">Entities</div>
+                    <div class="st-kpi-value">@activeEntities.Count <small>active</small></div>
+                    <div class="st-kpi-sub">@StatusUi.Plural(activeEntities.Select(e => e.EntityType).Distinct().Count(), "type") · @StatusUi.Plural(groupCount, "group")</div>
+                    @if (activeEntities.Count > 0)
                     {
-                        <div class="px-4 py-3 flex items-center justify-between hover:bg-gray-50 cursor-pointer"
-                             @onclick='() => Navigation.NavigateTo($"status/entities/{entity.Id}{queryParam}")'>
-                            <div class="flex items-center gap-3">
-                                <span class="text-lg">@entity.GetEntityTypeIcon()</span>
-                                <div>
-                                    <span class="text-sm font-medium text-gray-900">@entity.Name</span>
-                                    @if (!string.IsNullOrEmpty(entity.Group) && entity.Group != "Default")
-                                    {
-                                        <span class="ml-2 text-xs text-gray-400">@entity.Group</span>
-                                    }
-                                </div>
+                        <div class="st-kpi-bar" aria-hidden="true">
+                            @if (online > 0) { <i style="--sc:var(--success);flex:@online"></i> }
+                            @if (maint > 0) { <i style="--sc:var(--info);flex:@maint"></i> }
+                            @if (degraded > 0) { <i style="--sc:var(--warning);flex:@degraded"></i> }
+                            @if (downList.Count > 0) { <i style="--sc:var(--danger);flex:@downList.Count"></i> }
+                            @if (unknown > 0) { <i style="--sc:var(--border-strong);flex:@unknown"></i> }
+                        </div>
+                    }
+                </div>
+                <div class="st-kpi @(online > 0 ? "is-success" : "")">
+                    <div class="st-kpi-label">Online</div>
+                    <div class="st-kpi-value">@online</div>
+                    <div class="st-kpi-sub">@(activeEntities.Count > 0 ? $"{online * 100 / activeEntities.Count}% of entities" : "—")</div>
+                </div>
+                <div class="st-kpi @(degraded > 0 ? "is-warning" : "")">
+                    <div class="st-kpi-label">Degraded</div>
+                    <div class="st-kpi-value">@degraded</div>
+                    <div class="st-kpi-sub">@(maint > 0 ? $"{maint} in maintenance" : "none in maintenance")</div>
+                </div>
+                <div class="st-kpi @(downList.Count > 0 ? "is-danger" : "")">
+                    <div class="st-kpi-label">Down</div>
+                    <div class="st-kpi-value">@downList.Count</div>
+                    <div class="st-kpi-sub">@downList.Count(e => StatusUi.Current(e) == AssetStatus.Offline) offline · @downList.Count(e => StatusUi.Current(e) == AssetStatus.Error) error</div>
+                </div>
+                <div class="st-kpi @(critIncidents > 0 ? "is-danger" : "")">
+                    <div class="st-kpi-label">Active incidents</div>
+                    <div class="st-kpi-value">@activeIncidents.Count</div>
+                    <div class="st-kpi-sub">@(oldest is null ? "all clear" : $"{critIncidents} critical · oldest {StatusUi.Duration(oldest.Duration)}")</div>
+                </div>
+                <div class="st-kpi">
+                    <div class="st-kpi-label">Uptime, @(overview?.Days ?? 30) days</div>
+                    <div class="st-kpi-value">@(withData.Any() ? withData.Average(e => e.UptimePercent).ToString("0.0") : "—")<small>@(withData.Any() ? "%" : "")</small></div>
+                    <div class="st-kpi-sub">share of days fully online</div>
+                </div>
+            </div>
+
+            <div class="st-cols">
+                <div class="st-col">
+                    <div class="card">
+                        <div class="card-head">
+                            <h3 class="card-title">Needs attention</h3>
+                            <span class="st-card-sub">critical first</span>
+                            <span class="st-card-spacer"></span>
+                            <a class="st-link" href="@($"status/board{queryParam}")">Open board</a>
+                        </div>
+                        @if (!attention.Any())
+                        {
+                            <div class="empty">
+                                <div class="dl-empty-icon" style="color:var(--success)">@StatusUi.Icon("check-circle", 20)</div>
+                                <div class="empty-title">Everything is online</div>
+                                <div class="empty-text">No active entity reported a problem on its latest check.</div>
                             </div>
-                            <div class="flex items-center gap-2">
-                                @if (entity.IsCritical)
+                        }
+                        else
+                        {
+                            <ul class="st-attn">
+                                @foreach (var e in attention.Take(8))
                                 {
-                                    <span class="text-xs text-red-500 font-medium">Critical</span>
+                                    var latest = StatusUi.Latest(e);
+                                    var status = latest?.Status ?? AssetStatus.Unknown;
+                                    var inc = activeIncidents.FirstOrDefault(i => i.EntityId == e.Id);
+                                    <li>
+                                        <span class="st-tile">@StatusUi.TypeSvg(e.EntityType, 18)</span>
+                                        <div style="min-width:0">
+                                            <a class="st-attn-name" href="@($"status/entities/{e.Id}{queryParam}")">@e.Name</a>
+                                            <div class="st-attn-sub">
+                                                <span class="st-status @StatusUi.Cls(status)"><span class="st-dot is-live"></span> @StatusUi.Label(status)</span>
+                                                @if (e.IsCritical) { <span class="badge badge-danger dl-mini-badge">Critical</span> }
+                                                @if (!string.IsNullOrWhiteSpace(latest?.StatusMessage))
+                                                {
+                                                    <span class="st-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px" title="@latest!.StatusMessage">@latest!.StatusMessage</span>
+                                                }
+                                                @if (inc is not null)
+                                                {
+                                                    <a class="st-link" href="@($"status/incidents/{inc.Id}{queryParam}")">Incident: @inc.Status</a>
+                                                }
+                                            </div>
+                                        </div>
+                                        <div class="st-attn-since"><b>@StatusUi.Ago(latest?.CheckedAt)</b>last check</div>
+                                    </li>
                                 }
-                                @{
-                                    var latestStatus = entity.StatusHistory?.OrderByDescending(s => s.CheckedAt).FirstOrDefault();
-                                }
-                                @if (latestStatus != null)
-                                {
-                                    <span class="inline-flex items-center gap-1 text-xs font-medium @GetStatusClass(latestStatus.Status)">
-                                        <span class="w-1.5 h-1.5 rounded-full @GetStatusDotClass(latestStatus.Status)"></span>
-                                        @latestStatus.Status
-                                    </span>
-                                }
-                                else
-                                {
-                                    <span class="text-xs text-gray-400">Unknown</span>
-                                }
+                            </ul>
+                            @if (attention.Count > 8)
+                            {
+                                <div class="dl-footer"><span class="dl-footer-text"><strong>@(attention.Count - 8)</strong> more</span><a class="st-link" href="@($"status/entities{queryParam}")">See all entities</a></div>
+                            }
+                        }
+                    </div>
+
+                    @if (overview is not null && overview.Groups.Any())
+                    {
+                        <div class="card">
+                            <div class="card-head">
+                                <h3 class="card-title">By type</h3>
+                                <span class="st-card-spacer"></span>
+                                <span class="st-card-sub">worst status per day, last 14 days</span>
+                            </div>
+                            <div class="st-types-wrap">
+                                <table class="st-types">
+                                    <thead>
+                                        <tr><th>Type</th><th class="is-num">Total</th><th class="is-num">Online</th><th class="is-num">Degraded</th><th class="is-num">Down</th><th>Last 14 days</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var g in overview.Groups)
+                                        {
+                                            var gOn = g.Entities.Count(e => e.CurrentStatus == AssetStatus.Online);
+                                            var gDeg = g.Entities.Count(e => e.CurrentStatus == AssetStatus.Degraded);
+                                            var gDown = g.Entities.Count(e => StatusUi.IsDown(e.CurrentStatus));
+                                            <tr>
+                                                <td><span class="st-type-name">@StatusUi.TypeSvg(g.EntityType, 14) @StatusUi.TypePlural(g.EntityType)</span></td>
+                                                <td class="is-num">@g.EntityCount</td>
+                                                <td class="is-num @(gOn == 0 ? "is-zero" : "")">@gOn</td>
+                                                <td class="is-num @(gDeg == 0 ? "is-zero" : "is-warn")">@gDeg</td>
+                                                <td class="is-num @(gDown == 0 ? "is-zero" : "is-bad")">@gDown</td>
+                                                <td><AvailabilityStrip Days="@StatusUi.LastDays(StatusUi.WorstDays(g.Entities), 14)" Size="xs" Name="@StatusUi.TypePlural(g.EntityType)" /></td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     }
                 </div>
-            }
-            else
-            {
-                <div class="text-center py-8 text-sm text-gray-500">
-                    No entities yet. <button @onclick='() => Navigation.NavigateTo($"status/entities{queryParam}")' class="text-indigo-600 hover:underline">Create one</button>
+
+                <div class="st-col">
+                    <div class="card">
+                        <div class="card-head">
+                            <h3 class="card-title">Active incidents</h3>
+                            <span class="tab-count">@activeIncidents.Count</span>
+                            <span class="st-card-spacer"></span>
+                            <a class="st-link" href="@($"status/incidents{queryParam}")">View all</a>
+                        </div>
+                        @if (!activeIncidents.Any())
+                        {
+                            <div class="st-card-empty">No open incidents.</div>
+                        }
+                        else
+                        {
+                            <ul class="st-inc">
+                                @foreach (var i in activeIncidents.OrderByDescending(i => i.Severity).ThenBy(i => i.StartedAt).Take(8))
+                                {
+                                    <li class="@StatusUi.Cls(i.Severity)">
+                                        <div class="st-inc-text">
+                                            <a class="st-inc-title" href="@($"status/incidents/{i.Id}{queryParam}")">@i.Title</a>
+                                            <div class="st-inc-meta">
+                                                <span class="badge @StatusUi.Cls(i.Status)"><i></i>@i.Status</span>
+                                                <span>@(i.Entity?.Name ?? "Unknown entity")</span>
+                                                <span>·</span>
+                                                <span>@(string.IsNullOrWhiteSpace(i.AssignedTo) ? "unassigned" : i.AssignedTo)</span>
+                                            </div>
+                                        </div>
+                                        <span class="st-inc-dur">@StatusUi.Duration(i.Duration)</span>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </div>
+
+                    @if (inactiveCount > 0)
+                    {
+                        <div class="st-callout is-info">
+                            @StatusUi.Icon("info", 14)
+                            <div>@StatusUi.Plural(inactiveCount, "entity is", "entities are") inactive and not counted here. <a class="st-link" href="@($"status/entities{queryParam}")">Manage entities</a></div>
+                        </div>
+                    }
                 </div>
-            }
-        </div>
-    }
+            </div>
+        }
+    </div>
 </div>
 
 @code {
-    private List<MonitoredAsset> entities = new();
+    private List<MonitoredAsset> activeEntities = new();
+    private List<MonitoredAsset> attention = new();
     private List<Incident> activeIncidents = new();
-    private Dictionary<string, int> statusSummary = new();
+    private StatusOverviewDto? overview;
+    private int inactiveCount;
     private bool isLoading = true;
 
     private string queryParam => StateContainer.Company is null ? "" : $"?c={StateContainer.Company.Id}";
+    private string writeRoles => $"{StateContainer.Company?.Id}_INCIDENTS,{StateContainer.Company?.Id}_ADMIN";
 
     protected override async Task OnInitializedAsync()
     {
         var companyId = StateContainer.Company?.Id;
         if (string.IsNullOrEmpty(companyId)) { isLoading = false; return; }
 
-        entities = await EntityService.GetEntitiesWithLatestStatusAsync(companyId);
-        activeIncidents = await IncidentService.GetActiveIncidentsAsync(companyId);
-        statusSummary = await EntityService.GetEntityStatusSummaryAsync(companyId);
+        var entitiesTask = EntityService.GetEntitiesWithLatestStatusAsync(companyId);
+        var incidentsTask = IncidentService.GetActiveIncidentsAsync(companyId);
+        var overviewTask = OverviewService.GetOverviewAsync(companyId, 30);
+        await Task.WhenAll(entitiesTask, incidentsTask, overviewTask);
+
+        var all = entitiesTask.Result;
+        activeEntities = all.Where(e => e.IsActive).ToList();
+        inactiveCount = all.Count - activeEntities.Count;
+        activeIncidents = incidentsTask.Result;
+        overview = overviewTask.Result;
+
+        attention = activeEntities
+            .Where(e => StatusUi.NeedsAttention(StatusUi.Current(e)))
+            .OrderByDescending(e => e.IsCritical)
+            .ThenByDescending(e => StatusUi.Rank(StatusUi.Current(e)))
+            .ThenBy(e => e.Name)
+            .ToList();
+
         isLoading = false;
     }
-
-    private string GetStatusClass(AssetStatus status) => status switch
-    {
-        AssetStatus.Online => "text-green-700",
-        AssetStatus.Offline => "text-red-700",
-        AssetStatus.Error => "text-red-700",
-        AssetStatus.Degraded => "text-yellow-700",
-        AssetStatus.Maintenance => "text-blue-700",
-        _ => "text-gray-500"
-    };
-
-    private string GetStatusDotClass(AssetStatus status) => status switch
-    {
-        AssetStatus.Online => "bg-green-500",
-        AssetStatus.Offline => "bg-red-500",
-        AssetStatus.Error => "bg-red-500",
-        AssetStatus.Degraded => "bg-yellow-500",
-        AssetStatus.Maintenance => "bg-blue-500",
-        _ => "bg-gray-400"
-    };
 }

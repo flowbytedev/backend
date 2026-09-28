@@ -1,0 +1,144 @@
+@using Application.Shared.Enums
+@* Searchable entity picker, grouped by type. Replaces the four hand-rolled copies that lived in the entity
+   form, the dependencies page and the incident form. Entities loaded with their latest status show a dot,
+   and unhealthy ones can be listed first. *@
+
+<div class="st-picker">
+    <button type="button" class="st-picker-sel @(open ? "is-open" : "")" disabled="@Disabled" @onclick="Toggle"
+            aria-haspopup="listbox" aria-expanded="@(open ? "true" : "false")" id="@Id">
+        @if (Selected is not null)
+        {
+            <span class="st-tile-sm">@StatusUi.TypeSvg(Selected.EntityType, 13)</span>
+            <span class="st-picker-text">@Selected.Name<small>@Subtitle(Selected)</small></span>
+            @if (HasStatus(Selected))
+            {
+                <span class="st-dot @StatusUi.Cls(StatusUi.Current(Selected))"></span>
+            }
+        }
+        else
+        {
+            <span class="st-tile-sm">@StatusUi.Icon("search", 13)</span>
+            <span class="st-picker-text"><span class="st-picker-placeholder">@Placeholder</span></span>
+        }
+        <span class="st-picker-chev">@StatusUi.Icon("chev-down", 14)</span>
+    </button>
+
+    @if (open)
+    {
+        <div class="st-picker-backdrop" @onclick="Close"></div>
+        <div class="st-picker-menu">
+            <div class="st-picker-search">
+                @StatusUi.Icon("search", 14)
+                <input type="text" placeholder="@($"Search {Entities.Count} entities…")" @bind="search" @bind:event="oninput"
+                       @onkeydown="OnSearchKey" aria-label="Search entities" />
+            </div>
+            @{ var groups = Filtered().GroupBy(e => e.EntityType).OrderBy(g => StatusUi.TypePlural(g.Key)).ToList(); }
+            @if (!groups.Any())
+            {
+                <div class="st-picker-empty">No entities match “@search”.</div>
+            }
+            else
+            {
+                <ul class="st-picker-list" role="listbox">
+                    @foreach (var g in groups)
+                    {
+                        <li class="st-picker-grp">@StatusUi.TypePlural(g.Key)</li>
+                        @foreach (var e in g)
+                        {
+                            var entity = e;
+                            var reason = DisabledReason?.Invoke(entity);
+                            <li>
+                                <button type="button" class="st-picker-opt @(entity.Id == Value ? "is-sel" : "")" role="option"
+                                        aria-selected="@(entity.Id == Value ? "true" : "false")" disabled="@(reason is not null)"
+                                        @onclick="() => Pick(entity.Id)">
+                                    <span class="st-tile-sm">@StatusUi.TypeSvg(entity.EntityType, 13)</span>
+                                    <span class="st-picker-opt-text">@entity.Name<small>@(reason ?? Subtitle(entity))</small></span>
+                                    @if (entity.IsCritical)
+                                    {
+                                        <span class="badge badge-danger dl-mini-badge">Critical</span>
+                                    }
+                                    @if (HasStatus(entity))
+                                    {
+                                        <span class="st-dot @StatusUi.Cls(StatusUi.Current(entity))" title="@StatusUi.Label(StatusUi.Current(entity))"></span>
+                                    }
+                                </button>
+                            </li>
+                        }
+                    }
+                </ul>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<MonitoredAsset> Entities { get; set; } = new();
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string Placeholder { get; set; } = "Choose an entity";
+    [Parameter] public bool Disabled { get; set; }
+    [Parameter] public string? Id { get; set; }
+    /// <summary>List entities that are not online first (for incident reporting).</summary>
+    [Parameter] public bool UnhealthyFirst { get; set; }
+    /// <summary>Return a reason to show an entity greyed out, or null to allow it.</summary>
+    [Parameter] public Func<MonitoredAsset, string?>? DisabledReason { get; set; }
+
+    private bool open;
+    private string search = "";
+
+    private MonitoredAsset? Selected => Entities.FirstOrDefault(e => e.Id == Value);
+
+    private static bool HasStatus(MonitoredAsset e) => e.StatusHistory?.Any() == true;
+
+    private IEnumerable<MonitoredAsset> Filtered()
+    {
+        var q = search.Trim();
+        var list = string.IsNullOrEmpty(q)
+            ? Entities
+            : Entities.Where(e =>
+                (e.Name?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (e.Owner?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (e.Group?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (e.Location?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                (e.Url?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                StatusUi.TypeLabel(e.EntityType).Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        return UnhealthyFirst
+            ? list.OrderByDescending(e => StatusUi.Rank(HasStatus(e) ? StatusUi.Current(e) : null) >= 3).ThenBy(e => e.Name)
+            : list.OrderBy(e => e.Name);
+    }
+
+    public static string Subtitle(MonitoredAsset e)
+    {
+        var parts = new List<string> { StatusUi.TypeLabel(e.EntityType) };
+        if (!string.IsNullOrWhiteSpace(e.Group) && e.Group != "Default") parts.Add(e.Group!);
+        if (!string.IsNullOrWhiteSpace(e.Owner)) parts.Add(e.Owner!);
+        if (HasStatus(e)) parts.Add(StatusUi.Label(StatusUi.Current(e)).ToLowerInvariant());
+        return string.Join(" · ", parts);
+    }
+
+    private void Toggle()
+    {
+        open = !open;
+        if (open) search = "";
+    }
+
+    private void Close() => open = false;
+
+    private async Task Pick(string id)
+    {
+        open = false;
+        search = "";
+        Value = id;
+        await ValueChanged.InvokeAsync(id);
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") { Close(); return; }
+        if (e.Key == "Enter")
+        {
+            var first = Filtered().FirstOrDefault(x => DisabledReason?.Invoke(x) is null);
+            if (first is not null) await Pick(first.Id);
+        }
+    }
+}

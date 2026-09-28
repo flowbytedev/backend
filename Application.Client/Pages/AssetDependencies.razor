@@ -1,600 +1,265 @@
 @page "/status/entities/{AssetId}/dependencies"
-@using Application.Shared.Models
 @using Application.Shared.Enums
-@using Application.Client.Services
-@using Microsoft.AspNetCore.Authorization
-@using Microsoft.AspNetCore.Components.Forms
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
 @inject MonitoredAssetClientService EntityService
 @inject StateContainer StateContainer
 @attribute [Authorize(Policy = PolicyNames.StatusRead)]
 
-<PageTitle>Manage Dependencies - @(entity?.Name ?? "Loading...")</PageTitle>
+<PageTitle>Dependencies · @(entity?.Name ?? "Entity")</PageTitle>
 
-<style>
-    /* ── Dark theme (data-theme="dark") — override hardcoded Tailwind light colors ── */
-    [data-theme="dark"] .sd-scope.min-h-screen { background-color: #0e1117; }
-    [data-theme="dark"] .sd-scope.bg-white { background-color: #181a20; }
-
-    [data-theme="dark"] .sd-scope .bg-white { background-color: #181a20; }
-    [data-theme="dark"] .sd-scope .bg-white\/60 { background-color: rgba(24,26,32,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-50 { background-color: #1e222b; }
-    [data-theme="dark"] .sd-scope .bg-gray-50\/60 { background-color: rgba(30,34,43,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-100 { background-color: #20242c; }
-
-    [data-theme="dark"] .sd-scope .text-gray-900 { color: #f3f4f6; }
-    [data-theme="dark"] .sd-scope .text-gray-800 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-700 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-600 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-500 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-400 { color: #767d89; }
-    [data-theme="dark"] .sd-scope .text-gray-300 { color: #4b515e; }
-
-    [data-theme="dark"] .sd-scope .border-gray-100 { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .border-gray-200 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-200\/80 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-300 { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-50:hover { background-color: #20242c; }
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-100:hover { background-color: #262b34; }
-    [data-theme="dark"] .sd-scope .hover\:bg-red-50:hover { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .hover\:bg-indigo-100:hover { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .hover\:border-gray-400:hover { border-color: #3a4150; }
-    [data-theme="dark"] .sd-scope .hover\:border-red-200:hover { border-color: rgba(239,68,68,0.30); }
-
-    [data-theme="dark"] .sd-scope input:not([type="checkbox"]):not([type="radio"]),
-    [data-theme="dark"] .sd-scope select,
-    [data-theme="dark"] .sd-scope textarea {
-        background-color: #12141a !important;
-        border-color: #2b303b !important;
-        color: #e6e9ef !important;
-    }
-    [data-theme="dark"] .sd-scope input::placeholder,
-    [data-theme="dark"] .sd-scope textarea::placeholder { color: #767d89 !important; }
-
-    [data-theme="dark"] .sd-scope .bg-red-50 { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .bg-red-100 { background-color: rgba(239,68,68,0.15); }
-    [data-theme="dark"] .sd-scope .border-red-200 { border-color: rgba(239,68,68,0.30); }
-    [data-theme="dark"] .sd-scope .text-red-400,
-    [data-theme="dark"] .sd-scope .text-red-500,
-    [data-theme="dark"] .sd-scope .text-red-600,
-    [data-theme="dark"] .sd-scope .text-red-700,
-    [data-theme="dark"] .sd-scope .text-red-800 { color: #f87171; }
-    [data-theme="dark"] .sd-scope .hover\:text-red-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-red-800:hover { color: #fca5a5; }
-
-    [data-theme="dark"] .sd-scope .bg-green-50 { background-color: rgba(34,197,94,0.12); }
-    [data-theme="dark"] .sd-scope .bg-green-100 { background-color: rgba(34,197,94,0.15); }
-    [data-theme="dark"] .sd-scope .border-green-200 { border-color: rgba(34,197,94,0.30); }
-    [data-theme="dark"] .sd-scope .text-green-500,
-    [data-theme="dark"] .sd-scope .text-green-600,
-    [data-theme="dark"] .sd-scope .text-green-700,
-    [data-theme="dark"] .sd-scope .text-green-800 { color: #4ade80; }
-
-    [data-theme="dark"] .sd-scope .bg-yellow-50 { background-color: rgba(245,158,11,0.10); }
-    [data-theme="dark"] .sd-scope .bg-yellow-100 { background-color: rgba(245,158,11,0.15); }
-    [data-theme="dark"] .sd-scope .border-yellow-200 { border-color: rgba(245,158,11,0.30); }
-    [data-theme="dark"] .sd-scope .text-yellow-700,
-    [data-theme="dark"] .sd-scope .text-yellow-800 { color: #fcd34d; }
-
-    [data-theme="dark"] .sd-scope .bg-orange-50 { background-color: rgba(249,115,22,0.10); }
-    [data-theme="dark"] .sd-scope .bg-orange-100 { background-color: rgba(249,115,22,0.15); }
-    [data-theme="dark"] .sd-scope .border-orange-200 { border-color: rgba(249,115,22,0.30); }
-    [data-theme="dark"] .sd-scope .text-orange-600,
-    [data-theme="dark"] .sd-scope .text-orange-700,
-    [data-theme="dark"] .sd-scope .text-orange-800 { color: #fdba74; }
-
-    [data-theme="dark"] .sd-scope .bg-blue-50 { background-color: rgba(59,130,246,0.10); }
-    [data-theme="dark"] .sd-scope .bg-blue-100 { background-color: rgba(59,130,246,0.15); }
-    [data-theme="dark"] .sd-scope .border-blue-200 { border-color: rgba(59,130,246,0.30); }
-    [data-theme="dark"] .sd-scope .text-blue-600,
-    [data-theme="dark"] .sd-scope .text-blue-700,
-    [data-theme="dark"] .sd-scope .text-blue-800 { color: #93c5fd; }
-    [data-theme="dark"] .sd-scope .text-blue-900 { color: #bfdbfe; }
-
-    [data-theme="dark"] .sd-scope .bg-purple-50 { background-color: rgba(168,85,247,0.12); }
-    [data-theme="dark"] .sd-scope .bg-purple-100 { background-color: rgba(168,85,247,0.18); }
-    [data-theme="dark"] .sd-scope .text-purple-700,
-    [data-theme="dark"] .sd-scope .text-purple-800 { color: #d8b4fe; }
-
-    [data-theme="dark"] .sd-scope .bg-indigo-50 { background-color: rgba(129,140,248,0.14); }
-    [data-theme="dark"] .sd-scope .bg-indigo-100 { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .border-indigo-200 { border-color: rgba(129,140,248,0.30); }
-    [data-theme="dark"] .sd-scope .text-indigo-600,
-    [data-theme="dark"] .sd-scope .text-indigo-700 { color: #a5b4fc; }
-    [data-theme="dark"] .sd-scope .text-indigo-800 { color: #c7d2fe; }
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-800:hover { color: #c7d2fe; }
-
-    [data-theme="dark"] .sd-scope .bg-gray-200 { background-color: #23272f; }
-    [data-theme="dark"] .sd-scope .bg-gray-300 { background-color: #363c48; }
-
-    [data-theme="dark"] .sd-scope .ring-white { --tw-ring-color: #181a20; }
-    [data-theme="dark"] .sd-scope .ring-offset-1 { --tw-ring-offset-color: #181a20; }
-</style>
-
-<div class="min-h-screen bg-gray-50 sd-scope">
-    @if (isLoading)
-    {
-        <div class="flex justify-center items-center h-64">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        </div>
-    }
-    else if (entity == null)
-    {
-        <div class="text-center py-12">
-            <h3 class="text-lg font-medium text-gray-900">Entity not found</h3>
-            <p class="mt-2 text-sm text-gray-500">The entity you're looking for doesn't exist.</p>
-            <div class="mt-6">
-                <button @onclick="BackToEntities"
-                        class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700">
-                    Back to Entities
-                </button>
-            </div>
-        </div>
-    }
-    else
-    {
-        <!-- Header -->
-        <div class="bg-white border-b border-gray-200">
-            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="py-6">
-                    <nav class="flex" aria-label="Breadcrumb">
-                        <ol class="flex items-center space-x-4">
-                            <li>
-                                <div>
-                                    <button @onclick="BackToEntities" class="text-gray-400 hover:text-gray-500">
-                                        <svg class="flex-shrink-0 h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fill-rule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clip-rule="evenodd"></path>
-                                        </svg>
-                                        <span class="sr-only">Back</span>
-                                    </button>
-                                </div>
-                            </li>
-                            <li>
-                                <div class="flex items-center">
-                                    <svg class="flex-shrink-0 h-5 w-5 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 111.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <button @onclick="BackToEntities" class="ml-4 text-sm font-medium text-gray-500 hover:text-gray-700">
-                                        Entities
-                                    </button>
-                                </div>
-                            </li>
-                            <li>
-                                <div class="flex items-center">
-                                    <svg class="flex-shrink-0 h-5 w-5 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 111.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <button @onclick="BackToEntity" class="ml-4 text-sm font-medium text-gray-500 hover:text-gray-700">
-                                        @entity.Name
-                                    </button>
-                                </div>
-                            </li>
-                            <li>
-                                <div class="flex items-center">
-                                    <svg class="flex-shrink-0 h-5 w-5 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 111.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <span class="ml-4 text-sm font-medium text-gray-500">Dependencies</span>
-                                </div>
-                            </li>
-                        </ol>
-                    </nav>
-                    <div class="mt-2 md:flex md:items-center md:justify-between">
-                        <div class="flex-1 min-w-0">
-                            <h1 class="text-2xl font-bold leading-7 text-gray-900 sm:text-3xl sm:truncate">
-                                Manage Dependencies
-                            </h1>
-                            <p class="mt-1 text-sm text-gray-500">
-                                Configure dependencies for <strong>@entity.Name</strong>
-                            </p>
-                        </div>
-                        <div class="mt-4 flex md:mt-0 md:ml-4">
-                            <button @onclick="ShowAddDependencyForm"
-                                    class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
-                                <svg class="-ml-1 mr-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                                </svg>
-                                Add Dependency
-                            </button>
-                        </div>
-                    </div>
+@* Styles: Application/wwwroot/status.css (.st-tree, .st-node, .st-dep-*). *@
+<div class="sc">
+    <div class="page-wrap st-wrap">
+        @if (isLoading)
+        {
+            <div class="card"><div class="st-loading"><span class="spin"></span> Loading dependencies…</div></div>
+        }
+        else if (entity is null)
+        {
+            <div class="card">
+                <div class="empty">
+                    <div class="empty-title">Entity not found</div>
+                    <a class="btn btn-secondary btn-sm" href="@($"status/entities{queryParam}")">Back to entities</a>
                 </div>
             </div>
-        </div>
+        }
+        else
+        {
+            var selfStatus = dependencyTree?.CurrentStatus ?? AssetStatus.Unknown;
+            var upAll = Flatten(dependencyTree?.Dependencies);
+            var downAll = Flatten(dependencyTree?.Dependents);
+            var unhealthyUp = upAll.Where(n => StatusUi.IsUnhealthy(n.CurrentStatus)).ToList();
 
-        <!-- Main Content -->
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="lg:col-span-2">
-                    <!-- Dependency Tree -->
-                    <div class="bg-white shadow rounded-lg">
-                        <div class="px-6 py-5 border-b border-gray-200">
-                            <h3 class="text-lg leading-6 font-medium text-gray-900">
-                                Dependency Tree
-                            </h3>
-                            <p class="mt-1 text-sm text-gray-500">
-                                Complete dependency hierarchy showing all layers of dependencies and dependents.
-                                Use <span class="font-medium">Edit</span>/<span class="font-medium">Delete</span> on a direct dependency to manage it.
-                            </p>
+            <div class="st-head">
+                <div class="st-head-left">
+                    <a class="st-back" href="@EntityHref" title="Back to @entity.Name" aria-label="Back to @entity.Name">@StatusUi.Icon("arrow-left", 16)</a>
+                    <div class="st-head-main">
+                        <div class="st-crumbs">
+                            <a href="@($"status/entities{queryParam}")">Entities</a>
+                            @StatusUi.Icon("chev-right", 12)<a href="@EntityHref">@entity.Name</a>
+                            @StatusUi.Icon("chev-right", 12)<span>Dependencies</span>
                         </div>
-
-                        <div class="p-6">
-                            @if (dependencyTree != null)
-                            {
-                                <div class="space-y-6">
-                                    @if (dependencyTree.Dependencies?.Any() == true)
-                                    {
-                                        <div>
-                                            <h4 class="text-md font-semibold text-gray-900 mb-3 flex items-center">
-                                                <svg class="w-5 h-5 mr-2 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
-                                                </svg>
-                                                Upstream Dependencies (@dependencyTree.Dependencies.Count)
-                                            </h4>
-                                            <p class="text-sm text-gray-600 mb-4">Entities that @entity.Name depends on:</p>
-                                            <div class="ml-4">
-                                                @foreach (var dep in dependencyTree.Dependencies)
-                                                {
-                                                    @RenderDependencyNode(dep, true, 0)
-                                                }
-                                            </div>
-                                        </div>
-                                    }
-
-                                    <div class="text-center py-4">
-                                        <div class="inline-flex items-center px-4 py-2 rounded-lg bg-blue-50 border-2 border-blue-200">
-                                            <span class="w-3 h-3 @GetStatusColor(dependencyTree.CurrentStatus) rounded-full mr-3"></span>
-                                            <span class="font-semibold text-blue-900">@dependencyTree.EntityName</span>
-                                            <span class="ml-2 text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded">@dependencyTree.EntityType</span>
-                                        </div>
-                                    </div>
-
-                                    @if (dependencyTree.Dependents?.Any() == true)
-                                    {
-                                        <div>
-                                            <h4 class="text-md font-semibold text-gray-900 mb-3 flex items-center">
-                                                <svg class="w-5 h-5 mr-2 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 17l-5-5m0 0l5-5m-5 5h12"></path>
-                                                </svg>
-                                                Downstream Dependents (@dependencyTree.Dependents.Count)
-                                            </h4>
-                                            <p class="text-sm text-gray-600 mb-4">Entities that depend on @entity.Name:</p>
-                                            <div class="ml-4">
-                                                @foreach (var dep in dependencyTree.Dependents)
-                                                {
-                                                    @RenderDependencyNode(dep, false, 0)
-                                                }
-                                            </div>
-                                        </div>
-                                    }
-
-                                    @if (dependencyTree.Dependencies?.Any() != true && dependencyTree.Dependents?.Any() != true)
-                                    {
-                                        <div class="text-center py-8">
-                                            <svg class="mx-auto h-8 w-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path>
-                                            </svg>
-                                            <h3 class="mt-2 text-sm font-medium text-gray-900">No dependency tree</h3>
-                                            <p class="mt-1 text-sm text-gray-500">This entity has no dependencies or dependents configured.</p>
-                                        </div>
-                                    }
-                                </div>
-                            }
-                            else if (isLoadingTree)
-                            {
-                                <div class="flex justify-center items-center py-8">
-                                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-                                    <span class="ml-2 text-sm text-gray-600">Loading dependency tree...</span>
-                                </div>
-                            }
+                        <div class="st-title-row">
+                            <h1 class="page-title">Dependencies</h1>
+                            <span class="st-status @StatusUi.Cls(selfStatus)"><span class="st-dot @(StatusUi.IsUnhealthy(selfStatus) ? "is-live" : "")"></span> @entity.Name is @StatusUi.Label(selfStatus).ToLowerInvariant()</span>
                         </div>
+                        <p class="page-subtitle" style="margin-top:4px">What this entity needs to run, and what breaks when it doesn't.</p>
                     </div>
                 </div>
+                <div class="st-head-actions">
+                    <button class="btn btn-secondary" type="button" @onclick="LoadDependencyTree" disabled="@isLoadingTree">@StatusUi.Icon("refresh", 14) Recompute impact</button>
+                </div>
+            </div>
 
-                <!-- Add/Edit Dependency Form -->
-                <div class="lg:col-span-1">
-                    @if (showDependencyForm)
-                    {
-                        <div class="bg-white shadow rounded-lg">
-                            <div class="px-6 py-5 border-b border-gray-200">
-                                <h3 class="text-lg leading-6 font-medium text-gray-900">
-                                    @(editingDependency != null ? "Edit Dependency" : "Add Dependency")
-                                </h3>
+            <div class="st-cols is-even">
+                <div class="st-col">
+                    <div class="card">
+                        @if (isLoadingTree && dependencyTree is null)
+                        {
+                            <div class="st-load"><span class="spin"></span> Computing the dependency tree…</div>
+                        }
+                        else if (dependencyTree is null)
+                        {
+                            <div class="st-deps-empty">Couldn't load the dependency tree. <button class="st-link" type="button" @onclick="LoadDependencyTree">Try again</button></div>
+                        }
+                        else
+                        {
+                            <div class="st-dep-dir">@StatusUi.Icon("up-right", 12) Depends on <span class="st-dep-dir-n">@dependencyTree.Dependencies.Count direct@(upAll.Count > dependencyTree.Dependencies.Count ? $" · {upAll.Count} in chain" : "")</span></div>
+                            @if (StatusUi.IsUnhealthy(selfStatus) && dependencyTree.Dependencies.Any())
+                            {
+                                @if (unhealthyUp.Any())
+                                {
+                                    <div class="st-cause">@StatusUi.Icon("alert", 14)<div><b>Possible cause:</b> @string.Join(", ", unhealthyUp.Take(4).Select(n => n.EntityName))@(unhealthyUp.Count > 4 ? $" +{unhealthyUp.Count - 4} more" : "") @(unhealthyUp.Count == 1 ? "is" : "are") unhealthy upstream.</div></div>
+                                }
+                                else
+                                {
+                                    <div class="st-cause is-ok">@StatusUi.Icon("info", 14)<div><b>No upstream cause found.</b> Everything this entity depends on is healthy, so the problem is likely on @entity.Name itself.</div></div>
+                                }
+                            }
+                            @if (!dependencyTree.Dependencies.Any())
+                            {
+                                <div class="st-deps-empty">@entity.Name doesn't depend on anything yet.@(canWrite ? " Add what it needs to run with the form on the right." : "")</div>
+                            }
+                            else
+                            {
+                                <ul class="st-tree">
+                                    @foreach (var n in dependencyTree.Dependencies.OrderBy(d => d.Order).ThenBy(d => d.EntityName))
+                                    {
+                                        @Node(n, true, 0)
+                                    }
+                                </ul>
+                            }
+
+                            <div class="st-self">
+                                <span class="st-self-lbl">This entity</span>
+                                <span class="st-tile-sm">@StatusUi.TypeSvg(entity.EntityType, 13)</span>
+                                @entity.Name
+                                <span class="st-status @StatusUi.Cls(selfStatus)"><span class="st-dot"></span> @StatusUi.Label(selfStatus)</span>
                             </div>
-                            <div class="px-6 py-5">
-                                <EditForm Model="@dependencyForm" OnValidSubmit="@HandleDependencySubmit">
-                                    <DataAnnotationsValidator />
 
-                                    <div class="space-y-5">
-                                        <!-- Dependency Type (filters the list below) -->
-                                        <div>
-                                            <label for="dependencyType" class="block text-sm font-medium text-gray-700 mb-1.5">
-                                                Type
-                                            </label>
-                                            <select @bind="dependencyForm.DependencyType" @bind:after="OnDependencyTypeChanged" id="dependencyType"
-                                                    class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                                                <option value="">All types</option>
-                                                @foreach (var assetType in Enum.GetValues<AssetType>())
-                                                {
-                                                    <option value="@assetType">@assetType.ToString()</option>
-                                                }
-                                            </select>
-                                            <p class="mt-1 text-xs text-gray-500">Filters the entities you can depend on.</p>
-                                        </div>
+                            <div class="st-dep-dir">@StatusUi.Icon("down-right", 12) Impact if this fails <span class="st-dep-dir-n">@dependencyTree.Dependents.Count direct@(downAll.Count > dependencyTree.Dependents.Count ? $" · {downAll.Count} in chain" : "")@(downAll.Count(n => n.IsCritical) is var c && c > 0 ? $" · {c} critical" : "")</span></div>
+                            @if (!dependencyTree.Dependents.Any())
+                            {
+                                <div class="st-deps-empty">Nothing depends on @entity.Name.</div>
+                            }
+                            else
+                            {
+                                <ul class="st-tree">
+                                    @foreach (var n in dependencyTree.Dependents.OrderByDescending(d => d.IsCritical).ThenBy(d => d.EntityName))
+                                    {
+                                        @Node(n, false, 0)
+                                    }
+                                </ul>
+                                <div class="dl-footer"><span class="dl-footer-text">Downstream links are read-only here. Edit them from the dependent entity.</span></div>
+                            }
+                        }
+                    </div>
+                </div>
 
-                                        <!-- Depends On Entity (searchable dropdown) -->
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 mb-1.5">
-                                                Depends On Entity <span class="text-red-500">*</span>
-                                            </label>
-                                            <div class="relative">
-                                                <!-- Trigger -->
-                                                <button type="button" @onclick="ToggleDependsOnDropdown"
-                                                        class="flex w-full items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 text-left text-sm shadow-sm outline-none transition-colors hover:border-gray-400 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500">
-                                                    @if (SelectedDependsOnEntity is { } sel)
-                                                    {
-                                                        <span class="text-base leading-none">@sel.GetEntityTypeIcon()</span>
-                                                        <span class="min-w-0 flex-1 truncate font-medium text-gray-900">@sel.Name</span>
-                                                    }
-                                                    else
-                                                    {
-                                                        <span class="flex-1 text-gray-400">Select entity…</span>
-                                                    }
-                                                    <svg class="h-4 w-4 shrink-0 text-gray-400 transition-transform @(dependsOnDropdownOpen ? "rotate-180" : "")" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                                    </svg>
-                                                </button>
-
-                                                @if (dependsOnDropdownOpen)
-                                                {
-                                                    <div class="fixed inset-0 z-10" @onclick="CloseDependsOnDropdown"></div>
-                                                    <div class="absolute z-20 mt-1.5 w-full overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
-                                                        <div class="p-2">
-                                                            <div class="relative">
-                                                                <svg class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"></path>
-                                                                </svg>
-                                                                <input @bind="dependsOnSearch" @bind:event="oninput" placeholder="Search entities…"
-                                                                       class="w-full rounded-lg border-0 bg-gray-100 py-2 pl-8 pr-3 text-sm text-gray-900 outline-none ring-1 ring-transparent transition focus:bg-white focus:ring-indigo-500" />
-                                                            </div>
-                                                        </div>
-                                                        <ul class="max-h-64 overflow-y-auto px-1.5 pb-1.5">
-                                                            @if (!SearchedDependsOnEntities.Any())
-                                                            {
-                                                                <li class="px-3 py-6 text-center text-sm text-gray-400">No matching entities</li>
-                                                            }
-                                                            else
-                                                            {
-                                                                @foreach (var availableEntity in SearchedDependsOnEntities)
-                                                                {
-                                                                    var isSelected = availableEntity.Id == dependencyForm.DependsOnEntityId;
-                                                                    <li>
-                                                                        <button type="button" @onclick="() => SelectDependsOnEntity(availableEntity.Id)"
-                                                                                style="border:none;"
-                                                                                class="flex w-full items-center gap-3 rounded-lg bg-transparent px-2.5 py-2 text-left outline-none transition-colors hover:bg-gray-100 @(isSelected ? "bg-indigo-50" : "")">
-                                                                            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-base">@availableEntity.GetEntityTypeIcon()</span>
-                                                                            <span class="min-w-0 flex-1">
-                                                                                <span class="flex items-center gap-1.5">
-                                                                                    <span class="truncate text-sm font-medium text-gray-900">@availableEntity.Name</span>
-                                                                                    <span class="inline-flex shrink-0 items-center rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">@availableEntity.EntityType</span>
-                                                                                    @if (availableEntity.IsCritical)
-                                                                                    {
-                                                                                        <span class="inline-flex shrink-0 items-center rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">Critical</span>
-                                                                                    }
-                                                                                </span>
-                                                                                @if (!string.IsNullOrWhiteSpace(DependencySubtitle(availableEntity)))
-                                                                                {
-                                                                                    <span class="block truncate text-xs text-gray-400">@DependencySubtitle(availableEntity)</span>
-                                                                                }
-                                                                            </span>
-                                                                            @if (isSelected)
-                                                                            {
-                                                                                <svg class="h-4 w-4 shrink-0 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                                                                </svg>
-                                                                            }
-                                                                        </button>
-                                                                    </li>
-                                                                }
-                                                            }
-                                                        </ul>
-                                                    </div>
-                                                }
-                                            </div>
-                                            <ValidationMessage For="@(() => dependencyForm.DependsOnEntityId)" class="mt-1.5 text-sm text-red-600" />
-                                        </div>
-
-                                        <!-- Description -->
-                                        <div>
-                                            <label for="dependencyDescription" class="block text-sm font-medium text-gray-700 mb-1.5">
-                                                Description
-                                            </label>
-                                            <InputTextArea @bind-Value="dependencyForm.Description" id="dependencyDescription" rows="2"
-                                                           class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500"
-                                                           placeholder="Describe this dependency…" />
-                                        </div>
-
-                                        <!-- Order -->
-                                        <div>
-                                            <label for="dependencyOrder" class="block text-sm font-medium text-gray-700 mb-1.5">
-                                                Check Order
-                                            </label>
-                                            <InputNumber @bind-Value="dependencyForm.Order" id="dependencyOrder" min="0"
-                                                         class="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm outline-none transition-colors focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
-                                            <p class="mt-1 text-xs text-gray-500">Lower numbers are checked first.</p>
-                                        </div>
-
-                                        <!-- Flags -->
-                                        <div class="space-y-3">
-                                            <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-3 cursor-pointer hover:bg-gray-50 transition-colors">
-                                                <InputCheckbox @bind-Value="dependencyForm.IsActive" id="dependencyIsActive"
-                                                               class="mt-0.5 h-4 w-4 rounded text-indigo-600 border-gray-300 focus:ring-indigo-500" />
-                                                <span class="text-sm">
-                                                    <span class="block font-medium text-gray-800">Active</span>
-                                                    <span class="text-gray-500">Dependency is currently being monitored</span>
-                                                </span>
-                                            </label>
-                                            <label class="flex items-start gap-3 rounded-lg border border-gray-200 p-3 cursor-pointer hover:bg-gray-50 transition-colors">
-                                                <InputCheckbox @bind-Value="dependencyForm.IsCritical" id="dependencyIsCritical"
-                                                               class="mt-0.5 h-4 w-4 rounded text-red-600 border-gray-300 focus:ring-red-500" />
-                                                <span class="text-sm">
-                                                    <span class="block font-medium text-gray-800">Critical</span>
-                                                    <span class="text-gray-500">Failure will impact this entity</span>
-                                                </span>
-                                            </label>
-                                        </div>
+                <div class="st-col">
+                    @if (canWrite)
+                    {
+                        <div class="card">
+                            <div class="card-head">
+                                <h3 class="card-title">@(editingDependency is null ? "Add a dependency" : "Edit dependency")</h3>
+                                <span class="st-card-sub">@entity.Name depends on…</span>
+                            </div>
+                            <div class="card-body">
+                                <div class="field">
+                                    <label class="field-label" for="d-type">Type</label>
+                                    <select class="select" id="d-type" @bind="typeFilter" @bind:after="OnTypeChanged" disabled="@(editingDependency is not null)">
+                                        <option value="">All types</option>
+                                        @foreach (var t in Enum.GetValues<AssetType>())
+                                        {
+                                            <option value="@t">@StatusUi.TypeLabel(t)</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="field">
+                                    <label class="field-label" for="d-entity">Entity <b>*</b></label>
+                                    <EntityPicker Id="d-entity" Entities="@PickerEntities" @bind-Value="dependencyForm.DependsOnEntityId"
+                                                  Placeholder="Choose what it depends on" Disabled="@(editingDependency is not null)"
+                                                  DisabledReason="@AlreadyLinked" />
+                                    @if (showErrors && string.IsNullOrEmpty(dependencyForm.DependsOnEntityId)) { <span class="field-error">Choose an entity.</span> }
+                                </div>
+                                <div class="field">
+                                    <label class="field-label" for="d-note">Why it is needed</label>
+                                    <input class="input" id="d-note" maxlength="500" placeholder="e.g. source tables for the nightly load" @bind="dependencyForm.Description" />
+                                </div>
+                                <div class="st-form-grid">
+                                    <div class="field">
+                                        <label class="field-label" for="d-order">Check order</label>
+                                        <input class="input input-mono" id="d-order" type="number" min="0" @bind="dependencyForm.Order" />
+                                        <span class="field-help">Lower numbers are listed and checked first.</span>
                                     </div>
-
-                                    <!-- Form Actions -->
-                                    <div class="mt-6 flex justify-end gap-3">
-                                        <button type="button" @onclick="CancelDependencyForm"
-                                                class="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50">
-                                            Cancel
+                                    <div class="field">
+                                        <span class="field-label">Options</span>
+                                        <button type="button" class="switch-row" style="background:none;border:0;padding:5px 0" role="switch" aria-checked="@(dependencyForm.IsCritical ? "true" : "false")" @onclick="() => dependencyForm.IsCritical = !dependencyForm.IsCritical">
+                                            <span class="switch @(dependencyForm.IsCritical ? "is-on" : "")"></span><span class="switch-label">Critical</span>
                                         </button>
-                                        <button type="submit" disabled="@isSubmittingDependency"
-                                                class="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo-700 disabled:bg-indigo-300">
-                                            @if (isSubmittingDependency)
-                                            {
-                                                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
-                                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                                </svg>
-                                                @(editingDependency != null ? "Updating…" : "Adding…")
-                                            }
-                                            else
-                                            {
-                                                @(editingDependency != null ? "Update" : "Add")
-                                            }
+                                        <button type="button" class="switch-row" style="background:none;border:0;padding:5px 0" role="switch" aria-checked="@(dependencyForm.IsActive ? "true" : "false")" @onclick="() => dependencyForm.IsActive = !dependencyForm.IsActive">
+                                            <span class="switch @(dependencyForm.IsActive ? "is-on" : "")"></span><span class="switch-label">Active</span>
                                         </button>
                                     </div>
-                                </EditForm>
+                                </div>
+                                <div class="st-callout is-info">@StatusUi.Icon("info", 14)<div>When @entity.Name is unhealthy, unhealthy <b>upstream</b> dependencies are listed as a possible cause on its page.</div></div>
+                                @if (errorMessage is not null) { <div class="form-error" role="alert">@errorMessage</div> }
+                            </div>
+                            <div class="st-form-foot">
+                                @if (editingDependency is not null)
+                                {
+                                    <button class="btn btn-ghost st-btn-danger-outline" style="margin-right:auto" type="button" @onclick="() => DeleteDependency(editingDependency)">Remove</button>
+                                }
+                                <button class="btn btn-ghost" type="button" @onclick="ResetForm">@(editingDependency is null ? "Clear" : "Cancel")</button>
+                                <button class="btn btn-primary" type="button" disabled="@isSubmittingDependency" @onclick="HandleDependencySubmit">
+                                    @(isSubmittingDependency ? "Saving…" : editingDependency is null ? "Add dependency" : "Save dependency")
+                                </button>
                             </div>
                         </div>
                     }
-                    else
+
+                    @if (dependencyTree is not null)
                     {
-                        <!-- Info Panel -->
-                        <div class="bg-white shadow rounded-lg">
-                            <div class="px-6 py-5">
-                                <h3 class="text-lg leading-6 font-medium text-gray-900 mb-4">About Dependencies</h3>
-                                <div class="prose prose-sm text-gray-500">
-                                    <p>Dependencies define other entities that this entity relies on to function correctly.</p>
-                                    <ul class="mt-4 space-y-2">
-                                        <li><strong>Critical:</strong> Failure will significantly impact this entity</li>
-                                        <li><strong>Order:</strong> Lower numbers are checked first during monitoring</li>
-                                        <li><strong>Active:</strong> Whether this dependency is currently being monitored</li>
-                                    </ul>
-                                </div>
+                        <div class="card">
+                            <div class="card-head"><h3 class="card-title">Impact summary</h3></div>
+                            <div class="card-body">
+                                <dl class="st-dl">
+                                    <dt>Upstream</dt><dd>@StatusUi.Plural(dependencyTree.Dependencies.Count, "direct") · @StatusUi.Plural(upAll.Count, "entity", "entities") in the chain</dd>
+                                    <dt>Downstream</dt><dd>@StatusUi.Plural(dependencyTree.Dependents.Count, "direct") · @StatusUi.Plural(downAll.Count, "entity", "entities") in the chain</dd>
+                                    <dt>Critical affected</dt><dd>@downAll.Count(n => n.IsCritical)</dd>
+                                    <dt>Types affected</dt><dd>@(downAll.Any() ? string.Join(", ", downAll.Select(n => StatusUi.TypePlural(n.EntityType)).Distinct()) : "—")</dd>
+                                    <dt>Unhealthy now</dt><dd>@(upAll.Concat(downAll).Count(n => StatusUi.IsUnhealthy(n.CurrentStatus)))</dd>
+                                </dl>
                             </div>
                         </div>
                     }
                 </div>
             </div>
-        </div>
-    }
+        }
+    </div>
+
+    <StatusConfirm @ref="confirm" />
+    <StatusToast @ref="toast" />
 </div>
 
 @code {
     [Parameter] public string AssetId { get; set; } = string.Empty;
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
     private MonitoredAsset? entity;
     private List<MonitoredAsset> availableEntities = new();
     private AssetDependencyTree? dependencyTree;
     private bool isLoading = true;
-    private bool isLoadingTree = false;
-    private bool showDependencyForm = false;
-    private bool isSubmittingDependency = false;
-    private AssetDependency dependencyForm = new();
-    private AssetDependency? editingDependency = null;
+    private bool isLoadingTree;
+    private bool canWrite;
 
-    private bool dependsOnDropdownOpen = false;
-    private string dependsOnSearch = string.Empty;
+    private AssetDependency dependencyForm = new() { IsActive = true };
+    private AssetDependency? editingDependency;
+    private string typeFilter = "";
+    private bool isSubmittingDependency;
+    private bool showErrors;
+    private string? errorMessage;
+
+    private StatusConfirm confirm = default!;
+    private StatusToast toast = default!;
 
     private string queryParam => StateContainer.Company is null ? "" : $"?c={StateContainer.Company.Id}";
+    private string EntityHref => $"status/entities/{AssetId}{queryParam}";
 
-    // Available entities narrowed by the chosen dependency type (all types when none is selected).
-    private IEnumerable<MonitoredAsset> FilteredDependsOnEntities =>
-        availableEntities.Where(e => dependencyForm.DependencyType == null || e.EntityType == dependencyForm.DependencyType);
+    private List<MonitoredAsset> PickerEntities =>
+        Enum.TryParse<AssetType>(typeFilter, out var t)
+            ? availableEntities.Where(e => e.EntityType == t).ToList()
+            : availableEntities;
 
-    // The filtered list further narrowed by the dropdown's search box.
-    private IEnumerable<MonitoredAsset> SearchedDependsOnEntities
-    {
-        get
-        {
-            var q = dependsOnSearch?.Trim();
-            if (string.IsNullOrEmpty(q)) return FilteredDependsOnEntities;
-            return FilteredDependsOnEntities.Where(e =>
-                (e.Name?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (e.Owner?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (e.Location?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (e.Url?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false));
-        }
-    }
-
-    private MonitoredAsset? SelectedDependsOnEntity =>
-        availableEntities.FirstOrDefault(e => e.Id == dependencyForm.DependsOnEntityId);
-
-    // Muted secondary line for a dependency row/trigger: owner · location · version · url.
-    private static string DependencySubtitle(MonitoredAsset e)
-    {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(e.Owner)) parts.Add(e.Owner!);
-        if (!string.IsNullOrWhiteSpace(e.Location)) parts.Add(e.Location!);
-        if (!string.IsNullOrWhiteSpace(e.Version)) parts.Add($"v{e.Version}");
-        if (!string.IsNullOrWhiteSpace(e.Url)) parts.Add(e.Url!);
-        return string.Join(" · ", parts);
-    }
-
-    private void ToggleDependsOnDropdown()
-    {
-        dependsOnDropdownOpen = !dependsOnDropdownOpen;
-        if (dependsOnDropdownOpen) dependsOnSearch = string.Empty;
-    }
-
-    private void CloseDependsOnDropdown() => dependsOnDropdownOpen = false;
-
-    private void SelectDependsOnEntity(string id)
-    {
-        dependencyForm.DependsOnEntityId = id;
-        dependsOnDropdownOpen = false;
-        dependsOnSearch = string.Empty;
-    }
-
-    // When the type filter changes, drop a selection that no longer matches the narrowed list.
-    private void OnDependencyTypeChanged()
-    {
-        if (!FilteredDependsOnEntities.Any(e => e.Id == dependencyForm.DependsOnEntityId))
-            dependencyForm.DependsOnEntityId = string.Empty;
-        dependsOnSearch = string.Empty;
-    }
+    private string? AlreadyLinked(MonitoredAsset e) =>
+        editingDependency is null && entity?.Dependencies?.Any(d => d.DependsOnEntityId == e.Id && !d.IsDeleted) == true
+            ? "already a dependency"
+            : null;
 
     protected override async Task OnInitializedAsync()
     {
-        if (!string.IsNullOrEmpty(AssetId))
+        if (AuthState is not null)
         {
-            await LoadData();
+            var user = (await AuthState).User;
+            var c = StateContainer.Company?.Id;
+            canWrite = user.IsInRole($"{c}_INCIDENTS") || user.IsInRole($"{c}_ADMIN");
         }
+        if (!string.IsNullOrEmpty(AssetId)) await LoadData();
+        ResetForm();
     }
 
     private async Task LoadData()
     {
         var companyId = StateContainer.Company?.Id ?? "";
-
         try
         {
-            entity = await EntityService.GetEntityAsync(AssetId);
-
-            var allEntities = await EntityService.GetEntitiesAsync(companyId);
-            availableEntities = allEntities.Where(e => e.Id != AssetId).ToList();
-
-            await LoadDependencyTree();
+            var entityTask = EntityService.GetEntityAsync(AssetId);
+            var allTask = EntityService.GetEntitiesWithLatestStatusAsync(companyId);
+            var treeTask = LoadDependencyTree();
+            await Task.WhenAll(entityTask, allTask, treeTask);
+            entity = entityTask.Result;
+            availableEntities = allTask.Result.Where(e => e.Id != AssetId).ToList();
         }
         catch (Exception ex)
         {
@@ -609,7 +274,6 @@
     private async Task LoadDependencyTree()
     {
         if (string.IsNullOrEmpty(AssetId)) return;
-
         try
         {
             isLoadingTree = true;
@@ -625,39 +289,38 @@
         }
     }
 
-    private void ShowAddDependencyForm()
+    private void OnTypeChanged()
+    {
+        if (!PickerEntities.Any(e => e.Id == dependencyForm.DependsOnEntityId))
+            dependencyForm.DependsOnEntityId = string.Empty;
+    }
+
+    private void ResetForm()
     {
         editingDependency = null;
+        showErrors = false;
+        errorMessage = null;
+        typeFilter = "";
+        var nextOrder = (entity?.Dependencies?.Where(d => !d.IsDeleted).Select(d => d.Order).DefaultIfEmpty(0).Max() ?? 0) + 1;
         dependencyForm = new AssetDependency
         {
             EntityId = AssetId,
             IsActive = true,
             IsCritical = false,
-            Order = (entity?.Dependencies?.Count ?? 0) + 1,
+            Order = nextOrder,
             CompanyId = entity?.CompanyId
         };
-        showDependencyForm = true;
     }
 
-    /// <summary>Maps a top-level upstream tree node back to this entity's own dependency edge (if any).</summary>
     private AssetDependency? FindDirectDependency(AssetDependencyTreeNode node) =>
-        entity?.Dependencies?.FirstOrDefault(d => d.DependsOnEntityId == node.EntityId);
-
-    private void EditDependencyNode(AssetDependencyTreeNode node)
-    {
-        var dependency = FindDirectDependency(node);
-        if (dependency != null) EditDependency(dependency);
-    }
-
-    private async Task DeleteDependencyNode(AssetDependencyTreeNode node)
-    {
-        var dependency = FindDirectDependency(node);
-        if (dependency != null) await DeleteDependency(dependency);
-    }
+        entity?.Dependencies?.FirstOrDefault(d => d.DependsOnEntityId == node.EntityId && !d.IsDeleted);
 
     private void EditDependency(AssetDependency dependency)
     {
         editingDependency = dependency;
+        showErrors = false;
+        errorMessage = null;
+        typeFilter = "";
         dependencyForm = new AssetDependency
         {
             Id = dependency.Id,
@@ -670,43 +333,40 @@
             IsCritical = dependency.IsCritical,
             CompanyId = dependency.CompanyId
         };
-        showDependencyForm = true;
-    }
-
-    private void CancelDependencyForm()
-    {
-        showDependencyForm = false;
-        editingDependency = null;
-        dependencyForm = new AssetDependency();
     }
 
     private async Task HandleDependencySubmit()
     {
         if (isSubmittingDependency) return;
+        showErrors = true;
+        errorMessage = null;
+        if (string.IsNullOrEmpty(dependencyForm.DependsOnEntityId)) return;
 
         isSubmittingDependency = true;
         dependencyForm.CompanyId = entity?.CompanyId;
-
+        dependencyForm.DependencyType ??= availableEntities.FirstOrDefault(e => e.Id == dependencyForm.DependsOnEntityId)?.EntityType;
+        var targetName = availableEntities.FirstOrDefault(e => e.Id == dependencyForm.DependsOnEntityId)?.Name ?? "entity";
         try
         {
             if (editingDependency != null)
             {
-                await EntityService.UpdateDependencyAsync(dependencyForm);
-                await JSRuntime.InvokeVoidAsync("alert", "Dependency updated successfully!");
+                if (!await EntityService.UpdateDependencyAsync(dependencyForm)) { errorMessage = "The dependency could not be saved. Try again."; return; }
+                toast.Show($"Saved dependency on {targetName}");
             }
             else
             {
-                await EntityService.AddDependencyAsync(AssetId, dependencyForm);
-                await JSRuntime.InvokeVoidAsync("alert", "Dependency added successfully!");
+                if (dependencyForm.Id is null or "") dependencyForm.Id = Guid.NewGuid().ToString();
+                if (await EntityService.AddDependencyAsync(AssetId, dependencyForm) is null) { errorMessage = "The dependency could not be added. It may already exist."; return; }
+                toast.Show($"Added dependency on {targetName}");
             }
-
-            CancelDependencyForm();
-            await LoadData();
+            entity = await EntityService.GetEntityAsync(AssetId);
+            ResetForm();
+            await LoadDependencyTree();
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error saving dependency: {ex.Message}");
-            await JSRuntime.InvokeVoidAsync("alert", $"Error saving dependency: {ex.Message}");
+            errorMessage = $"The dependency could not be saved: {ex.Message}";
         }
         finally
         {
@@ -716,116 +376,78 @@
 
     private async Task DeleteDependency(AssetDependency dependency)
     {
-        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", $"Are you sure you want to remove this dependency on '{dependency.DependsOnEntity?.Name}'?");
-        if (confirmed)
+        var name = availableEntities.FirstOrDefault(e => e.Id == dependency.DependsOnEntityId)?.Name ?? dependency.DependsOnEntity?.Name ?? "this entity";
+        if (!await confirm.Ask($"Remove the dependency on {name}?", $"{entity?.Name} will no longer list {name} as something it needs.", "Remove")) return;
+        try
         {
-            try
+            if (await EntityService.RemoveDependencyAsync(dependency.Id))
             {
-                await EntityService.RemoveDependencyAsync(dependency.Id);
-                await JSRuntime.InvokeVoidAsync("alert", "Dependency removed successfully!");
-                await LoadData();
+                toast.Show($"Removed dependency on {name}");
+                entity = await EntityService.GetEntityAsync(AssetId);
+                ResetForm();
+                await LoadDependencyTree();
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error deleting dependency: {ex.Message}");
-                await JSRuntime.InvokeVoidAsync("alert", "Error removing dependency. Please try again.");
-            }
+            else toast.Show("Could not remove the dependency. Try again.", error: true);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error deleting dependency: {ex.Message}");
+            toast.Show("Could not remove the dependency. Try again.", error: true);
         }
     }
 
-    private void BackToEntities()
+    private static List<AssetDependencyTreeNode> Flatten(List<AssetDependencyTreeNode>? nodes)
     {
-        Navigation.NavigateTo($"/status/entities{queryParam}");
+        var acc = new Dictionary<string, AssetDependencyTreeNode>();
+        void Walk(List<AssetDependencyTreeNode>? ns)
+        {
+            if (ns == null) return;
+            foreach (var n in ns)
+            {
+                if (!acc.ContainsKey(n.EntityId)) acc[n.EntityId] = n;
+                Walk(n.Children);
+            }
+        }
+        Walk(nodes);
+        return acc.Values.ToList();
     }
 
-    private void BackToEntity()
+    private RenderFragment Node(AssetDependencyTreeNode node, bool isUpstream, int depth) => __builder =>
     {
-        Navigation.NavigateTo($"/status/entities/{AssetId}{queryParam}");
-    }
-
-    private string GetStatusColor(AssetStatus status) => status switch
-    {
-        AssetStatus.Online => "bg-green-500",
-        AssetStatus.Offline => "bg-red-500",
-        AssetStatus.Degraded => "bg-yellow-500",
-        AssetStatus.Maintenance => "bg-blue-500",
-        _ => "bg-gray-500"
-    };
-
-    private RenderFragment RenderDependencyNode(AssetDependencyTreeNode node, bool isUpstream, int depth)
-    {
-        return @<div class="@($"ml-{depth * 4} mb-2")">
-            <div class="flex items-center p-3 border border-gray-200 rounded-lg bg-gray-50">
-                <div class="flex items-center flex-1">
-                    <span class="w-3 h-3 @GetStatusColor(node.CurrentStatus) rounded-full mr-3"></span>
-                    <div class="flex-1">
-                        <div class="flex items-center">
-                            <span class="text-sm font-medium text-gray-900">@node.EntityName</span>
-                            @if (node.IsCritical)
-                            {
-                                <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                                    Critical
-                                </span>
-                            }
-                            @if (!node.IsActive)
-                            {
-                                <span class="ml-2 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                                    Inactive
-                                </span>
-                            }
-                        </div>
-                        @if (!string.IsNullOrEmpty(node.Description))
-                        {
-                            <p class="text-xs text-gray-500 mt-1">@node.Description</p>
-                        }
-                        <div class="flex items-center text-xs text-gray-500 space-x-2 mt-1">
-                            <span>@node.EntityType</span>
-                            <span>•</span>
-                            <span>Level @(node.Level + 1)</span>
-                            @if (node.Order > 0)
-                            {
-                                <span>•</span>
-                                <span>Order @node.Order</span>
-                            }
-                        </div>
-                    </div>
-                </div>
-                <div class="flex items-center gap-3">
-                    <div class="text-xs text-gray-400">
-                        @if (isUpstream)
-                        {
-                            <span>↗️ Depends on</span>
-                        }
-                        else
-                        {
-                            <span>↙️ Dependent</span>
-                        }
-                    </div>
-                    @if (isUpstream && depth == 0 && FindDirectDependency(node) != null)
-                    {
-                        <div class="flex items-center space-x-2">
-                            <button @onclick="() => EditDependencyNode(node)"
-                                    class="text-blue-600 hover:text-blue-800 text-sm font-medium">
-                                Edit
-                            </button>
-                            <button @onclick="() => DeleteDependencyNode(node)"
-                                    class="text-red-600 hover:text-red-800 text-sm font-medium">
-                                Delete
-                            </button>
-                        </div>
-                    }
-                </div>
+        var direct = isUpstream && depth == 0 ? FindDirectDependency(node) : null;
+        <li>
+            <div class="st-node">
+                @if (depth == 0)
+                {
+                    <span class="st-node-ord" title="Check order">@(isUpstream && node.Order > 0 ? node.Order.ToString() : "")</span>
+                }
+                else
+                {
+                    <span class="st-node-depth" title="Level @(depth + 1)">L@(depth + 1)</span>
+                }
+                <span class="st-dot @StatusUi.Cls(node.CurrentStatus)" title="@StatusUi.Label(node.CurrentStatus)"></span>
+                <span class="st-tile-sm">@StatusUi.TypeSvg(node.EntityType, 13)</span>
+                <span class="st-node-name">
+                    <a href="@($"status/entities/{node.EntityId}{queryParam}")">@node.EntityName</a>
+                    <small>@StatusUi.TypeLabel(node.EntityType)@(string.IsNullOrWhiteSpace(node.Description) ? "" : $" · {node.Description}")</small>
+                </span>
+                @if (!node.IsActive) { <span class="badge badge-neutral dl-mini-badge">Inactive</span> }
+                @if (node.IsCritical) { <span class="badge badge-danger dl-mini-badge">Critical</span> }
+                @if (direct is not null && canWrite)
+                {
+                    <button class="dl-act" style="opacity:1" type="button" title="Edit" aria-label="Edit dependency on @node.EntityName" @onclick="() => EditDependency(direct)">@StatusUi.Icon("edit", 13)</button>
+                    <button class="dl-act dl-act-danger" style="opacity:1" type="button" title="Remove" aria-label="Remove dependency on @node.EntityName" @onclick="() => DeleteDependency(direct)">@StatusUi.Icon("x", 13)</button>
+                }
             </div>
-
             @if (node.Children?.Any() == true)
             {
-                <div class="mt-2 ml-4 border-l-2 border-gray-200 pl-4">
+                <ul>
                     @foreach (var child in node.Children)
                     {
-                        @RenderDependencyNode(child, isUpstream, depth + 1)
+                        @Node(child, isUpstream, depth + 1)
                     }
-                </div>
+                </ul>
             }
-        </div>;
-    }
+        </li>
+    };
 }

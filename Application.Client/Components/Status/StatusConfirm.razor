@@ -1,0 +1,51 @@
+@using Application.Shared.Enums
+@* In-page confirmation dialog. Replaces confirm() on the status pages:
+   `if (await confirm.Ask("Delete DW-SQL-01?", "History is kept.", "Delete")) …` *@
+
+@if (open)
+{
+    <div class="fb-modal-backdrop" @onclick="() => Answer(false)">
+        <div class="fb-modal" style="max-width:440px" role="alertdialog" aria-modal="true" aria-labelledby="st-confirm-title" @onclick:stopPropagation="true">
+            <div class="fb-modal-head">
+                <div class="fb-modal-title" id="st-confirm-title">@title</div>
+                <button type="button" class="st-modal-x" aria-label="Close" @onclick="() => Answer(false)">@StatusUi.Icon("x", 15)</button>
+            </div>
+            @if (!string.IsNullOrEmpty(body))
+            {
+                <div class="fb-modal-body" style="font-size:13px;color:var(--text-secondary);line-height:1.5">@body</div>
+            }
+            <div class="fb-modal-foot">
+                <button type="button" class="btn btn-ghost" @onclick="() => Answer(false)">Cancel</button>
+                <button type="button" class="btn @(danger ? "btn-danger" : "btn-primary")" @onclick="() => Answer(true)">@confirmLabel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool open;
+    private string title = "";
+    private string? body;
+    private string confirmLabel = "Confirm";
+    private bool danger = true;
+    private TaskCompletionSource<bool>? tcs;
+
+    public Task<bool> Ask(string title, string? body = null, string confirmLabel = "Delete", bool danger = true)
+    {
+        tcs?.TrySetResult(false);
+        this.title = title;
+        this.body = body;
+        this.confirmLabel = confirmLabel;
+        this.danger = danger;
+        open = true;
+        tcs = new TaskCompletionSource<bool>();
+        StateHasChanged();
+        return tcs.Task;
+    }
+
+    private void Answer(bool yes)
+    {
+        open = false;
+        tcs?.TrySetResult(yes);
+    }
+}

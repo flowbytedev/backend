@@ -50,6 +50,14 @@
     --danger-hover: #b91c1c;
     --danger-subtle: #fef2f2;
     --danger-border: #fecaca;
+    /* Status module: Maintenance / Identified / Monitoring / Low use --info, High severity uses --serious,
+       so severity reads low → medium → high → critical as blue → amber → orange → red. */
+    --info: #2563eb;
+    --info-subtle: #eff6ff;
+    --info-border: #bfdbfe;
+    --serious: #ea580c;
+    --serious-subtle: #fff7ed;
+    --serious-border: #fed7aa;
 
     --bg: #fafafa;
     --surface: #ffffff;
@@ -109,6 +117,12 @@
     --danger-hover: #ff6a63;
     --danger-subtle: #25100f;
     --danger-border: #da3633;
+    --info: #58a6ff;
+    --info-subtle: #0f1d33;
+    --info-border: #1f6feb;
+    --serious: #f0883e;
+    --serious-subtle: #2a1a0d;
+    --serious-border: #bd561d;
 
     --bg: #0d1117;
     --surface: #161b22;
@@ -278,6 +292,8 @@
 .sc .badge-success { --bh: var(--success); }
 .sc .badge-warning { --bh: var(--warning); }
 .sc .badge-danger { --bh: var(--danger); }
+.sc .badge-info { --bh: var(--info); }
+.sc .badge-serious { --bh: var(--serious); }
 
 /* ---- card ---- */
 .sc .card {

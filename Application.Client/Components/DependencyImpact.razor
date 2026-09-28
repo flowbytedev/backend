@@ -4,130 +4,82 @@
 @inject MonitoredAssetClientService EntityService
 @inject StateContainer StateContainer
 
-<!-- Dependencies & Impact -->
-<div class="bg-white overflow-hidden shadow rounded-lg">
-    <div class="px-6 py-5 sm:p-6">
-        <div class="flex items-center justify-between mb-4 gap-3 flex-wrap">
-            <div>
-                <h3 class="text-lg leading-6 font-medium text-gray-900">Dependencies &amp; Impact</h3>
-                <p class="text-xs text-gray-500 mt-0.5">What this entity relies on, and everything that breaks if it goes down.</p>
-            </div>
-            <a href="@($"status/entities/{EntityId}/dependencies{QueryParam}")"
-               class="inline-flex items-center px-3 py-1 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                Manage
-            </a>
-        </div>
+@* Dependencies & impact card on the entity page (status.css .st-dep-*, .st-deps). The tree is computed on
+   demand because it can be expensive; set AutoLoad when the caller already knows it wants it. *@
+<div class="card">
+    <div class="card-head">
+        <h3 class="card-title">Dependencies</h3>
+        <span class="st-card-spacer"></span>
+        <a class="st-link" href="@($"status/entities/{EntityId}/dependencies{QueryParam}")">Manage</a>
+    </div>
 
-        @if (isLoading)
+    @if (isLoading)
+    {
+        <div class="st-load"><span class="spin"></span> Computing the dependency tree…</div>
+    }
+    else if (!loaded)
+    {
+        <div class="st-load">
+            <button class="btn btn-secondary btn-sm" type="button" @onclick="LoadAsync">@StatusUi.Icon("branch", 13) Load dependencies and impact</button>
+            <span>Loaded on demand because the full tree can take a moment.</span>
+        </div>
+    }
+    else if (tree == null)
+    {
+        <div class="st-deps-empty">Couldn't load dependency information. <button class="st-link" type="button" @onclick="LoadAsync">Try again</button></div>
+    }
+    else
+    {
+        @if (StatusUi.IsUnhealthy(tree.CurrentStatus) && rootCauses.Any())
         {
-            <div class="flex justify-center py-6">
-                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-indigo-600"></div>
+            <div class="st-cause">
+                @StatusUi.Icon("alert", 14)
+                <div>
+                    <b>Possible cause:</b> @StatusUi.Plural(rootCauses.Count, "upstream dependency is", "upstream dependencies are") unhealthy:
+                    @string.Join(", ", rootCauses.Take(4).Select(n => n.EntityName))@(rootCauses.Count > 4 ? $" +{rootCauses.Count - 4} more" : "").
+                </div>
             </div>
         }
-        else if (!loaded)
+
+        <div class="st-dep-dir">@StatusUi.Icon("up-right", 12) Depends on <span class="st-dep-dir-n">@(tree.Dependencies?.Count ?? 0) direct@(upstreamAll.Count > (tree.Dependencies?.Count ?? 0) ? $" · {upstreamAll.Count} in chain" : "")</span></div>
+        @if (tree.Dependencies?.Any() == true)
         {
-            <div class="text-center py-6">
-                <button @onclick="LoadAsync"
-                        class="inline-flex items-center gap-2 px-4 py-2 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                    <svg class="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                    </svg>
-                    Load dependencies &amp; impact
-                </button>
-                <p class="text-xs text-gray-400 mt-2">Computing the full dependency tree can take a moment, so it's loaded on demand.</p>
-            </div>
-        }
-        else if (tree == null)
-        {
-            <p class="text-center py-4 text-sm text-gray-500">Couldn't load dependency information.</p>
+            <ul class="st-deps">
+                @foreach (var n in tree.Dependencies.OrderByDescending(d => StatusUi.Rank(d.CurrentStatus)).ThenBy(d => d.EntityName))
+                {
+                    @NodeRow(n)
+                }
+            </ul>
         }
         else
         {
-            <!-- Root-cause banner: this entity is unhealthy and so are some upstreams it depends on. -->
-            @if (IsUnhealthy(tree.CurrentStatus) && rootCauses.Any())
-            {
-                <div class="mb-5 bg-red-50 border border-red-200 rounded-md p-3">
-                    <div class="flex items-start gap-2">
-                        <svg class="h-5 w-5 text-red-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
-                        </svg>
-                        <div class="text-sm text-red-800">
-                            <span class="font-semibold">Possible cause:</span>
-                            @rootCauses.Count upstream @(rootCauses.Count == 1 ? "dependency is" : "dependencies are") unhealthy —
-                            <span class="font-medium">@string.Join(", ", rootCauses.Take(4).Select(n => n.EntityName))</span>@(rootCauses.Count > 4 ? $" +{rootCauses.Count - 4} more" : "").
-                        </div>
-                    </div>
-                </div>
-            }
-
-            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-                <!-- Depends on (upstream) -->
-                <div>
-                    <div class="flex items-center justify-between mb-2">
-                        <h4 class="text-xs font-medium uppercase tracking-wide text-gray-400">Depends on</h4>
-                        @if (upstreamAll.Count > 0)
-                        {
-                            <span class="text-xs text-gray-400">@upstreamAll.Count total upstream</span>
-                        }
-                    </div>
-                    @if (tree.Dependencies?.Any() == true)
-                    {
-                        <div class="space-y-1">
-                            @foreach (var n in tree.Dependencies.OrderByDescending(d => Severity(d.CurrentStatus)).ThenBy(d => d.EntityName))
-                            {
-                                @NodeRow(n)
-                            }
-                        </div>
-                    }
-                    else
-                    {
-                        <p class="text-sm text-gray-500">This entity doesn't depend on anything yet.</p>
-                    }
-                </div>
-
-                <!-- Impact (downstream blast radius) -->
-                <div>
-                    <div class="flex items-center justify-between mb-2">
-                        <h4 class="text-xs font-medium uppercase tracking-wide text-gray-400">Impact if this fails</h4>
-                        @if (downstreamAll.Count > 0)
-                        {
-                            <span class="text-xs @(downImpactedCount > 0 ? "text-red-600 font-medium" : "text-gray-400")">
-                                @downstreamAll.Count affected@(criticalCount > 0 ? $" · {criticalCount} critical" : "")
-                            </span>
-                        }
-                    </div>
-
-                    @if (tree.Dependents?.Any() == true)
-                    {
-                        <p class="text-sm text-gray-600 mb-2">
-                            If <span class="font-medium">@tree.EntityName</span> goes down,
-                            <span class="font-semibold">@downstreamAll.Count</span>
-                            downstream @(downstreamAll.Count == 1 ? "entity is" : "entities are") impacted@(criticalCount > 0 ? $", {criticalCount} of them critical" : "").
-                        </p>
-                        <div class="space-y-1 max-h-72 overflow-y-auto">
-                            @foreach (var n in downstreamAll.OrderByDescending(d => d.IsCritical).ThenBy(d => d.EntityName))
-                            {
-                                @NodeRow(n)
-                            }
-                        </div>
-                    }
-                    else
-                    {
-                        <p class="text-sm text-gray-500">Nothing depends on this entity.</p>
-                    }
-                </div>
-            </div>
+            <div class="st-deps-empty">This entity doesn't depend on anything yet.</div>
         }
-    </div>
+
+        <div class="st-dep-dir">@StatusUi.Icon("down-right", 12) Impact if this fails <span class="st-dep-dir-n">@downstreamAll.Count@(criticalCount > 0 ? $" · {criticalCount} critical" : "")</span></div>
+        @if (downstreamAll.Any())
+        {
+            <ul class="st-deps" style="max-height:320px;overflow-y:auto">
+                @foreach (var n in downstreamAll.OrderByDescending(d => d.IsCritical).ThenBy(d => d.EntityName))
+                {
+                    @NodeRow(n)
+                }
+            </ul>
+        }
+        else
+        {
+            <div class="st-deps-empty">Nothing depends on this entity.</div>
+        }
+    }
 </div>
 
 @code {
     [Parameter] public string EntityId { get; set; } = string.Empty;
+    [Parameter] public bool AutoLoad { get; set; }
 
     private AssetDependencyTree? tree;
-    private bool isLoading = false;
-    private bool loaded = false;
+    private bool isLoading;
+    private bool loaded;
     private string? lastEntityId;
 
     // Flattened, de-duplicated transitive sets.
@@ -135,13 +87,12 @@
     private List<AssetDependencyTreeNode> downstreamAll = new();
     private List<AssetDependencyTreeNode> rootCauses = new();
     private int criticalCount;
-    private int downImpactedCount;
 
     private string QueryParam => StateContainer.Company is null ? "" : $"?c={StateContainer.Company.Id}";
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
-        // Reset to the "Load" prompt when the component is reused for a different entity.
+        // Reset when the component is reused for a different entity.
         if (lastEntityId != EntityId)
         {
             lastEntityId = EntityId;
@@ -152,7 +103,7 @@
             downstreamAll = new();
             rootCauses = new();
             criticalCount = 0;
-            downImpactedCount = 0;
+            if (AutoLoad) await LoadAsync();
         }
     }
 
@@ -164,9 +115,8 @@
 
         upstreamAll = Flatten(tree?.Dependencies);
         downstreamAll = Flatten(tree?.Dependents);
-        rootCauses = upstreamAll.Where(n => IsUnhealthy(n.CurrentStatus)).ToList();
+        rootCauses = upstreamAll.Where(n => StatusUi.IsUnhealthy(n.CurrentStatus)).ToList();
         criticalCount = downstreamAll.Count(n => n.IsCritical);
-        downImpactedCount = downstreamAll.Count(n => IsUnhealthy(n.CurrentStatus));
 
         loaded = true;
         isLoading = false;
@@ -189,51 +139,15 @@
         return acc.Values.ToList();
     }
 
-    private RenderFragment NodeRow(AssetDependencyTreeNode n)
+    private RenderFragment NodeRow(AssetDependencyTreeNode n) => __builder =>
     {
-        return @<div class="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-gray-50">
-            <span class="w-2.5 h-2.5 rounded-full shrink-0 @DotClass(n.CurrentStatus)"></span>
-            <a href="@($"status/entities/{n.EntityId}{QueryParam}")" class="text-sm text-gray-900 hover:text-indigo-600 truncate">@n.EntityName</a>
-            <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">@n.EntityType</span>
-            @if (n.IsCritical)
-            {
-                <span class="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700">Critical</span>
-            }
-            <span class="ml-auto text-xs @TextClass(n.CurrentStatus)">@n.CurrentStatus</span>
-        </div>;
-    }
-
-    private static bool IsUnhealthy(AssetStatus s) =>
-        s is AssetStatus.Offline or AssetStatus.Error or AssetStatus.Degraded;
-
-    private static int Severity(AssetStatus status) => status switch
-    {
-        AssetStatus.Offline => 5,
-        AssetStatus.Error => 5,
-        AssetStatus.Degraded => 4,
-        AssetStatus.Maintenance => 3,
-        AssetStatus.Unknown => 2,
-        AssetStatus.Online => 1,
-        _ => 0
-    };
-
-    private static string DotClass(AssetStatus s) => s switch
-    {
-        AssetStatus.Online => "bg-green-500",
-        AssetStatus.Offline => "bg-red-500",
-        AssetStatus.Error => "bg-red-500",
-        AssetStatus.Degraded => "bg-yellow-500",
-        AssetStatus.Maintenance => "bg-blue-500",
-        _ => "bg-gray-400"
-    };
-
-    private static string TextClass(AssetStatus s) => s switch
-    {
-        AssetStatus.Online => "text-green-600",
-        AssetStatus.Offline => "text-red-600",
-        AssetStatus.Error => "text-red-600",
-        AssetStatus.Degraded => "text-yellow-600",
-        AssetStatus.Maintenance => "text-blue-600",
-        _ => "text-gray-400"
+        <li>
+            <span class="st-dot @StatusUi.Cls(n.CurrentStatus)" title="@StatusUi.Label(n.CurrentStatus)"></span>
+            <div class="st-deps-name">
+                <a href="@($"status/entities/{n.EntityId}{QueryParam}")">@n.EntityName</a>
+                <small>@StatusUi.TypeLabel(n.EntityType) · @StatusUi.Label(n.CurrentStatus).ToLowerInvariant()</small>
+            </div>
+            @if (n.IsCritical) { <span class="badge badge-danger dl-mini-badge">Critical</span> }
+        </li>
     };
 }

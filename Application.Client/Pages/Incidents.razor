@@ -1,7 +1,5 @@
 @page "/status/incidents"
-@using Application.Shared.Models
 @using Application.Shared.Enums
-@using Application.Client.Services
 @using System.Threading
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @inject IncidentClientService IncidentService
@@ -11,357 +9,237 @@
 
 <PageTitle>Status Incidents</PageTitle>
 
-<style>
-    /* Belt-and-suspenders: guarantee no cell/row/column borders regardless of any inherited
-       table styling (Bootstrap/FluentUI resets are loaded globally alongside Tailwind). */
-    .incidents-table, .incidents-table thead, .incidents-table tbody, .incidents-table tr,
-    .incidents-table th, .incidents-table td {
-        border: none !important;
-        border-collapse: collapse;
-    }
-    /* The sortable column headers and row actions render as plain buttons — without Tailwind's
-       Preflight reset actually applying (e.g. the CDN script loads late/is blocked), they fall
-       back to the browser's native button chrome, which includes a visible border. */
-    .incidents-table th button, .incidents-table td button {
-        border: none !important;
-        outline: none !important;
-        background: transparent !important;
-    }
-
-    /* ── Dark theme (data-theme="dark") — override hardcoded Tailwind light colors ── */
-    [data-theme="dark"] .sd-scope.min-h-screen { background-color: #0e1117; }
-    [data-theme="dark"] .sd-scope.bg-white { background-color: #181a20; }
-
-    [data-theme="dark"] .sd-scope .bg-white { background-color: #181a20; }
-    [data-theme="dark"] .sd-scope .bg-white\/60 { background-color: rgba(24,26,32,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-50 { background-color: #1e222b; }
-    [data-theme="dark"] .sd-scope .bg-gray-50\/60 { background-color: rgba(30,34,43,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-100 { background-color: #20242c; }
-
-    [data-theme="dark"] .sd-scope .text-gray-900 { color: #f3f4f6; }
-    [data-theme="dark"] .sd-scope .text-gray-800 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-700 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-600 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-500 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-400 { color: #767d89; }
-    [data-theme="dark"] .sd-scope .text-gray-300 { color: #4b515e; }
-
-    [data-theme="dark"] .sd-scope .border-gray-100 { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .border-gray-200 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-200\/80 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-300 { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-50:hover { background-color: #20242c; }
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-100:hover { background-color: #262b34; }
-    [data-theme="dark"] .sd-scope .hover\:bg-red-50:hover { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .hover\:bg-indigo-100:hover { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .hover\:border-gray-400:hover { border-color: #3a4150; }
-    [data-theme="dark"] .sd-scope .hover\:border-red-200:hover { border-color: rgba(239,68,68,0.30); }
-
-    [data-theme="dark"] .sd-scope input:not([type="checkbox"]):not([type="radio"]),
-    [data-theme="dark"] .sd-scope select,
-    [data-theme="dark"] .sd-scope textarea {
-        background-color: #12141a !important;
-        border-color: #2b303b !important;
-        color: #e6e9ef !important;
-    }
-    [data-theme="dark"] .sd-scope input::placeholder,
-    [data-theme="dark"] .sd-scope textarea::placeholder { color: #767d89 !important; }
-
-    [data-theme="dark"] .sd-scope .bg-red-50 { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .bg-red-100 { background-color: rgba(239,68,68,0.15); }
-    [data-theme="dark"] .sd-scope .border-red-200 { border-color: rgba(239,68,68,0.30); }
-    [data-theme="dark"] .sd-scope .text-red-400,
-    [data-theme="dark"] .sd-scope .text-red-500,
-    [data-theme="dark"] .sd-scope .text-red-600,
-    [data-theme="dark"] .sd-scope .text-red-700,
-    [data-theme="dark"] .sd-scope .text-red-800 { color: #f87171; }
-    [data-theme="dark"] .sd-scope .hover\:text-red-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-red-800:hover { color: #fca5a5; }
-
-    [data-theme="dark"] .sd-scope .bg-green-50 { background-color: rgba(34,197,94,0.12); }
-    [data-theme="dark"] .sd-scope .bg-green-100 { background-color: rgba(34,197,94,0.15); }
-    [data-theme="dark"] .sd-scope .border-green-200 { border-color: rgba(34,197,94,0.30); }
-    [data-theme="dark"] .sd-scope .text-green-500,
-    [data-theme="dark"] .sd-scope .text-green-600,
-    [data-theme="dark"] .sd-scope .text-green-700,
-    [data-theme="dark"] .sd-scope .text-green-800 { color: #4ade80; }
-
-    [data-theme="dark"] .sd-scope .bg-yellow-50 { background-color: rgba(245,158,11,0.10); }
-    [data-theme="dark"] .sd-scope .bg-yellow-100 { background-color: rgba(245,158,11,0.15); }
-    [data-theme="dark"] .sd-scope .border-yellow-200 { border-color: rgba(245,158,11,0.30); }
-    [data-theme="dark"] .sd-scope .text-yellow-700,
-    [data-theme="dark"] .sd-scope .text-yellow-800 { color: #fcd34d; }
-
-    [data-theme="dark"] .sd-scope .bg-orange-50 { background-color: rgba(249,115,22,0.10); }
-    [data-theme="dark"] .sd-scope .bg-orange-100 { background-color: rgba(249,115,22,0.15); }
-    [data-theme="dark"] .sd-scope .border-orange-200 { border-color: rgba(249,115,22,0.30); }
-    [data-theme="dark"] .sd-scope .text-orange-600,
-    [data-theme="dark"] .sd-scope .text-orange-700,
-    [data-theme="dark"] .sd-scope .text-orange-800 { color: #fdba74; }
-
-    [data-theme="dark"] .sd-scope .bg-blue-50 { background-color: rgba(59,130,246,0.10); }
-    [data-theme="dark"] .sd-scope .bg-blue-100 { background-color: rgba(59,130,246,0.15); }
-    [data-theme="dark"] .sd-scope .border-blue-200 { border-color: rgba(59,130,246,0.30); }
-    [data-theme="dark"] .sd-scope .text-blue-600,
-    [data-theme="dark"] .sd-scope .text-blue-700,
-    [data-theme="dark"] .sd-scope .text-blue-800 { color: #93c5fd; }
-    [data-theme="dark"] .sd-scope .text-blue-900 { color: #bfdbfe; }
-
-    [data-theme="dark"] .sd-scope .bg-purple-50 { background-color: rgba(168,85,247,0.12); }
-    [data-theme="dark"] .sd-scope .bg-purple-100 { background-color: rgba(168,85,247,0.18); }
-    [data-theme="dark"] .sd-scope .text-purple-700,
-    [data-theme="dark"] .sd-scope .text-purple-800 { color: #d8b4fe; }
-
-    [data-theme="dark"] .sd-scope .bg-indigo-50 { background-color: rgba(129,140,248,0.14); }
-    [data-theme="dark"] .sd-scope .bg-indigo-100 { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .border-indigo-200 { border-color: rgba(129,140,248,0.30); }
-    [data-theme="dark"] .sd-scope .text-indigo-600,
-    [data-theme="dark"] .sd-scope .text-indigo-700 { color: #a5b4fc; }
-    [data-theme="dark"] .sd-scope .text-indigo-800 { color: #c7d2fe; }
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-800:hover { color: #c7d2fe; }
-
-    [data-theme="dark"] .sd-scope .bg-gray-200 { background-color: #23272f; }
-    [data-theme="dark"] .sd-scope .bg-gray-300 { background-color: #363c48; }
-
-    [data-theme="dark"] .sd-scope .ring-white { --tw-ring-color: #181a20; }
-    [data-theme="dark"] .sd-scope .ring-offset-1 { --tw-ring-offset-color: #181a20; }
-</style>
-
-<div class="h-full flex flex-col gap-4 min-h-0 sd-scope">
-    <!-- Header -->
-    <div class="flex items-center justify-between flex-shrink-0">
-        <div>
-            <h1 class="text-2xl font-bold text-gray-900">Incidents</h1>
-            <p class="mt-0.5 text-sm text-gray-500">Track and manage system incidents across all entities</p>
-        </div>
-        <AuthorizeView Roles="@writeRoles">
-            <Authorized>
-                <button @onclick="CreateIncident"
-                        class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
-                    </svg>
-                    New Incident
-                </button>
-            </Authorized>
-        </AuthorizeView>
-    </div>
-
-    <!-- Filters -->
-    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-3 flex flex-wrap items-center gap-2.5 flex-shrink-0">
-        <div class="relative flex-1 min-w-[14rem]">
-            <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-            </svg>
-            <input value="@searchText" @oninput="OnSearchInput"
-                   class="w-full border border-gray-300 rounded-lg text-sm pl-9 pr-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                   placeholder="Search title, description, entity..." />
+@* List recipe from datalist.css (.dl-*), status pieces from status.css (.st-*). *@
+<div class="sc">
+    <div class="page-wrap dl-wrap">
+        <div class="dl-head">
+            <div class="page-header">
+                <h1 class="page-title">Incidents</h1>
+                <p class="page-subtitle">
+                    @if (activeCount is null)
+                    {
+                        <span class="skeleton st-skel-line" style="display:inline-block;width:160px;vertical-align:middle"></span>
+                    }
+                    else if (activeCount == 0)
+                    {
+                        <span>No active incidents</span>
+                    }
+                    else
+                    {
+                        <span>@activeCount active</span>
+                        @if (criticalCount > 0) { <span class="dl-sep">·</span><span>@criticalCount critical</span> }
+                        @if (oldestActive is not null) { <span class="dl-sep">·</span><span>oldest open for @StatusUi.Duration(oldestActive.Duration)</span> }
+                    }
+                </p>
+            </div>
+            <AuthorizeView Roles="@writeRoles">
+                <Authorized>
+                    <div class="dl-head-actions">
+                        <button class="btn btn-primary" type="button" @onclick="CreateIncident">@StatusUi.Icon("plus", 16) Report incident</button>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
         </div>
 
-        <select @bind="severityFilter" @bind:after="ApplyFilters"
-                class="border border-gray-300 rounded-lg text-sm px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
-            <option value="">All Severities</option>
-            @foreach (var s in Enum.GetValues<IncidentSeverity>())
-            {
-                <option value="@s">@s.ToString()</option>
-            }
-        </select>
-
-        <select @bind="statusFilter" @bind:after="ApplyFilters"
-                class="border border-gray-300 rounded-lg text-sm px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
-            <option value="">All Statuses</option>
-            @foreach (var s in Enum.GetValues<IncidentStatus>())
-            {
-                <option value="@s">@s.ToString()</option>
-            }
-        </select>
-
-        <select @bind="entityTypeFilter" @bind:after="ApplyFilters"
-                class="border border-gray-300 rounded-lg text-sm px-3 py-2 bg-white focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
-            <option value="">All Entity Types</option>
-            @foreach (var t in Enum.GetValues<AssetType>())
-            {
-                <option value="@t">@EntityTypeLabel(t)</option>
-            }
-        </select>
-
-        <button @onclick="ToggleActiveOnly"
-                class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors @(activeOnly ? "bg-indigo-50 border-indigo-200 text-indigo-700" : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50")">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-            </svg>
-            Active only
-        </button>
-
-        @if (HasActiveFilters)
-        {
-            <button @onclick="ClearFilters"
-                    class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium text-gray-500 hover:text-gray-800 transition-colors">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                </svg>
-                Clear
-            </button>
-        }
-    </div>
-
-    <!-- Table card -->
-    <div class="bg-white rounded-xl border border-gray-200 shadow-sm flex-1 flex flex-col min-h-0 overflow-hidden">
-        <div class="flex-1 overflow-auto min-h-0 relative">
-            @if (isLoading)
-            {
-                <div class="absolute inset-0 bg-white/60 flex items-center justify-center z-20">
-                    <div class="animate-spin rounded-full h-9 w-9 border-2 border-indigo-600 border-t-transparent"></div>
+        <div class="card dl-card">
+            <div class="dl-toolbar">
+                <div class="dl-search">
+                    @StatusUi.Icon("search", 14)
+                    <input class="input" type="search" placeholder="Search title, description, entity…" aria-label="Search incidents"
+                           value="@searchText" @oninput="OnSearchInput" />
                 </div>
-            }
+                <div class="dl-seg" role="group" aria-label="Filter by state">
+                    <button type="button" class="dl-seg-btn @(scope == "active" ? "is-active" : "")" @onclick='() => SetScope("active")'>
+                        Active @if (activeCount is not null) { <span class="dl-seg-count">@activeCount</span> }
+                    </button>
+                    <button type="button" class="dl-seg-btn @(scope == "resolved" ? "is-active" : "")" @onclick='() => SetScope("resolved")'>Resolved</button>
+                    <button type="button" class="dl-seg-btn @(scope == "all" ? "is-active" : "")" @onclick='() => SetScope("all")'>All</button>
+                </div>
+                <select class="select" aria-label="Severity" @bind="severityFilter" @bind:after="ApplyFilters">
+                    <option value="">All severities</option>
+                    @foreach (var s in Enum.GetValues<IncidentSeverity>().Reverse())
+                    {
+                        <option value="@s">@s</option>
+                    }
+                </select>
+                @if (scope != "resolved")
+                {
+                    <select class="select" aria-label="Status" @bind="statusFilter" @bind:after="ApplyFilters">
+                        <option value="">All statuses</option>
+                        @foreach (var s in Enum.GetValues<IncidentStatus>().Where(s => scope != "active" || s != IncidentStatus.Resolved))
+                        {
+                            <option value="@s">@s</option>
+                        }
+                    </select>
+                }
+                <select class="select" aria-label="Entity type" @bind="entityTypeFilter" @bind:after="ApplyFilters">
+                    <option value="">All entity types</option>
+                    @foreach (var t in Enum.GetValues<AssetType>())
+                    {
+                        <option value="@t">@StatusUi.TypeLabel(t)</option>
+                    }
+                </select>
+                <div class="dl-toolbar-spacer"></div>
+                @if (HasActiveFilters)
+                {
+                    <button type="button" class="dl-seg-btn" @onclick="ClearFilters">@StatusUi.Icon("x", 13) Clear</button>
+                }
+            </div>
 
-            @if (pageData.Items.Any())
-            {
-                <table class="min-w-full text-sm incidents-table">
-                    <thead class="bg-gray-50 sticky top-0 z-10">
+            <div class="dl-table-wrap">
+                <table class="dl-table" aria-busy="@(isLoading ? "true" : "false")">
+                    <colgroup>
+                        <col /><col style="width:112px" /><col style="width:140px" /><col style="width:200px" />
+                        <col style="width:150px" /><col style="width:140px" /><col style="width:112px" /><col style="width:80px" />
+                    </colgroup>
+                    <thead>
                         <tr>
-                            <th class="px-4 py-2.5 text-left">@SortHeader("Severity", "severity")</th>
-                            <th class="px-4 py-2.5 text-left">@SortHeader("Incident", "title")</th>
-                            <th class="px-4 py-2.5 text-left">@SortHeader("Entity", "entity")</th>
-                            <th class="px-4 py-2.5 text-left">@SortHeader("Status", "status")</th>
-                            <th class="px-4 py-2.5 text-left">@SortHeader("Started", "started")</th>
-                            <th class="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Duration</th>
-                            <th class="px-4 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
+                            @SortHeader("Incident", "title")
+                            @SortHeader("Severity", "severity")
+                            @SortHeader("Status", "status")
+                            @SortHeader("Entity", "entity")
+                            <th class="dl-th">Assigned</th>
+                            @SortHeader("Started", "started")
+                            <th class="dl-th dl-th-num">Duration</th>
+                            <th class="dl-th dl-th-actions"><span class="dl-sr-only">Actions</span></th>
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var incident in pageData.Items)
+                        @if (isLoading && !pageData.Items.Any())
                         {
-                            <tr class="hover:bg-gray-50 cursor-pointer transition-colors" @onclick="() => ViewIncident(incident.Id)">
-                                <td class="px-4 py-2.5">
-                                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium @incident.GetSeverityClass()">
-                                        @SeverityIcon() @incident.Severity
-                                    </span>
-                                </td>
-                                <td class="px-4 py-2.5">
-                                    <div class="font-medium text-gray-900">@incident.Title</div>
-                                    @if (!string.IsNullOrEmpty(incident.Description))
-                                    {
-                                        <div class="text-xs text-gray-400 truncate max-w-xs">@incident.Description</div>
-                                    }
-                                </td>
-                                <td class="px-4 py-2.5 text-gray-600">@(string.IsNullOrEmpty(incident.Entity?.Name) ? "—" : incident.Entity!.Name)</td>
-                                <td class="px-4 py-2.5">
-                                    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium @incident.GetStatusClass()">@incident.Status</span>
-                                </td>
-                                <td class="px-4 py-2.5 text-gray-600">
-                                    @(incident.StartedAt?.ToString("MMM dd, yyyy HH:mm") ?? "—")
-                                </td>
-                                <td class="px-4 py-2.5">
-                                    @if (incident.IsResolved)
-                                    {
-                                        <span class="text-xs text-gray-400">Resolved</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="text-xs text-gray-600">@FormatDuration(incident.Duration)</span>
-                                    }
-                                </td>
-                                <td class="px-4 py-2.5" @onclick:stopPropagation="true">
-                                    <div class="ds-actions">
-                                        <button class="btn-icon btn-icon-open" title="View incident" @onclick="() => ViewIncident(incident.Id)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" x2="21" y1="14" y2="3"/></svg>
-                                        </button>
-                                        <AuthorizeView Roles="@writeRoles" Context="writeCtx">
-                                            <Authorized>
-                                                <button class="btn-icon btn-icon-edit" title="Edit incident" @onclick="() => EditIncident(incident.Id)">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                                                </button>
-                                            </Authorized>
-                                        </AuthorizeView>
+                            @for (var i = 0; i < 6; i++)
+                            {
+                                <tr class="dl-row dl-row-skel">
+                                    <td class="dl-td"><div class="skeleton dl-skel" style="width:60%"></div><div class="skeleton dl-skel" style="width:85%;margin-top:6px;height:10px"></div></td>
+                                    @for (var c = 0; c < 6; c++) { <td class="dl-td"><div class="skeleton dl-skel" style="width:70%"></div></td> }
+                                    <td class="dl-td"></td>
+                                </tr>
+                            }
+                        }
+                        else if (!pageData.Items.Any())
+                        {
+                            <tr>
+                                <td colspan="8">
+                                    <div class="empty">
+                                        <div class="dl-empty-icon" style="@(HasActiveFilters || scope != "active" ? "" : "color:var(--success)")">@StatusUi.Icon(HasActiveFilters || scope != "active" ? "inbox" : "check-circle", 20)</div>
+                                        <div class="empty-title">@(HasActiveFilters ? "No incidents match these filters" : scope == "active" ? "All clear" : "No incidents yet")</div>
+                                        <div class="empty-text">@(HasActiveFilters ? "Try a different search or clear the filters." : scope == "active" ? "Nothing is open right now." : "Incidents reported by people or opened by the ping job appear here.")</div>
+                                        @if (HasActiveFilters)
+                                        {
+                                            <button class="btn btn-secondary btn-sm" type="button" @onclick="ClearFilters">Clear filters</button>
+                                        }
+                                        else if (scope == "active")
+                                        {
+                                            <button class="btn btn-secondary btn-sm" type="button" @onclick='() => SetScope("all")'>Show all incidents</button>
+                                        }
                                     </div>
                                 </td>
                             </tr>
                         }
+                        else
+                        {
+                            @foreach (var incident in pageData.Items)
+                            {
+                                var i = incident;
+                                <tr class="dl-row @StatusUi.RowCls(i)" tabindex="0" @onclick="() => ViewIncident(i.Id)" @onkeydown="@(k => OnRowKey(k, i.Id))">
+                                    <td class="dl-td">
+                                        <div class="dl-cell-main" style="font-weight:600">@i.Title</div>
+                                        <div class="dl-cell-sub" title="@i.Description">@i.Description</div>
+                                    </td>
+                                    <td class="dl-td"><span class="badge @StatusUi.Cls(i.Severity)"><i></i>@i.Severity</span></td>
+                                    <td class="dl-td"><span class="badge @StatusUi.Cls(i.Status)"><i></i>@i.Status</span></td>
+                                    <td class="dl-td">
+                                        @if (i.Entity is not null)
+                                        {
+                                            <div class="dl-ident" style="gap:8px">
+                                                <span class="st-tile-sm">@StatusUi.TypeSvg(i.Entity.EntityType, 12)</span>
+                                                <div class="dl-ident-text">
+                                                    <div class="dl-cell-main">@i.Entity.Name</div>
+                                                    <div class="dl-cell-sub">@StatusUi.TypeLabel(i.Entity.EntityType)@(string.IsNullOrWhiteSpace(i.Entity.Group) || i.Entity.Group == "Default" ? "" : $" · {i.Entity.Group}")</div>
+                                                </div>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span class="dl-na">Unknown entity</span>
+                                        }
+                                    </td>
+                                    <td class="dl-td">
+                                        @if (string.IsNullOrWhiteSpace(i.AssignedTo))
+                                        {
+                                            <span class="dl-na">Unassigned</span>
+                                        }
+                                        else
+                                        {
+                                            <div class="dl-ident" style="gap:8px"><span class="st-av is-sm">@StatusUi.Initials(i.AssignedTo)</span><span class="dl-cell-main">@i.AssignedTo</span></div>
+                                        }
+                                    </td>
+                                    <td class="dl-td dl-td-date">
+                                        @StatusUi.When(i.StartedAt)
+                                        @if (!string.IsNullOrWhiteSpace(i.ReportedBy)) { <div class="dl-cell-sub">by @i.ReportedBy</div> }
+                                    </td>
+                                    <td class="dl-td dl-td-num">
+                                        <span class="st-mono">@StatusUi.Duration(i.Duration)</span>
+                                        <div class="dl-cell-sub">@(i.IsResolved ? $"resolved {StatusUi.When(i.ResolvedAt)}" : "ongoing")</div>
+                                    </td>
+                                    <td class="dl-td dl-td-actions" @onclick:stopPropagation="true">
+                                        <AuthorizeView Roles="@writeRoles" Context="writeCtx">
+                                            <Authorized>
+                                                <div class="dl-actions">
+                                                    <button class="dl-act" type="button" title="Edit" aria-label="Edit @i.Title" @onclick="() => EditIncident(i.Id)">@StatusUi.Icon("edit", 14)</button>
+                                                </div>
+                                            </Authorized>
+                                        </AuthorizeView>
+                                    </td>
+                                </tr>
+                            }
+                        }
                     </tbody>
                 </table>
-            }
-            else if (!isLoading)
-            {
-                <div class="h-full flex flex-col items-center justify-center text-center py-12 px-4">
-                    <div class="w-12 h-12 rounded-full bg-green-50 flex items-center justify-center">
-                        <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </div>
-                    <p class="mt-3 text-sm font-medium text-gray-900">No incidents found</p>
-                    <p class="mt-1 text-sm text-gray-500">
-                        @(HasActiveFilters ? "Try adjusting your filters." : "All clear — no incidents reported.")
-                    </p>
-                    @if (HasActiveFilters)
-                    {
-                        <button @onclick="ClearFilters" class="mt-4 text-sm font-medium text-indigo-600 hover:underline">Clear filters</button>
-                    }
-                </div>
-            }
-        </div>
+            </div>
 
-        <!-- Pagination footer -->
-        <div class="flex items-center justify-between gap-4 px-4 py-3 border-t border-gray-200 bg-gray-50/60 flex-shrink-0 flex-wrap">
-            <div class="flex items-center gap-3 text-sm text-gray-500">
-                <span>
+            <div class="dl-footer">
+                <div class="dl-footer-text">
                     @if (pageData.TotalCount == 0)
                     {
-                        <text>No results</text>
+                        <span>No results</span>
                     }
                     else
                     {
-                        <text>Showing <span class="font-medium text-gray-700">@FromRow</span>–<span class="font-medium text-gray-700">@ToRow</span> of <span class="font-medium text-gray-700">@pageData.TotalCount</span></text>
+                        <span>Showing <strong>@FromRow–@ToRow</strong> of <strong>@pageData.TotalCount</strong></span>
                     }
-                </span>
-                <span class="flex items-center gap-1.5">
-                    <span class="text-gray-400">·</span>
-                    <select @bind="pageSize" @bind:after="OnPageSizeChanged"
-                            class="border border-gray-300 rounded-md text-sm px-2 py-1 bg-white focus:ring-2 focus:ring-indigo-500 outline-none">
+                    <span class="dl-sep">·</span>
+                    <select class="select" aria-label="Rows per page" @bind="pageSize" @bind:after="OnPageSizeChanged">
                         <option value="10">10</option>
                         <option value="25">25</option>
                         <option value="50">50</option>
                         <option value="100">100</option>
                     </select>
-                    <span>per page</span>
-                </span>
-            </div>
-
-            @if (pageData.TotalPages > 1)
-            {
-                <div class="flex items-center gap-1">
-                    <button @onclick="() => GoToPage(pageData.Page - 1)" disabled="@(!pageData.HasPrevious)"
-                            class="px-2.5 py-1.5 rounded-md text-sm border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                        Prev
-                    </button>
-                    @if (PageNumbers().First() > 1)
-                    {
-                        <button @onclick="() => GoToPage(1)" class="px-3 py-1.5 rounded-md text-sm border border-gray-300 bg-white text-gray-600 hover:bg-gray-50">1</button>
-                        <span class="px-1 text-gray-400">…</span>
-                    }
-                    @foreach (var n in PageNumbers())
-                    {
-                        <button @onclick="() => GoToPage(n)"
-                                class="px-3 py-1.5 rounded-md text-sm border transition-colors @(n == pageData.Page ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50")">
-                            @n
-                        </button>
-                    }
-                    @if (PageNumbers().Last() < pageData.TotalPages)
-                    {
-                        <span class="px-1 text-gray-400">…</span>
-                        <button @onclick="() => GoToPage(pageData.TotalPages)" class="px-3 py-1.5 rounded-md text-sm border border-gray-300 bg-white text-gray-600 hover:bg-gray-50">@pageData.TotalPages</button>
-                    }
-                    <button @onclick="() => GoToPage(pageData.Page + 1)" disabled="@(!pageData.HasNext)"
-                            class="px-2.5 py-1.5 rounded-md text-sm border border-gray-300 bg-white text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                        Next
-                    </button>
+                    <span> per page</span>
                 </div>
-            }
+                @if (pageData.TotalPages > 1)
+                {
+                    <div class="dl-pager">
+                        <button class="dl-page-btn" type="button" disabled="@(!pageData.HasPrevious)" @onclick="() => GoToPage(pageData.Page - 1)">Prev</button>
+                        @if (PageNumbers().First() > 1)
+                        {
+                            <button class="dl-page-btn" type="button" @onclick="() => GoToPage(1)">1</button>
+                            <span class="dl-page-gap">…</span>
+                        }
+                        @foreach (var n in PageNumbers())
+                        {
+                            var p = n;
+                            <button class="dl-page-btn @(p == pageData.Page ? "is-active" : "")" type="button" @onclick="() => GoToPage(p)">@p</button>
+                        }
+                        @if (PageNumbers().Last() < pageData.TotalPages)
+                        {
+                            <span class="dl-page-gap">…</span>
+                            <button class="dl-page-btn" type="button" @onclick="() => GoToPage(pageData.TotalPages)">@pageData.TotalPages</button>
+                        }
+                        <button class="dl-page-btn" type="button" disabled="@(!pageData.HasNext)" @onclick="() => GoToPage(pageData.Page + 1)">Next</button>
+                    </div>
+                }
+            </div>
         </div>
     </div>
 </div>
@@ -369,22 +247,23 @@
 @code {
     private PagedResult<Incident> pageData = new();
     private bool isLoading = true;
+    private int? activeCount;
+    private int criticalCount;
+    private Incident? oldestActive;
 
     private readonly IncidentQueryParameters query = new() { Page = 1, PageSize = 10, SortBy = "started", SortDir = "desc" };
 
-    // Filter-bound fields
     private string searchText = "";
+    private string scope = "active";
     private string severityFilter = "";
     private string statusFilter = "";
     private string entityTypeFilter = "";
-    private bool activeOnly = false;
     private int pageSize = 10;
-
     private CancellationTokenSource? searchCts;
 
     private bool HasActiveFilters =>
         !string.IsNullOrWhiteSpace(searchText) || !string.IsNullOrEmpty(severityFilter) ||
-        !string.IsNullOrEmpty(statusFilter) || !string.IsNullOrEmpty(entityTypeFilter) || activeOnly;
+        !string.IsNullOrEmpty(statusFilter) || !string.IsNullOrEmpty(entityTypeFilter);
 
     private int FromRow => pageData.TotalCount == 0 ? 0 : (pageData.Page - 1) * pageData.PageSize + 1;
     private int ToRow => Math.Min(pageData.Page * pageData.PageSize, pageData.TotalCount);
@@ -396,7 +275,15 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadPage();
+        var companyId = StateContainer.Company?.Id;
+        if (string.IsNullOrEmpty(companyId)) { isLoading = false; return; }
+
+        var pageTask = LoadPage();
+        var active = await IncidentService.GetActiveIncidentsAsync(companyId);
+        activeCount = active.Count;
+        criticalCount = active.Count(i => i.Severity == IncidentSeverity.Critical);
+        oldestActive = active.OrderBy(i => i.StartedAt).FirstOrDefault();
+        await pageTask;
     }
 
     private async Task LoadPage()
@@ -409,9 +296,11 @@
 
         query.Search = string.IsNullOrWhiteSpace(searchText) ? null : searchText;
         query.Severity = Enum.TryParse<IncidentSeverity>(severityFilter, out var sev) ? sev : null;
-        query.Status = Enum.TryParse<IncidentStatus>(statusFilter, out var st) ? st : null;
         query.EntityType = Enum.TryParse<AssetType>(entityTypeFilter, out var et) ? et : null;
-        query.ActiveOnly = activeOnly;
+        query.ActiveOnly = scope == "active";
+        query.Status = scope == "resolved"
+            ? IncidentStatus.Resolved
+            : Enum.TryParse<IncidentStatus>(statusFilter, out var st) ? st : null;
 
         pageData = await IncidentService.GetIncidentsPagedAsync(companyId, query);
         isLoading = false;
@@ -424,6 +313,13 @@
         await LoadPage();
     }
 
+    private async Task SetScope(string s)
+    {
+        scope = s;
+        if (s == "resolved" || (s == "active" && statusFilter == nameof(IncidentStatus.Resolved))) statusFilter = "";
+        await ApplyFilters();
+    }
+
     private async Task OnSearchInput(ChangeEventArgs e)
     {
         searchText = e.Value?.ToString() ?? "";
@@ -433,30 +329,22 @@
         try
         {
             await Task.Delay(350, token);
-            if (!token.IsCancellationRequested)
-                await ApplyFilters();
+            if (!token.IsCancellationRequested) await ApplyFilters();
         }
         catch (TaskCanceledException) { /* superseded by a newer keystroke */ }
     }
 
-    private async Task ToggleActiveOnly()
-    {
-        activeOnly = !activeOnly;
-        await ApplyFilters();
-    }
-
     private async Task ClearFilters()
     {
-        searchText = ""; severityFilter = ""; statusFilter = ""; entityTypeFilter = ""; activeOnly = false;
+        searchText = ""; severityFilter = ""; statusFilter = ""; entityTypeFilter = "";
         query.SortBy = "started"; query.SortDir = "desc";
         await ApplyFilters();
     }
 
     private async Task SortByColumn(string column)
     {
-        if (query.SortBy == column)
-            query.SortDir = query.SortDir == "asc" ? "desc" : "asc";
-        else { query.SortBy = column; query.SortDir = "asc"; }
+        if (query.SortBy == column) query.SortDir = query.SortDir == "asc" ? "desc" : "asc";
+        else { query.SortBy = column; query.SortDir = column is "started" or "severity" ? "desc" : "asc"; }
         query.Page = 1;
         await LoadPage();
     }
@@ -483,42 +371,21 @@
         for (var i = start; i <= end; i++) yield return i;
     }
 
-    private RenderFragment SortHeader(string label, string column) => builder =>
+    private RenderFragment SortHeader(string label, string column) => __builder =>
     {
         var active = query.SortBy == column;
-        builder.OpenElement(0, "button");
-        builder.AddAttribute(1, "class",
-            "inline-flex items-center gap-1 text-xs font-semibold uppercase tracking-wide transition-colors " +
-            (active ? "text-indigo-600" : "text-gray-500 hover:text-gray-700"));
-        builder.AddAttribute(2, "onclick", EventCallback.Factory.Create(this, () => SortByColumn(column)));
-        builder.AddContent(3, label);
-        if (active)
-            builder.AddMarkupContent(4, query.SortDir == "asc" ? " <span>▲</span>" : " <span>▼</span>");
-        builder.CloseElement();
+        var dir = active ? (query.SortDir == "asc" ? "ascending" : "descending") : "none";
+        <th class="dl-th dl-th-sort @(active ? "is-active" : "")" aria-sort="@dir" @onclick="() => SortByColumn(column)">
+            <span class="dl-th-inner">@label <span class="dl-sort-ico">@StatusUi.Icon(active ? (query.SortDir == "asc" ? "sort-asc" : "sort-desc") : "sort", 12)</span></span>
+        </th>
     };
+
+    private void OnRowKey(KeyboardEventArgs k, string id)
+    {
+        if (k.Key == "Enter") ViewIncident(id);
+    }
 
     private void CreateIncident() => Navigation.NavigateTo($"/status/incidents/create{queryParam}");
     private void ViewIncident(string id) => Navigation.NavigateTo($"/status/incidents/{id}{queryParam}");
     private void EditIncident(string id) => Navigation.NavigateTo($"/status/incidents/{id}/edit{queryParam}");
-
-    private static string EntityTypeLabel(AssetType type)
-    {
-        var member = typeof(AssetType).GetMember(type.ToString());
-        var display = member.Length > 0
-            ? member[0].GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.DisplayAttribute), false)
-                       .Cast<System.ComponentModel.DataAnnotations.DisplayAttribute>().FirstOrDefault()
-            : null;
-        return display?.Name ?? type.ToString();
-    }
-
-    private string FormatDuration(TimeSpan? d)
-    {
-        if (!d.HasValue) return "";
-        if (d.Value.TotalDays >= 1) return $"{(int)d.Value.TotalDays}d {d.Value.Hours}h";
-        if (d.Value.TotalHours >= 1) return $"{(int)d.Value.TotalHours}h {d.Value.Minutes}m";
-        return $"{(int)d.Value.TotalMinutes}m";
-    }
-
-    // Colored via the surrounding severity pill's own text color (currentColor) — no emoji.
-    private RenderFragment SeverityIcon() => @<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8" viewBox="0 0 8 8"><circle cx="4" cy="4" r="4" fill="currentColor"/></svg>;
 }

@@ -1,557 +1,319 @@
 @page "/status/incidents/create"
 @page "/status/incidents/{IncidentId}/edit"
-@using Application.Shared.Models
 @using Application.Shared.Enums
-@using Microsoft.AspNetCore.Authorization
-@using Microsoft.AspNetCore.Components.Forms
-@using Microsoft.FluentUI.AspNetCore.Components
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
 @inject IncidentClientService IncidentService
 @inject MonitoredAssetClientService EntityService
 @inject StateContainer StateContainer
 @attribute [Authorize(Policy = PolicyNames.StatusWrite)]
 
-<PageTitle>@(IsEditMode ? $"Edit Incident - {incident?.Title}" : "Report Incident")</PageTitle>
+<PageTitle>@(IsEditMode ? $"Edit {incident.Title}" : "Report incident") · Status</PageTitle>
 
-<style>
-    /* ── Dark theme (data-theme="dark") — override hardcoded Tailwind light colors ── */
-    [data-theme="dark"] .sd-scope.min-h-screen { background-color: #0e1117; }
-    [data-theme="dark"] .sd-scope.bg-white { background-color: #181a20; }
-
-    [data-theme="dark"] .sd-scope .bg-white { background-color: #181a20; }
-    [data-theme="dark"] .sd-scope .bg-white\/60 { background-color: rgba(24,26,32,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-50 { background-color: #1e222b; }
-    [data-theme="dark"] .sd-scope .bg-gray-50\/60 { background-color: rgba(30,34,43,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-100 { background-color: #20242c; }
-
-    [data-theme="dark"] .sd-scope .text-gray-900 { color: #f3f4f6; }
-    [data-theme="dark"] .sd-scope .text-gray-800 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-700 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-600 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-500 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-400 { color: #767d89; }
-    [data-theme="dark"] .sd-scope .text-gray-300 { color: #4b515e; }
-
-    [data-theme="dark"] .sd-scope .border-gray-100 { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .border-gray-200 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-200\/80 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-300 { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-50:hover { background-color: #20242c; }
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-100:hover { background-color: #262b34; }
-    [data-theme="dark"] .sd-scope .hover\:bg-red-50:hover { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .hover\:bg-indigo-100:hover { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .hover\:border-gray-400:hover { border-color: #3a4150; }
-    [data-theme="dark"] .sd-scope .hover\:border-red-200:hover { border-color: rgba(239,68,68,0.30); }
-
-    [data-theme="dark"] .sd-scope input:not([type="checkbox"]):not([type="radio"]),
-    [data-theme="dark"] .sd-scope select,
-    [data-theme="dark"] .sd-scope textarea {
-        background-color: #12141a !important;
-        border-color: #2b303b !important;
-        color: #e6e9ef !important;
-    }
-    [data-theme="dark"] .sd-scope input::placeholder,
-    [data-theme="dark"] .sd-scope textarea::placeholder { color: #767d89 !important; }
-
-    [data-theme="dark"] .sd-scope .bg-red-50 { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .bg-red-100 { background-color: rgba(239,68,68,0.15); }
-    [data-theme="dark"] .sd-scope .border-red-200 { border-color: rgba(239,68,68,0.30); }
-    [data-theme="dark"] .sd-scope .text-red-400,
-    [data-theme="dark"] .sd-scope .text-red-500,
-    [data-theme="dark"] .sd-scope .text-red-600,
-    [data-theme="dark"] .sd-scope .text-red-700,
-    [data-theme="dark"] .sd-scope .text-red-800 { color: #f87171; }
-    [data-theme="dark"] .sd-scope .hover\:text-red-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-red-800:hover { color: #fca5a5; }
-
-    [data-theme="dark"] .sd-scope .bg-green-50 { background-color: rgba(34,197,94,0.12); }
-    [data-theme="dark"] .sd-scope .bg-green-100 { background-color: rgba(34,197,94,0.15); }
-    [data-theme="dark"] .sd-scope .border-green-200 { border-color: rgba(34,197,94,0.30); }
-    [data-theme="dark"] .sd-scope .text-green-500,
-    [data-theme="dark"] .sd-scope .text-green-600,
-    [data-theme="dark"] .sd-scope .text-green-700,
-    [data-theme="dark"] .sd-scope .text-green-800 { color: #4ade80; }
-
-    [data-theme="dark"] .sd-scope .bg-yellow-50 { background-color: rgba(245,158,11,0.10); }
-    [data-theme="dark"] .sd-scope .bg-yellow-100 { background-color: rgba(245,158,11,0.15); }
-    [data-theme="dark"] .sd-scope .border-yellow-200 { border-color: rgba(245,158,11,0.30); }
-    [data-theme="dark"] .sd-scope .text-yellow-700,
-    [data-theme="dark"] .sd-scope .text-yellow-800 { color: #fcd34d; }
-
-    [data-theme="dark"] .sd-scope .bg-orange-50 { background-color: rgba(249,115,22,0.10); }
-    [data-theme="dark"] .sd-scope .bg-orange-100 { background-color: rgba(249,115,22,0.15); }
-    [data-theme="dark"] .sd-scope .border-orange-200 { border-color: rgba(249,115,22,0.30); }
-    [data-theme="dark"] .sd-scope .text-orange-600,
-    [data-theme="dark"] .sd-scope .text-orange-700,
-    [data-theme="dark"] .sd-scope .text-orange-800 { color: #fdba74; }
-
-    [data-theme="dark"] .sd-scope .bg-blue-50 { background-color: rgba(59,130,246,0.10); }
-    [data-theme="dark"] .sd-scope .bg-blue-100 { background-color: rgba(59,130,246,0.15); }
-    [data-theme="dark"] .sd-scope .border-blue-200 { border-color: rgba(59,130,246,0.30); }
-    [data-theme="dark"] .sd-scope .text-blue-600,
-    [data-theme="dark"] .sd-scope .text-blue-700,
-    [data-theme="dark"] .sd-scope .text-blue-800 { color: #93c5fd; }
-    [data-theme="dark"] .sd-scope .text-blue-900 { color: #bfdbfe; }
-
-    [data-theme="dark"] .sd-scope .bg-purple-50 { background-color: rgba(168,85,247,0.12); }
-    [data-theme="dark"] .sd-scope .bg-purple-100 { background-color: rgba(168,85,247,0.18); }
-    [data-theme="dark"] .sd-scope .text-purple-700,
-    [data-theme="dark"] .sd-scope .text-purple-800 { color: #d8b4fe; }
-
-    [data-theme="dark"] .sd-scope .bg-indigo-50 { background-color: rgba(129,140,248,0.14); }
-    [data-theme="dark"] .sd-scope .bg-indigo-100 { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .border-indigo-200 { border-color: rgba(129,140,248,0.30); }
-    [data-theme="dark"] .sd-scope .text-indigo-600,
-    [data-theme="dark"] .sd-scope .text-indigo-700 { color: #a5b4fc; }
-    [data-theme="dark"] .sd-scope .text-indigo-800 { color: #c7d2fe; }
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-800:hover { color: #c7d2fe; }
-
-    [data-theme="dark"] .sd-scope .bg-gray-200 { background-color: #23272f; }
-    [data-theme="dark"] .sd-scope .bg-gray-300 { background-color: #363c48; }
-
-    [data-theme="dark"] .sd-scope .ring-white { --tw-ring-color: #181a20; }
-    [data-theme="dark"] .sd-scope .ring-offset-1 { --tw-ring-offset-color: #181a20; }
-</style>
-
-<div class="min-h-screen bg-gray-50 sd-scope">
-    <!-- Header -->
-    <div class="bg-white border-b border-gray-200">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="py-6">
-                <nav class="flex" aria-label="Breadcrumb">
-                    <ol class="flex items-center space-x-4">
-                        <li>
-                            <div>
-                                <button @onclick="BackToIncidents" class="text-gray-400 hover:text-gray-500">
-                                    <svg class="flex-shrink-0 h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                                        <path fill-rule="evenodd" d="M9.707 14.707a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 1.414L7.414 9H15a1 1 0 110 2H7.414l2.293 2.293a1 1 0 010 1.414z" clip-rule="evenodd"></path>
-                                    </svg>
-                                    <span class="sr-only">Back</span>
-                                </button>
-                            </div>
-                        </li>
-                        <li>
-                            <div class="flex items-center">
-                                <svg class="flex-shrink-0 h-5 w-5 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 111.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
-                                </svg>
-                                <button @onclick="BackToIncidents" class="ml-4 text-sm font-medium text-gray-500 hover:text-gray-700">
-                                    Incidents
-                                </button>
-                            </div>
-                        </li>
-                        <li>
-                            <div class="flex items-center">
-                                <svg class="flex-shrink-0 h-5 w-5 text-gray-300" fill="currentColor" viewBox="0 0 20 20">
-                                    <path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 111.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd"></path>
-                                </svg>
-                                <span class="ml-4 text-sm font-medium text-gray-500">
-                                    @(IsEditMode ? "Edit" : "Create")
-                                </span>
-                            </div>
-                        </li>
-                    </ol>
-                </nav>
-                <div class="mt-6 md:flex md:items-center md:justify-between">
-                    <div class="flex-1 min-w-0">
-                        <h1 class="text-2xl font-bold leading-7 text-gray-900 sm:text-3xl sm:truncate">
-                            @(IsEditMode ? "Edit Incident" : "Report New Incident")
-                        </h1>
+@* Styles: Application/wwwroot/status.css (.st-form*, .st-sev). Validation comes from the Incident model's
+   data annotations. `?entity={id}` preselects the affected entity (used by the entity page). *@
+<div class="sc">
+    <div class="page-wrap st-wrap st-wrap-narrow">
+        <div class="st-head">
+            <div class="st-head-left">
+                <a class="st-back" href="@BackHref" title="Back" aria-label="Back">@StatusUi.Icon("arrow-left", 16)</a>
+                <div class="st-head-main">
+                    <div class="st-crumbs">
+                        <a href="@($"status/incidents{queryParam}")">Incidents</a>
+                        @if (IsEditMode)
+                        {
+                            @StatusUi.Icon("chev-right", 12)<a href="@BackHref">@(string.IsNullOrWhiteSpace(incident.Title) ? "Incident" : incident.Title)</a>
+                        }
+                        @StatusUi.Icon("chev-right", 12)<span>@(IsEditMode ? "Edit" : "New")</span>
                     </div>
+                    <h1 class="page-title">@(IsEditMode ? "Edit incident" : "Report an incident")</h1>
                 </div>
             </div>
         </div>
-    </div>
 
-    <!-- Form Content -->
-    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div class="bg-white shadow sm:rounded-lg">
-            <div class="px-4 py-5 sm:p-6">
-                <EditForm Model="incident" OnValidSubmit="HandleValidSubmit" FormName="IncidentForm">
-                    <DataAnnotationsValidator />
-
-                    @if (!string.IsNullOrEmpty(errorMessage))
-                    {
-                        <div class="mb-4 bg-red-50 border border-red-200 rounded-md p-4">
-                            <div class="flex">
-                                <div class="flex-shrink-0">
-                                    <svg class="h-5 w-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                                    </svg>
-                                </div>
-                                <div class="ml-3">
-                                    <p class="text-sm text-red-700">@errorMessage</p>
-                                </div>
-                            </div>
-                        </div>
-                    }
-
-                    <div class="space-y-6">
-                        <!-- Entity Selection -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1.5">Affected Entity *</label>
-                            <div class="relative">
-                                <!-- Trigger -->
-                                <button type="button" @onclick="ToggleEntityDropdown"
-                                        class="flex w-full items-center gap-2 rounded-md border border-gray-300 bg-white px-3 py-2 text-left text-sm shadow-sm outline-none transition-colors hover:border-gray-400 focus:border-red-500 focus:ring-1 focus:ring-red-500">
-                                    @if (SelectedEntity is { } sel)
-                                    {
-                                        <span class="text-base leading-none">@sel.GetEntityTypeIcon()</span>
-                                        <span class="min-w-0 flex-1 truncate font-medium text-gray-900">@sel.Name</span>
-                                        <span class="hidden sm:inline-flex shrink-0 items-center rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">@sel.EntityType</span>
-                                    }
-                                    else
-                                    {
-                                        <span class="flex-1 text-gray-400">Select an entity…</span>
-                                    }
-                                    <svg class="h-4 w-4 shrink-0 text-gray-400 transition-transform @(entityDropdownOpen ? "rotate-180" : "")" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                                    </svg>
-                                </button>
-
-                                @if (entityDropdownOpen)
-                                {
-                                    <div class="fixed inset-0 z-10" @onclick="CloseEntityDropdown"></div>
-                                    <div class="absolute z-20 mt-1.5 w-full overflow-hidden rounded-xl border border-gray-200/80 bg-white shadow-[0_8px_30px_rgb(0,0,0,0.08)]">
-                                        <div class="p-2">
-                                            <div class="relative">
-                                                <svg class="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"></path>
-                                                </svg>
-                                                <input @bind="entitySearch" @bind:event="oninput" placeholder="Search entities…"
-                                                       class="w-full rounded-lg border-0 bg-gray-100 py-2 pl-8 pr-3 text-sm text-gray-900 outline-none ring-1 ring-transparent transition focus:bg-white focus:ring-red-500" />
-                                            </div>
-                                        </div>
-                                        <ul class="max-h-64 overflow-y-auto px-1.5 pb-1.5">
-                                            @if (!SearchedEntities.Any())
-                                            {
-                                                <li class="px-3 py-6 text-center text-sm text-gray-400">No matching entities</li>
-                                            }
-                                            else
-                                            {
-                                                @foreach (var entity in SearchedEntities)
-                                                {
-                                                    var isSelected = entity.Id == incident.EntityId;
-                                                    <li>
-                                                        <button type="button" @onclick="() => SelectEntity(entity.Id)"
-                                                                style="border:none;"
-                                                                class="flex w-full items-center gap-3 rounded-lg bg-transparent px-2.5 py-2 text-left outline-none transition-colors hover:bg-gray-100 @(isSelected ? "bg-red-50" : "")">
-                                                            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100 text-base">@entity.GetEntityTypeIcon()</span>
-                                                            <span class="min-w-0 flex-1">
-                                                                <span class="flex items-center gap-1.5">
-                                                                    <span class="truncate text-sm font-medium text-gray-900">@entity.Name</span>
-                                                                    <span class="inline-flex shrink-0 items-center rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500">@entity.EntityType</span>
-                                                                    @if (entity.IsCritical)
-                                                                    {
-                                                                        <span class="inline-flex shrink-0 items-center rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">Critical</span>
-                                                                    }
-                                                                </span>
-                                                                @if (!string.IsNullOrWhiteSpace(EntitySubtitle(entity)))
-                                                                {
-                                                                    <span class="block truncate text-xs text-gray-400">@EntitySubtitle(entity)</span>
-                                                                }
-                                                            </span>
-                                                            @if (isSelected)
-                                                            {
-                                                                <svg class="h-4 w-4 shrink-0 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                                                </svg>
-                                                            }
-                                                        </button>
-                                                    </li>
-                                                }
-                                            }
-                                        </ul>
-                                    </div>
-                                }
-                            </div>
-                            <ValidationMessage For="@(() => incident.EntityId)" class="mt-1 text-sm text-red-600" />
-                        </div>
-
-                        <!-- Title -->
-                        <div>
-                            <label for="title" class="block text-sm font-medium text-gray-700">Incident Title *</label>
-                            <InputText @bind-Value="incident.Title"
-                                       class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
-                                       placeholder="Brief description of the incident"
-                                       maxlength="200" />
-                            <ValidationMessage For="@(() => incident.Title)" class="mt-1 text-sm text-red-600" />
-                        </div>
-
-                        <!-- Description -->
-                        <div>
-                            <label for="description" class="block text-sm font-medium text-gray-700">Description *</label>
-                            <InputTextArea @bind-Value="incident.Description"
-                                           class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
-                                           rows="4"
-                                           placeholder="Detailed description of the incident, symptoms, and impact"
-                                           maxlength="4000" />
-                            <ValidationMessage For="@(() => incident.Description)" class="mt-1 text-sm text-red-600" />
-                        </div>
-
-                        <!-- Severity and Status Row -->
-                        <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                            <!-- Severity -->
-                            <div>
-                                <label for="severity" class="block text-sm font-medium text-gray-700">Severity *</label>
-                                <select @bind="incident.Severity"
-                                        class="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm rounded-md">
-                                    <option value="@IncidentSeverity.Low">🔵 Low</option>
-                                    <option value="@IncidentSeverity.Medium">🟡 Medium</option>
-                                    <option value="@IncidentSeverity.High">🟠 High</option>
-                                    <option value="@IncidentSeverity.Critical">🔴 Critical</option>
-                                </select>
-                                <ValidationMessage For="@(() => incident.Severity)" class="mt-1 text-sm text-red-600" />
-                            </div>
-
-                            <!-- Status (only show for edit mode) -->
-                            @if (IsEditMode)
+        @if (isLoading)
+        {
+            <div class="card"><div class="st-loading"><span class="spin"></span> Loading…</div></div>
+        }
+        else
+        {
+            <EditForm Model="incident" OnValidSubmit="HandleValidSubmit" OnInvalidSubmit="() => submitted = true" class="st-form">
+                <DataAnnotationsValidator />
+                <div class="card">
+                    <div class="card-body">
+                        <div class="field">
+                            <label class="field-label" for="i-entity">Affected entity <b>*</b></label>
+                            <EntityPicker Id="i-entity" Entities="@entities" Value="@incident.EntityId" ValueChanged="OnEntityChanged"
+                                          UnhealthyFirst="true" Placeholder="Choose the entity that is affected" />
+                            @if (submitted && string.IsNullOrEmpty(incident.EntityId))
                             {
-                                <div>
-                                    <label for="status" class="block text-sm font-medium text-gray-700">Status</label>
-                                    <select @bind="incident.Status"
-                                            class="mt-1 block w-full pl-3 pr-10 py-2 text-base border border-gray-300 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm rounded-md">
-                                        <option value="@IncidentStatus.Open">Open</option>
-                                        <option value="@IncidentStatus.Investigating">Investigating</option>
-                                        <option value="@IncidentStatus.Identified">Identified</option>
-                                        <option value="@IncidentStatus.Monitoring">Monitoring</option>
-                                        <option value="@IncidentStatus.Resolved">Resolved</option>
-                                    </select>
-                                </div>
-                            }
-                        </div>
-
-                        <!-- Assignment Row -->
-                        <div class="grid grid-cols-1 gap-6 sm:grid-cols-2">
-                            <!-- Reported By -->
-                            <div>
-                                <label for="reportedBy" class="block text-sm font-medium text-gray-700">Reported By</label>
-                                <InputText @bind-Value="incident.ReportedBy"
-                                           class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
-                                           placeholder="Email or name of reporter"
-                                           maxlength="200" />
-                            </div>
-
-                            <!-- Assigned To -->
-                            <div>
-                                <label for="assignedTo" class="block text-sm font-medium text-gray-700">Assigned To</label>
-                                <InputText @bind-Value="incident.AssignedTo"
-                                           class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
-                                           placeholder="Email or name of assignee"
-                                           maxlength="200" />
-                            </div>
-                        </div>
-
-                        <!-- Impact Description -->
-                        <div>
-                            <label for="impact" class="block text-sm font-medium text-gray-700">Impact Description</label>
-                            <InputTextArea @bind-Value="incident.ImpactDescription"
-                                           class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
-                                           rows="3"
-                                           placeholder="Describe the business impact, affected users, etc."
-                                           maxlength="1000" />
-                        </div>
-
-                        <!-- Resolution Details (only for edit mode and if resolved) -->
-                        @if (IsEditMode && incident.Status == IncidentStatus.Resolved)
-                        {
-                            <div>
-                                <label for="resolution" class="block text-sm font-medium text-gray-700">Resolution Details</label>
-                                <InputTextArea @bind-Value="incident.ResolutionDetails"
-                                               class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
-                                               rows="3"
-                                               placeholder="Describe how the incident was resolved"
-                                               maxlength="2000" />
-                            </div>
-                        }
-
-                        <!-- External Incident ID -->
-                        <div>
-                            <label for="externalId" class="block text-sm font-medium text-gray-700">External Incident ID</label>
-                            <InputText @bind-Value="incident.ExternalIncidentId"
-                                       class="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-red-500 focus:border-red-500 sm:text-sm"
-                                       placeholder="Reference ID from external systems (optional)"
-                                       maxlength="100" />
-                            <p class="mt-1 text-sm text-gray-500">Link to tickets from external systems like Jira, ServiceNow, etc.</p>
-                        </div>
-                    </div>
-
-                    <!-- Form Actions -->
-                    <div class="mt-8 flex justify-end space-x-3">
-                        <button type="button" @onclick="BackToIncidents"
-                                class="bg-white py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500">
-                            Cancel
-                        </button>
-                        <button type="submit" disabled="@isSubmitting"
-                                class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 disabled:opacity-50">
-                            @if (isSubmitting)
-                            {
-                                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                </svg>
-                                <span>@(IsEditMode ? "Updating..." : "Creating...")</span>
+                                <span class="field-error">Choose the affected entity.</span>
                             }
                             else
                             {
-                                <span>@(IsEditMode ? "Update Incident" : "Report Incident")</span>
+                                <span class="field-help">Entities that are not online are listed first.</span>
                             }
+                        </div>
+
+                        <div class="field">
+                            <label class="field-label" for="i-title">Title <b>*</b></label>
+                            <InputText class="input" id="i-title" maxlength="200" @bind-Value="incident.Title" placeholder="What is broken, in one line" />
+                            <ValidationMessage For="() => incident.Title" />
+                        </div>
+
+                        <div class="field">
+                            <span class="field-label">Severity <b>*</b></span>
+                            <div class="st-sev" role="radiogroup" aria-label="Severity">
+                                @foreach (var (sev, hint) in SeverityOptions)
+                                {
+                                    var s = sev;
+                                    <button type="button" class="st-sev-opt @StatusUi.Cls(s) @(incident.Severity == s ? "is-on" : "")" role="radio"
+                                            aria-checked="@(incident.Severity == s ? "true" : "false")" @onclick="() => incident.Severity = s">
+                                        <span class="st-sev-name"><i></i>@s</span>
+                                        <small>@hint</small>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        @if (IsEditMode)
+                        {
+                            <div class="field">
+                                <label class="field-label" for="i-status">Status</label>
+                                <InputSelect class="select" id="i-status" @bind-Value="incident.Status">
+                                    @foreach (var s in StatusUi.Flow)
+                                    {
+                                        <option value="@s">@s</option>
+                                    }
+                                </InputSelect>
+                                <span class="field-help">Changing the status here does not post a timeline update. Use the incident page to post one.</span>
+                            </div>
+                        }
+
+                        <div class="field">
+                            <label class="field-label" for="i-desc">What is happening <b>*</b></label>
+                            <InputTextArea class="textarea" id="i-desc" rows="4" maxlength="4000" @bind-Value="incident.Description"
+                                           placeholder="Symptoms, error messages, when it started" />
+                            <ValidationMessage For="() => incident.Description" />
+                        </div>
+
+                        <div class="field">
+                            <label class="field-label" for="i-impact">Impact</label>
+                            <InputTextArea class="textarea" id="i-impact" rows="2" maxlength="1000" @bind-Value="incident.ImpactDescription"
+                                           placeholder="Who or what is affected, and how badly" />
+                        </div>
+
+                        @if (IsEditMode && incident.Status == IncidentStatus.Resolved)
+                        {
+                            <div class="field">
+                                <label class="field-label" for="i-resolution">Resolution</label>
+                                <InputTextArea class="textarea" id="i-resolution" rows="3" maxlength="2000" @bind-Value="incident.ResolutionDetails"
+                                               placeholder="Root cause and the fix" />
+                            </div>
+                        }
+
+                        <div class="st-form-grid">
+                            <div class="field">
+                                <label class="field-label" for="i-start">Started at</label>
+                                <input class="input input-mono" id="i-start" type="datetime-local" @bind="startedLocal" @bind:format="yyyy-MM-ddTHH:mm" />
+                                <span class="field-help">@(IsEditMode ? "Local time." : "Defaults to now. Local time.")</span>
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="i-assign">Assign to</label>
+                                <InputText class="input" id="i-assign" maxlength="200" @bind-Value="incident.AssignedTo" placeholder="Name or email" />
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="i-rep">Reported by</label>
+                                <InputText class="input" id="i-rep" maxlength="200" @bind-Value="incident.ReportedBy" />
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="i-ext">External reference</label>
+                                <InputText class="input input-mono" id="i-ext" maxlength="100" @bind-Value="incident.ExternalIncidentId" placeholder="OPS-1234" />
+                                <span class="field-help">Jira, ServiceNow or vendor ticket.</span>
+                            </div>
+                        </div>
+
+                        @if (errorMessage is not null)
+                        {
+                            <div class="form-error" role="alert">@errorMessage</div>
+                        }
+                    </div>
+                    <div class="st-form-foot">
+                        <span class="st-form-hint">@(IsEditMode ? "" : "It appears on the incidents list and on the entity's page.")</span>
+                        <a class="btn btn-ghost" href="@BackHref">Cancel</a>
+                        <button class="btn btn-primary" type="submit" disabled="@isSubmitting" @onclick="() => submitted = true">
+                            @if (isSubmitting) { <span class="spin"></span> }
+                            @(isSubmitting ? (IsEditMode ? "Saving…" : "Reporting…") : (IsEditMode ? "Save changes" : "Report incident"))
                         </button>
                     </div>
-                </EditForm>
-            </div>
-        </div>
+                </div>
+
+                <div class="st-col">
+                    @if (SelectedEntity is not null)
+                    {
+                        var e = SelectedEntity;
+                        var st = StatusUi.Current(e);
+                        var open = entityIncidents.Where(i => i.Status != IncidentStatus.Resolved && i.Id != incident.Id).ToList();
+                        var last = entityIncidents.Where(i => i.Id != incident.Id).OrderByDescending(i => i.StartedAt).FirstOrDefault();
+                        <div class="card">
+                            <div class="card-head">
+                                <span class="st-tile-sm">@StatusUi.TypeSvg(e.EntityType, 13)</span>
+                                <h3 class="card-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">@e.Name</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="st-status is-lg @StatusUi.Cls(st)" style="margin-bottom:12px"><span class="st-dot @(StatusUi.IsUnhealthy(st) ? "is-live" : "")"></span> @StatusUi.Label(st)
+                                    @if (StatusUi.Latest(e)?.CheckedAt is DateTime at) { <span class="st-muted" style="font-weight:400;font-size:12px">· checked @StatusUi.When(at)</span> }
+                                </div>
+                                <dl class="st-dl">
+                                    <dt>Type</dt><dd>@StatusUi.TypeLabel(e.EntityType)@(string.IsNullOrWhiteSpace(e.Group) || e.Group == "Default" ? "" : $" · {e.Group}")</dd>
+                                    @if (!string.IsNullOrWhiteSpace(e.Owner)) { <dt>Owner</dt><dd>@e.Owner</dd> }
+                                    @if (e.IsCritical) { <dt>Critical</dt><dd>Yes</dd> }
+                                    <dt>Open incidents</dt>
+                                    <dd>
+                                        @if (!open.Any()) { <span class="st-muted">None</span> }
+                                        else
+                                        {
+                                            @foreach (var o in open.Take(3))
+                                            {
+                                                <div><a href="@($"status/incidents/{o.Id}{queryParam}")">@o.Title</a></div>
+                                            }
+                                        }
+                                    </dd>
+                                    <dt>Last incident</dt>
+                                    <dd>@if (last is null) { <span class="st-muted">None</span> } else { <a href="@($"status/incidents/{last.Id}{queryParam}")">@last.Title</a><span class="st-muted"> · @StatusUi.When(last.StartedAt)</span> }</dd>
+                                </dl>
+                                @if (open.Any() && !IsEditMode)
+                                {
+                                    <div class="st-callout is-warning st-callout-gap">@StatusUi.Icon("alert", 14)<div>This entity already has @StatusUi.Plural(open.Count, "open incident"). Post an update there if it's the same problem.</div></div>
+                                }
+                            </div>
+                        </div>
+                    }
+                    <div class="st-callout is-info">
+                        @StatusUi.Icon("info", 14)
+                        <div><b>Choosing a severity.</b> Critical: sales, stores or customer data at risk. High: a store or team is blocked. Medium: degraded with a workaround. Low: minor, no one is blocked.</div>
+                    </div>
+                </div>
+            </EditForm>
+        }
     </div>
 </div>
 
 @code {
     [Parameter] public string? IncidentId { get; set; }
+    [SupplyParameterFromQuery(Name = "entity")] public string? PrefillEntityId { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
-    private Incident incident = new Incident();
-    private List<MonitoredAsset>? entities;
-    private bool isSubmitting = false;
+    private Incident incident = new();
+    private List<MonitoredAsset> entities = new();
+    private List<Incident> entityIncidents = new();
+    private DateTime? startedLocal;
+    private bool isLoading = true;
+    private bool isSubmitting;
+    private bool submitted;
     private string? errorMessage;
 
-    private bool entityDropdownOpen = false;
-    private string entitySearch = string.Empty;
+    private static readonly (IncidentSeverity, string)[] SeverityOptions =
+    {
+        (IncidentSeverity.Low, "Minor, no one is blocked"),
+        (IncidentSeverity.Medium, "Degraded, workaround exists"),
+        (IncidentSeverity.High, "A store or team is blocked"),
+        (IncidentSeverity.Critical, "Sales or data at risk"),
+    };
 
     private string queryParam => StateContainer.Company is null ? "" : $"?c={StateContainer.Company.Id}";
     private bool IsEditMode => !string.IsNullOrEmpty(IncidentId);
-
-    private IEnumerable<MonitoredAsset> SearchedEntities
-    {
-        get
-        {
-            var all = entities ?? Enumerable.Empty<MonitoredAsset>();
-            var q = entitySearch?.Trim();
-            if (string.IsNullOrEmpty(q)) return all;
-            return all.Where(e =>
-                (e.Name?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (e.Owner?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (e.Location?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false) ||
-                (e.EntityType.ToString().Contains(q, StringComparison.OrdinalIgnoreCase)));
-        }
-    }
-
-    private MonitoredAsset? SelectedEntity =>
-        entities?.FirstOrDefault(e => e.Id == incident.EntityId);
-
-    // Muted secondary line for an entity row/trigger: owner · location · version · url.
-    private static string EntitySubtitle(MonitoredAsset e)
-    {
-        var parts = new List<string>();
-        if (!string.IsNullOrWhiteSpace(e.Owner)) parts.Add(e.Owner!);
-        if (!string.IsNullOrWhiteSpace(e.Location)) parts.Add(e.Location!);
-        if (!string.IsNullOrWhiteSpace(e.Version)) parts.Add($"v{e.Version}");
-        if (!string.IsNullOrWhiteSpace(e.Url)) parts.Add(e.Url!);
-        return string.Join(" · ", parts);
-    }
-
-    private void ToggleEntityDropdown()
-    {
-        entityDropdownOpen = !entityDropdownOpen;
-        if (entityDropdownOpen) entitySearch = string.Empty;
-    }
-
-    private void CloseEntityDropdown() => entityDropdownOpen = false;
-
-    private void SelectEntity(string id)
-    {
-        incident.EntityId = id;
-        entityDropdownOpen = false;
-        entitySearch = string.Empty;
-    }
+    private string BackHref => IsEditMode ? $"status/incidents/{IncidentId}{queryParam}" : $"status/incidents{queryParam}";
+    private MonitoredAsset? SelectedEntity => entities.FirstOrDefault(e => e.Id == incident.EntityId);
 
     protected override async Task OnInitializedAsync()
-    {
-        await LoadEntities();
-
-        if (IsEditMode)
-        {
-            await LoadIncident();
-        }
-        else
-        {
-            incident.Severity = IncidentSeverity.Medium;
-            incident.Status = IncidentStatus.Open;
-        }
-    }
-
-    private async Task LoadEntities()
     {
         try
         {
             var companyId = StateContainer.Company?.Id ?? "";
-            entities = await EntityService.GetEntitiesAsync(companyId);
+            entities = (await EntityService.GetEntitiesWithLatestStatusAsync(companyId)).Where(e => e.IsActive || IsEditMode).ToList();
+
+            if (IsEditMode)
+            {
+                var loaded = await IncidentService.GetIncidentAsync(IncidentId!);
+                if (loaded != null) incident = loaded;
+                else errorMessage = "Incident not found.";
+            }
+            else
+            {
+                incident.Severity = IncidentSeverity.Medium;
+                incident.Status = IncidentStatus.Open;
+                incident.StartedAt = DateTime.UtcNow;
+                if (AuthState is not null) incident.ReportedBy = (await AuthState).User.Identity?.Name;
+                if (!string.IsNullOrEmpty(PrefillEntityId) && entities.Any(e => e.Id == PrefillEntityId))
+                    incident.EntityId = PrefillEntityId;
+            }
+
+            startedLocal = incident.StartedAt.HasValue ? StatusUi.Local(incident.StartedAt.Value) : null;
+            await LoadEntityIncidents();
         }
         catch (Exception ex)
         {
-            await JSRuntime.InvokeVoidAsync("console.error", "Error loading entities:", ex.Message);
+            errorMessage = $"Could not load the form: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
         }
     }
 
-    private async Task LoadIncident()
+    private async Task OnEntityChanged(string id)
     {
-        try
-        {
-            var loaded = await IncidentService.GetIncidentAsync(IncidentId!);
-            if (loaded != null)
-                incident = loaded;
-            else
-                errorMessage = "Incident not found.";
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"Error loading incident: {ex.Message}";
-        }
+        incident.EntityId = id;
+        await LoadEntityIncidents();
+    }
+
+    private async Task LoadEntityIncidents()
+    {
+        entityIncidents = string.IsNullOrEmpty(incident.EntityId)
+            ? new()
+            : await IncidentService.GetIncidentsByEntityAsync(incident.EntityId);
     }
 
     private async Task HandleValidSubmit()
     {
         if (isSubmitting) return;
+        submitted = true;
+        errorMessage = null;
+        if (string.IsNullOrEmpty(incident.EntityId)) return;
 
+        isSubmitting = true;
         try
         {
-            isSubmitting = true;
-            errorMessage = null;
-            var companyId = StateContainer.Company?.Id ?? "";
+            incident.StartedAt = startedLocal.HasValue
+                ? DateTime.SpecifyKind(startedLocal.Value, DateTimeKind.Local).ToUniversalTime()
+                : incident.StartedAt ?? DateTime.UtcNow;
+            if (incident.Status == IncidentStatus.Resolved) incident.ResolvedAt ??= DateTime.UtcNow;
+            else incident.ResolvedAt = null;
 
             if (IsEditMode)
             {
-                var success = await IncidentService.UpdateIncidentAsync(incident);
-                if (success)
+                if (await IncidentService.UpdateIncidentAsync(incident))
                     Navigation.NavigateTo($"/status/incidents/{incident.Id}{queryParam}");
                 else
-                    errorMessage = "Error updating incident.";
+                    errorMessage = "The incident could not be saved. Check the fields and try again.";
             }
             else
             {
-                var created = await IncidentService.CreateIncidentAsync(companyId, incident);
+                var created = await IncidentService.CreateIncidentAsync(StateContainer.Company?.Id ?? "", incident);
                 if (created != null)
                     Navigation.NavigateTo($"/status/incidents/{created.Id}{queryParam}");
                 else
-                    errorMessage = "Error creating incident.";
+                    errorMessage = "The incident could not be reported. Check the fields and try again.";
             }
         }
         catch (Exception ex)
         {
-            errorMessage = $"An error occurred: {ex.Message}";
+            errorMessage = $"The incident could not be saved: {ex.Message}";
         }
         finally
         {
             isSubmitting = false;
         }
-    }
-
-    private void BackToIncidents()
-    {
-        Navigation.NavigateTo($"/status/incidents{queryParam}");
     }
 }

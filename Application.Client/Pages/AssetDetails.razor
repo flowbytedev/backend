@@ -1,575 +1,527 @@
 @page "/status/entities/{AssetId}"
-@using Application.Shared.Models
 @using Application.Shared.Enums
-@using Microsoft.AspNetCore.Authorization
-@using Microsoft.AspNetCore.Components.Forms
-@using Microsoft.FluentUI.AspNetCore.Components
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
 @inject MonitoredAssetClientService EntityService
 @inject AssetStatusHistoryClientService HistoryService
 @inject EntityAudienceClientService AudienceService
+@inject IncidentClientService IncidentService
+@inject StatusOverviewClientService OverviewService
 @inject StateContainer StateContainer
 @attribute [Authorize(Policy = PolicyNames.StatusRead)]
 
-<PageTitle>Entity Details - @(entity?.Name ?? "Loading...")</PageTitle>
+<PageTitle>@(entity?.Name ?? "Entity") · Status</PageTitle>
 
-<style>
-    /* ── Dark theme (data-theme="dark") — override hardcoded Tailwind light colors ── */
-    [data-theme="dark"] .sd-scope.min-h-screen { background-color: #0e1117; }
-    [data-theme="dark"] .sd-scope.bg-white { background-color: #181a20; }
-
-    [data-theme="dark"] .sd-scope .bg-white { background-color: #181a20; }
-    [data-theme="dark"] .sd-scope .bg-white\/60 { background-color: rgba(24,26,32,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-50 { background-color: #1e222b; }
-    [data-theme="dark"] .sd-scope .bg-gray-50\/60 { background-color: rgba(30,34,43,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-100 { background-color: #20242c; }
-
-    [data-theme="dark"] .sd-scope .text-gray-900 { color: #f3f4f6; }
-    [data-theme="dark"] .sd-scope .text-gray-800 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-700 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-600 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-500 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-400 { color: #767d89; }
-    [data-theme="dark"] .sd-scope .text-gray-300 { color: #4b515e; }
-
-    [data-theme="dark"] .sd-scope .border-gray-100 { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .border-gray-200 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-200\/80 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-300 { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-50:hover { background-color: #20242c; }
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-100:hover { background-color: #262b34; }
-    [data-theme="dark"] .sd-scope .hover\:bg-red-50:hover { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .hover\:bg-indigo-100:hover { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .hover\:border-gray-400:hover { border-color: #3a4150; }
-    [data-theme="dark"] .sd-scope .hover\:border-red-200:hover { border-color: rgba(239,68,68,0.30); }
-
-    [data-theme="dark"] .sd-scope input:not([type="checkbox"]):not([type="radio"]),
-    [data-theme="dark"] .sd-scope select,
-    [data-theme="dark"] .sd-scope textarea {
-        background-color: #12141a !important;
-        border-color: #2b303b !important;
-        color: #e6e9ef !important;
-    }
-    [data-theme="dark"] .sd-scope input::placeholder,
-    [data-theme="dark"] .sd-scope textarea::placeholder { color: #767d89 !important; }
-
-    [data-theme="dark"] .sd-scope .bg-red-50 { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .bg-red-100 { background-color: rgba(239,68,68,0.15); }
-    [data-theme="dark"] .sd-scope .border-red-200 { border-color: rgba(239,68,68,0.30); }
-    [data-theme="dark"] .sd-scope .text-red-400,
-    [data-theme="dark"] .sd-scope .text-red-500,
-    [data-theme="dark"] .sd-scope .text-red-600,
-    [data-theme="dark"] .sd-scope .text-red-700,
-    [data-theme="dark"] .sd-scope .text-red-800 { color: #f87171; }
-    [data-theme="dark"] .sd-scope .hover\:text-red-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-red-800:hover { color: #fca5a5; }
-
-    [data-theme="dark"] .sd-scope .bg-green-50 { background-color: rgba(34,197,94,0.12); }
-    [data-theme="dark"] .sd-scope .bg-green-100 { background-color: rgba(34,197,94,0.15); }
-    [data-theme="dark"] .sd-scope .border-green-200 { border-color: rgba(34,197,94,0.30); }
-    [data-theme="dark"] .sd-scope .text-green-500,
-    [data-theme="dark"] .sd-scope .text-green-600,
-    [data-theme="dark"] .sd-scope .text-green-700,
-    [data-theme="dark"] .sd-scope .text-green-800 { color: #4ade80; }
-
-    [data-theme="dark"] .sd-scope .bg-yellow-50 { background-color: rgba(245,158,11,0.10); }
-    [data-theme="dark"] .sd-scope .bg-yellow-100 { background-color: rgba(245,158,11,0.15); }
-    [data-theme="dark"] .sd-scope .border-yellow-200 { border-color: rgba(245,158,11,0.30); }
-    [data-theme="dark"] .sd-scope .text-yellow-700,
-    [data-theme="dark"] .sd-scope .text-yellow-800 { color: #fcd34d; }
-
-    [data-theme="dark"] .sd-scope .bg-orange-50 { background-color: rgba(249,115,22,0.10); }
-    [data-theme="dark"] .sd-scope .bg-orange-100 { background-color: rgba(249,115,22,0.15); }
-    [data-theme="dark"] .sd-scope .border-orange-200 { border-color: rgba(249,115,22,0.30); }
-    [data-theme="dark"] .sd-scope .text-orange-600,
-    [data-theme="dark"] .sd-scope .text-orange-700,
-    [data-theme="dark"] .sd-scope .text-orange-800 { color: #fdba74; }
-
-    [data-theme="dark"] .sd-scope .bg-blue-50 { background-color: rgba(59,130,246,0.10); }
-    [data-theme="dark"] .sd-scope .bg-blue-100 { background-color: rgba(59,130,246,0.15); }
-    [data-theme="dark"] .sd-scope .border-blue-200 { border-color: rgba(59,130,246,0.30); }
-    [data-theme="dark"] .sd-scope .text-blue-600,
-    [data-theme="dark"] .sd-scope .text-blue-700,
-    [data-theme="dark"] .sd-scope .text-blue-800 { color: #93c5fd; }
-    [data-theme="dark"] .sd-scope .text-blue-900 { color: #bfdbfe; }
-
-    [data-theme="dark"] .sd-scope .bg-purple-50 { background-color: rgba(168,85,247,0.12); }
-    [data-theme="dark"] .sd-scope .bg-purple-100 { background-color: rgba(168,85,247,0.18); }
-    [data-theme="dark"] .sd-scope .text-purple-700,
-    [data-theme="dark"] .sd-scope .text-purple-800 { color: #d8b4fe; }
-
-    [data-theme="dark"] .sd-scope .bg-indigo-50 { background-color: rgba(129,140,248,0.14); }
-    [data-theme="dark"] .sd-scope .bg-indigo-100 { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .border-indigo-200 { border-color: rgba(129,140,248,0.30); }
-    [data-theme="dark"] .sd-scope .text-indigo-600,
-    [data-theme="dark"] .sd-scope .text-indigo-700 { color: #a5b4fc; }
-    [data-theme="dark"] .sd-scope .text-indigo-800 { color: #c7d2fe; }
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-800:hover { color: #c7d2fe; }
-
-    [data-theme="dark"] .sd-scope .bg-gray-200 { background-color: #23272f; }
-    [data-theme="dark"] .sd-scope .bg-gray-300 { background-color: #363c48; }
-
-    [data-theme="dark"] .sd-scope .ring-white { --tw-ring-color: #181a20; }
-    [data-theme="dark"] .sd-scope .ring-offset-1 { --tw-ring-offset-color: #181a20; }
-</style>
-
-<div class="min-h-screen bg-gray-50 sd-scope">
-    @if (isLoading)
-    {
-        <div class="flex justify-center items-center h-64">
-            <div class="animate-spin rounded-full h-10 w-10 border-2 border-indigo-600 border-t-transparent"></div>
-        </div>
-    }
-    else if (entity == null)
-    {
-        <div class="max-w-3xl mx-auto px-4 py-20 text-center">
-            <div class="mx-auto w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center">
-                <svg class="w-7 h-7 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
+@* Styles: Application/wwwroot/status.css (.st-*). *@
+<div class="sc">
+    <div class="page-wrap st-wrap">
+        @if (isLoading)
+        {
+            <div class="card"><div class="st-loading"><span class="spin"></span> Loading entity…</div></div>
+        }
+        else if (entity is null)
+        {
+            <div class="card">
+                <div class="empty">
+                    <div class="dl-empty-icon">@StatusUi.Icon("inbox", 20)</div>
+                    <div class="empty-title">Entity not found</div>
+                    <div class="empty-text">It may have been deleted, or it belongs to another company.</div>
+                    <a class="btn btn-secondary btn-sm" href="@($"status/entities{queryParam}")">Back to entities</a>
+                </div>
             </div>
-            <h3 class="mt-4 text-lg font-semibold text-gray-900">Entity not found</h3>
-            <p class="mt-1 text-sm text-gray-500">The entity you're looking for doesn't exist.</p>
-            <button @onclick="BackToEntities"
-                    class="mt-6 inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
-                Back to Entities
-            </button>
-        </div>
-    }
-    else
-    {
-        <div class="w-full px-4 sm:px-6 py-6">
-            <!-- Back link -->
-            <button @onclick="BackToEntities"
-                    class="inline-flex items-center text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors mb-4">
-                <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-                </svg>
-                Entities
-            </button>
+        }
+        else
+        {
+            var status = entity.IsActive ? currentStatus : AssetStatus.Unknown;
+            var openIncidents = incidents.Where(i => i.Status != IncidentStatus.Resolved).OrderByDescending(i => i.Severity).ToList();
 
-            <!-- Header card -->
-            <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6 mb-5">
-                <div class="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-                    <div class="flex items-start gap-4 min-w-0">
-                        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center text-2xl">
-                            @entity.GetEntityTypeIcon()
-                        </div>
-                        <div class="min-w-0">
-                            <div class="flex flex-wrap items-center gap-2">
-                                <h1 class="text-2xl font-bold text-gray-900 truncate">@entity.Name</h1>
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium @entity.GetEntityTypeClass()">
-                                    @entity.EntityType.ToString()
-                                </span>
-                                @if (entity.IsCritical)
-                                {
-                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
-                                        <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                                            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
-                                        </svg>
-                                        Critical
-                                    </span>
-                                }
-                            </div>
-                            <div class="mt-1.5 flex items-center gap-2 text-sm">
-                                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium @GetAssetStatusClass(currentEntityStatus)">
-                                    <span class="w-1.5 h-1.5 rounded-full bg-current mr-1.5 opacity-70"></span>
-                                    @currentEntityStatus.ToString()
-                                </span>
-                                <span class="text-gray-300">·</span>
-                                <span class="text-gray-500">@(entity.IsActive ? "Active" : "Inactive")</span>
-                            </div>
-                            @if (!string.IsNullOrEmpty(entity.Description))
+            <div class="st-head">
+                <div class="st-head-left">
+                    <a class="st-back" href="@($"status/entities{queryParam}")" title="Back to entities" aria-label="Back to entities">@StatusUi.Icon("arrow-left", 16)</a>
+                    <div class="st-head-main">
+                        <div class="st-crumbs">
+                            <a href="@($"status/entities{queryParam}")">Entities</a>
+                            @if (!string.IsNullOrWhiteSpace(entity.Group) && entity.Group != "Default")
                             {
-                                <p class="mt-3 text-sm text-gray-600 max-w-2xl">@entity.Description</p>
+                                @StatusUi.Icon("chev-right", 12)<span>@entity.Group</span>
                             }
                         </div>
+                        <div class="st-title-row">
+                            <span class="st-tile">@StatusUi.TypeSvg(entity.EntityType, 20)</span>
+                            <h1 class="page-title">@entity.Name</h1>
+                            <span class="badge badge-neutral">@StatusUi.TypeLabel(entity.EntityType)</span>
+                            @if (entity.IsCritical) { <span class="badge badge-danger">Critical</span> }
+                            @if (!entity.IsActive)
+                            {
+                                <span class="badge badge-neutral">Inactive · not monitored</span>
+                            }
+                            else
+                            {
+                                <span class="st-status is-lg @StatusUi.Cls(status)"><span class="st-dot @(StatusUi.IsUnhealthy(status) ? "is-live" : "")"></span> @StatusUi.Label(status)</span>
+                            }
+                        </div>
+                        <div class="st-meta">
+                            @if (!string.IsNullOrWhiteSpace(entity.Description)) { <span>@entity.Description</span> }
+                            @if (!string.IsNullOrWhiteSpace(entity.Url))
+                            {
+                                <span class="st-meta-item">@StatusUi.Icon("link", 11)
+                                    @if (IsHttpUrl(entity.Url))
+                                    {
+                                        <a class="st-mono" href="@entity.Url" target="_blank" rel="noopener noreferrer">@entity.Url</a>
+                                    }
+                                    else
+                                    {
+                                        <span class="st-mono">@entity.Url</span>
+                                    }
+                                </span>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(entity.Owner)) { <span>Owner <b style="color:var(--text-secondary);font-weight:500">@entity.Owner</b></span> }
+                            @if (!string.IsNullOrWhiteSpace(entity.Location)) { <span>@entity.Location</span> }
+                        </div>
                     </div>
+                </div>
+                <div class="st-head-actions">
                     <AuthorizeView Roles="@writeRoles">
                         <Authorized>
-                            <div class="flex items-center gap-2 flex-shrink-0">
-                                <button @onclick="OpenUpdateStatusModal"
-                                        class="inline-flex items-center px-3.5 py-2 text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
-                                    <svg class="w-4 h-4 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                                    </svg>
-                                    Update Status
-                                </button>
-                                <button @onclick="EditEntity" title="Edit"
-                                        class="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-gray-300 text-gray-600 bg-white hover:bg-gray-50 transition-colors">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                                    </svg>
-                                </button>
-                                <button @onclick="DeleteEntity" title="Delete"
-                                        class="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-gray-300 text-red-600 bg-white hover:bg-red-50 hover:border-red-200 transition-colors">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path>
-                                    </svg>
-                                </button>
-                            </div>
+                            <button class="btn btn-secondary" type="button" @onclick="OpenUpdateStatusModal">@StatusUi.Icon("activity", 14) Update status</button>
+                            <a class="btn btn-secondary" href="@($"status/incidents/create{QueryWith("entity", entity.Id)}")">@StatusUi.Icon("alert", 14) Report incident</a>
+                        </Authorized>
+                    </AuthorizeView>
+                    <a class="btn btn-secondary" href="@($"status/entities/{entity.Id}/dependencies{queryParam}")">@StatusUi.Icon("branch", 14) Dependencies</a>
+                    <AuthorizeView Roles="@writeRoles">
+                        <Authorized>
+                            <a class="btn btn-primary" href="@($"status/entities/{entity.Id}/edit{queryParam}")">@StatusUi.Icon("edit", 14) Edit</a>
+                            <button class="btn btn-ghost btn-icon" type="button" title="Delete entity" aria-label="Delete entity" @onclick="DeleteEntity">@StatusUi.Icon("trash", 15)</button>
                         </Authorized>
                     </AuthorizeView>
                 </div>
             </div>
 
-            <!-- Main Content -->
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
-                <!-- Left Column - Main Info -->
-                <div class="lg:col-span-2 space-y-5">
-                    <!-- Basic Information -->
-                    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                        <h3 class="text-base font-semibold text-gray-900 mb-5">Details</h3>
-                        <dl class="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-3">
-                            <div>
-                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Type</dt>
-                                <dd class="mt-1 text-sm text-gray-900">@entity.EntityType.ToString()</dd>
+            @if (openIncidents.Any())
+            {
+                var top = openIncidents[0];
+                <div class="st-callout @(top.Severity >= IncidentSeverity.High ? "is-danger" : "is-warning") st-page-callout">
+                    @StatusUi.Icon("alert", 15)
+                    <div>
+                        <b>@(openIncidents.Count == 1 ? "Open incident:" : $"{openIncidents.Count} open incidents, most severe:")</b>
+                        <a href="@($"status/incidents/{top.Id}{queryParam}")">@top.Title</a>
+                        · @top.Severity · @top.Status · open for @StatusUi.Duration(top.Duration)@(string.IsNullOrWhiteSpace(top.AssignedTo) ? "" : $" · {top.AssignedTo}")
+                    </div>
+                </div>
+            }
+
+            var stats30 = UptimeFor(30);
+            var stats90 = UptimeFor(90);
+            var inc90 = incidents.Count(i => i.StartedAt >= DateTime.UtcNow.AddDays(-90));
+            var resolvedDurations = incidents.Where(i => i.IsResolved && i.Duration.HasValue).Select(i => i.Duration!.Value.TotalMinutes).ToList();
+
+            <div class="st-kpis">
+                <div class="st-kpi @(stats30.pct is < 99 ? "is-danger" : stats30.pct is < 99.9 ? "is-warning" : "")">
+                    <div class="st-kpi-label">Uptime, 30 days</div>
+                    <div class="st-kpi-value">@(stats30.pct?.ToString("0.0") ?? "—")<small>@(stats30.pct.HasValue ? "%" : "")</small></div>
+                    <div class="st-kpi-sub">@(stats30.withData == 0 ? "no data yet" : $"{stats30.online} of {stats30.withData} days fully online")</div>
+                </div>
+                <div class="st-kpi">
+                    <div class="st-kpi-label">Uptime, 90 days</div>
+                    <div class="st-kpi-value">@(stats90.pct?.ToString("0.0") ?? "—")<small>@(stats90.pct.HasValue ? "%" : "")</small></div>
+                    <div class="st-kpi-sub">@(stats90.withData == 0 ? "no data yet" : $"{stats90.withData} days with checks")</div>
+                </div>
+                <div class="st-kpi @(StatusUi.IsUnhealthy(status) ? "is-warning" : "")">
+                    <div class="st-kpi-label">Response, last check</div>
+                    <div class="st-kpi-value">@(latest?.ResponseTime is double rt ? rt.ToString("#,0").Replace(",", " ") : "—")<small>@(latest?.ResponseTime.HasValue == true ? "ms" : "")</small></div>
+                    <div class="st-kpi-sub">@(AvgResponse is double a ? $"avg {StatusUi.Ms(a)} over {historyDays}d" : "no response times recorded")</div>
+                </div>
+                <div class="st-kpi">
+                    <div class="st-kpi-label">Last check</div>
+                    <div class="st-kpi-value" style="font-size:18px">@StatusUi.Ago(latest?.CheckedAt)</div>
+                    <div class="st-kpi-sub">@StatusUi.FullWhen(latest?.CheckedAt)</div>
+                </div>
+                <div class="st-kpi @(openIncidents.Any() ? "is-danger" : "")">
+                    <div class="st-kpi-label">Incidents, 90 days</div>
+                    <div class="st-kpi-value">@inc90</div>
+                    <div class="st-kpi-sub">@openIncidents.Count open@(resolvedDurations.Any() ? $" · MTTR {StatusUi.Duration(TimeSpan.FromMinutes(resolvedDurations.Average()))}" : "")</div>
+                </div>
+            </div>
+
+            <div class="st-cols">
+                <div class="st-col">
+                    <div class="card">
+                        <div class="card-head">
+                            <h3 class="card-title">Availability</h3>
+                            <span class="st-card-sub">last @stripDays days</span>
+                            <span class="st-card-spacer"></span>
+                            <div class="dl-seg" role="group" aria-label="Range">
+                                @foreach (var d in new[] { 30, 90 })
+                                {
+                                    var dd = d;
+                                    <button type="button" class="dl-seg-btn @(stripDays == dd ? "is-active" : "")" @onclick="() => { stripDays = dd; CloseDay(); }">@(dd)d</button>
+                                }
                             </div>
-                            <div>
-                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">State</dt>
-                                <dd class="mt-1 flex items-center text-sm text-gray-900">
-                                    <span class="w-2 h-2 @(entity.IsActive ? "bg-green-500" : "bg-gray-400") rounded-full mr-2"></span>
-                                    @(entity.IsActive ? "Active" : "Inactive")
-                                </dd>
-                            </div>
-                            @if (!string.IsNullOrEmpty(entity.Owner))
+                        </div>
+                        <div class="card-body">
+                            @if (overviewEntity is null)
                             {
-                                <div>
-                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Owner</dt>
-                                    <dd class="mt-1 text-sm text-gray-900">@entity.Owner</dd>
+                                <div class="st-card-empty">No availability data yet. Days appear here once the ping job has checked this entity.</div>
+                            }
+                            else
+                            {
+                                var strip = StatusUi.LastDays(overviewEntity.Days, stripDays);
+                                <AvailabilityStrip Days="@strip" Size="lg" Interactive="true" MarkToday="true" Name="@entity.Name"
+                                                   SelectedDate="@openDate" OnDayClick="ToggleDay" />
+                                <div class="st-strip-axis">
+                                    <span>@strip.First().Date.ToString("d MMM")</span>
+                                    <span>@strip[strip.Count / 2].Date.ToString("d MMM")</span>
+                                    <span>Today</span>
+                                </div>
+                                @if (openDate.HasValue)
+                                {
+                                    <div class="st-day">
+                                        <div class="st-day-head">
+                                            <span>@openDate.Value.ToString("d MMMM yyyy") · @(dayLoading ? "loading…" : StatusUi.Plural(dayEvents.Count, "check"))</span>
+                                            <button type="button" class="st-link" @onclick="CloseDay">Close</button>
+                                        </div>
+                                        @if (!dayLoading && !dayEvents.Any())
+                                        {
+                                            <div class="st-day-empty">No checks were recorded on this day.</div>
+                                        }
+                                        else if (!dayLoading)
+                                        {
+                                            <ul class="st-day-list">
+                                                @foreach (var ev in dayEvents)
+                                                {
+                                                    <li>
+                                                        <time>@StatusUi.Local(ev.CheckedAt).ToString("HH:mm")</time>
+                                                        <span class="st-status @StatusUi.Cls(ev.Status)"><span class="st-dot"></span> @StatusUi.Label(ev.Status)</span>
+                                                        <span class="st-day-ms">@(ev.ResponseTime.HasValue ? StatusUi.Ms(ev.ResponseTime) : "")</span>
+                                                        <span class="st-day-msg" title="@ev.StatusMessage">@ev.StatusMessage</span>
+                                                    </li>
+                                                }
+                                            </ul>
+                                        }
+                                    </div>
+                                }
+                                <div class="st-legend" style="margin-top:14px">
+                                    <span><i class="s-online"></i> Online</span><span><i class="s-degraded"></i> Degraded</span>
+                                    <span><i class="s-offline"></i> Offline / error</span><span><i class="s-maintenance"></i> Maintenance</span>
+                                    <span><i class="s-none"></i> No data</span>
+                                    <span class="st-legend-note">Click a day to see its checks</span>
                                 </div>
                             }
-                            @if (!string.IsNullOrEmpty(entity.Version))
-                            {
-                                <div>
-                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Version</dt>
-                                    <dd class="mt-1 text-sm text-gray-900">@entity.Version</dd>
-                                </div>
-                            }
-                            @if (!string.IsNullOrEmpty(entity.Location))
-                            {
-                                <div>
-                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Location</dt>
-                                    <dd class="mt-1 text-sm text-gray-900">@entity.Location</dd>
-                                </div>
-                            }
-                            @if (!string.IsNullOrEmpty(entity.Url))
-                            {
-                                <div class="sm:col-span-2 lg:col-span-3">
-                                    <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">URL</dt>
-                                    <dd class="mt-1 text-sm">
-                                        <a href="@entity.Url" target="_blank" class="inline-flex items-center text-indigo-600 hover:text-indigo-800 break-all">
-                                            @entity.Url
-                                            <svg class="inline w-3.5 h-3.5 ml-1 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                                            </svg>
-                                        </a>
-                                    </dd>
-                                </div>
-                            }
-                        </dl>
+                        </div>
                     </div>
 
-                    <!-- Dependencies & Impact -->
-                    <DependencyImpact EntityId="@entity.Id" />
+                    <div class="card">
+                        <div class="card-head">
+                            <h3 class="card-title">Response time</h3>
+                            <span class="st-card-sub">last @(historyDays == 1 ? "24 hours" : $"{historyDays} days")</span>
+                            <span class="st-card-spacer"></span>
+                            <div class="dl-seg" role="group" aria-label="Range">
+                                @foreach (var d in new[] { 1, 7, 30 })
+                                {
+                                    var dd = d;
+                                    <button type="button" class="dl-seg-btn @(historyDays == dd ? "is-active" : "")" @onclick="() => SetHistoryDays(dd)">@(dd == 1 ? "24h" : $"{dd}d")</button>
+                                }
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            @if (historyLoading)
+                            {
+                                <div class="st-load"><span class="spin"></span> Loading checks…</div>
+                            }
+                            else
+                            {
+                                <ResponseTimeChart History="@history" />
+                            }
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="tabs" style="margin:0;padding:0 14px" role="tablist">
+                            <button class="tab @(tab == "checks" ? "is-active" : "")" type="button" role="tab" @onclick='() => tab = "checks"'>Recent checks <span class="tab-count">@history.Count</span></button>
+                            <button class="tab @(tab == "incidents" ? "is-active" : "")" type="button" role="tab" @onclick='() => tab = "incidents"'>Incidents <span class="tab-count">@incidents.Count</span></button>
+                        </div>
+                        @if (tab == "checks")
+                        {
+                            var rows = (changesOnly ? StatusChanges() : history.OrderByDescending(h => h.CheckedAt)).Take(checksShown).ToList();
+                            <div class="card-body" style="padding:10px 14px;border-bottom:1px solid var(--border)">
+                                <button type="button" class="switch-row" style="background:none;border:0;padding:0" @onclick="() => changesOnly = !changesOnly">
+                                    <span class="switch @(changesOnly ? "is-on" : "")"></span><span class="switch-label">Status changes only</span>
+                                </button>
+                            </div>
+                            @if (!rows.Any())
+                            {
+                                <div class="st-card-empty">No checks in the last @(historyDays == 1 ? "24 hours" : $"{historyDays} days").</div>
+                            }
+                            else
+                            {
+                                <div class="st-checks-wrap">
+                                    <table class="st-checks">
+                                        @foreach (var h in rows)
+                                        {
+                                            <tr>
+                                                <td class="is-time">@(h.CheckedAt.HasValue ? StatusUi.Local(h.CheckedAt.Value).ToString(historyDays == 1 ? "HH:mm:ss" : "d MMM HH:mm") : "—")</td>
+                                                <td><span class="st-status @StatusUi.Cls(h.Status)"><span class="st-dot"></span> @StatusUi.Label(h.Status)</span></td>
+                                                <td class="is-msg" title="@h.StatusMessage">@(string.IsNullOrWhiteSpace(h.StatusMessage) ? "—" : h.StatusMessage)</td>
+                                                <td class="is-ms">@(h.ResponseTime.HasValue ? StatusUi.Ms(h.ResponseTime) : "")</td>
+                                            </tr>
+                                        }
+                                    </table>
+                                </div>
+                                <div class="dl-footer">
+                                    <span class="dl-footer-text">Local time · <strong>@rows.Count</strong> of @(changesOnly ? StatusChanges().Count() : history.Count)</span>
+                                    @if (rows.Count < (changesOnly ? StatusChanges().Count() : history.Count))
+                                    {
+                                        <button class="st-link" type="button" @onclick="() => checksShown += 25">Show more</button>
+                                    }
+                                </div>
+                            }
+                        }
+                        else
+                        {
+                            @if (!incidents.Any())
+                            {
+                                <div class="st-card-empty">No incidents recorded for this entity.</div>
+                            }
+                            else
+                            {
+                                <ul class="st-inc">
+                                    @foreach (var i in incidents.OrderByDescending(i => i.StartedAt).Take(20))
+                                    {
+                                        <li class="@(i.Status == IncidentStatus.Resolved ? "" : StatusUi.Cls(i.Severity))">
+                                            <div class="st-inc-text">
+                                                <a class="st-inc-title" href="@($"status/incidents/{i.Id}{queryParam}")">@i.Title</a>
+                                                <div class="st-inc-meta">
+                                                    <span class="badge @StatusUi.Cls(i.Status)"><i></i>@i.Status</span>
+                                                    <span class="badge @StatusUi.Cls(i.Severity)"><i></i>@i.Severity</span>
+                                                    <span>@StatusUi.When(i.StartedAt)</span>
+                                                </div>
+                                            </div>
+                                            <span class="st-inc-dur">@StatusUi.Duration(i.Duration)@(i.IsResolved ? "" : " · ongoing")</span>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        }
+                    </div>
 
                     @if (entity.EntityType == AssetType.Server)
                     {
-                        <ServerManagement EntityId="@entity.Id" />
+                        <div class="st-legacy"><ServerManagement EntityId="@entity.Id" /></div>
                     }
-
                     @if (entity.EntityType == AssetType.Dataset
                          && !string.IsNullOrEmpty(entity.Url)
                          && entity.Url.Contains("powerbi.com", StringComparison.OrdinalIgnoreCase))
                     {
-                        <PowerBiDataset EntityId="@entity.Id" EntityUrl="@entity.Url" />
+                        <div class="st-legacy"><PowerBiDataset EntityId="@entity.Id" EntityUrl="@entity.Url" /></div>
                     }
-
                     @if (entity.EntityType == AssetType.Database)
                     {
-                        <DatabaseTables EntityId="@entity.Id" />
+                        <div class="st-legacy"><DatabaseTables EntityId="@entity.Id" /></div>
                     }
-
                     @if (entity.EntityType == AssetType.Table)
                     {
-                        <TableFreshness EntityId="@entity.Id" />
+                        <div class="st-legacy"><TableFreshness EntityId="@entity.Id" /></div>
                     }
                 </div>
 
-                <!-- Right Column - Sidebar -->
-                <div class="space-y-5">
-                    <!-- Quick Actions -->
-                    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                        <h3 class="text-base font-semibold text-gray-900 mb-4">Quick Actions</h3>
-                        <div class="space-y-2">
-                            <AuthorizeView Roles="@writeRoles" Context="editCtx">
-                                <Authorized>
-                                    <button @onclick="EditEntity"
-                                            class="w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                                        <svg class="mr-3 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                                        </svg>
-                                        Edit Entity
-                                    </button>
-                                </Authorized>
-                            </AuthorizeView>
-                            <button @onclick="ManageDependencies"
-                                    class="w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                                <svg class="mr-3 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
-                                </svg>
-                                Manage Dependencies
-                            </button>
-                            <AuthorizeView Roles="@writeRoles" Context="statusCtx">
-                                <Authorized>
-                                    <button @onclick="OpenUpdateStatusModal"
-                                            class="w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                                        <svg class="mr-3 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                                        </svg>
-                                        Update Status
-                                    </button>
-                                </Authorized>
-                            </AuthorizeView>
-                            @if (!string.IsNullOrEmpty(entity.Url))
+                <div class="st-col">
+                    <DependencyImpact EntityId="@entity.Id" />
+
+                    <div class="card">
+                        <div class="card-head"><h3 class="card-title">Details</h3></div>
+                        <div class="card-body">
+                            <dl class="st-dl">
+                                <dt>Type</dt><dd>@StatusUi.TypeLabel(entity.EntityType)</dd>
+                                <dt>Group</dt><dd>@(string.IsNullOrWhiteSpace(entity.Group) ? "—" : entity.Group)</dd>
+                                @if (!string.IsNullOrWhiteSpace(entity.Url)) { <dt>URL or host</dt><dd><span class="st-mono">@entity.Url</span></dd> }
+                                @if (!string.IsNullOrWhiteSpace(entity.Version)) { <dt>Version</dt><dd>@entity.Version</dd> }
+                                @if (!string.IsNullOrWhiteSpace(entity.Owner)) { <dt>Owner</dt><dd>@entity.Owner</dd> }
+                                @if (!string.IsNullOrWhiteSpace(entity.Location)) { <dt>Location</dt><dd>@entity.Location</dd> }
+                                <dt>Monitoring</dt><dd>@(entity.IsActive ? "Active" : "Inactive")@(entity.IsCritical ? " · critical" : "")</dd>
+                                <dt>Created</dt><dd>@StatusUi.FullWhen(entity.CreatedOn)</dd>
+                                <dt>Modified</dt><dd>@StatusUi.FullWhen(entity.ModifiedOn)</dd>
+                                <dt>ID</dt><dd><span class="st-mono" style="color:var(--text-muted)">@entity.Id</span></dd>
+                            </dl>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-head">
+                            <h3 class="card-title">People</h3>
+                            <span class="st-card-sub">notified about incidents</span>
+                        </div>
+                        <div class="card-body">
+                            @if (!audience.Any())
                             {
-                                <a href="@entity.Url" target="_blank"
-                                   class="w-full flex items-center px-3 py-2 text-sm font-medium rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                                    <svg class="mr-3 h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                                    </svg>
-                                    Open URL
-                                </a>
+                                <div class="st-muted" style="font-size:12.5px">Nobody is assigned yet. Owners and maintainers receive incident emails.</div>
                             }
+                            else
+                            {
+                                <ul class="st-people">
+                                    @foreach (var member in audience.OrderBy(a => a.AudienceType).ThenBy(a => a.DisplayName ?? a.Email))
+                                    {
+                                        var m = member;
+                                        <li>
+                                            <span class="st-av">@StatusUi.Initials(m.DisplayName ?? m.Email)</span>
+                                            <div class="st-who"><b>@(m.DisplayName ?? m.Email)</b><small>@m.Email</small></div>
+                                            <span class="badge @(m.AudienceType == EntityAudienceType.Owner ? "badge-accent" : "badge-neutral")">@m.AudienceType</span>
+                                            <AuthorizeView Roles="@writeRoles" Context="rmCtx">
+                                                <Authorized>
+                                                    <button class="dl-act" style="opacity:1" type="button" title="Remove" aria-label="Remove @(m.DisplayName ?? m.Email)" @onclick="() => RemoveAudienceMember(m)">@StatusUi.Icon("x", 13)</button>
+                                                </Authorized>
+                                            </AuthorizeView>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            <AuthorizeView Roles="@writeRoles" Context="addCtx">
+                                <Authorized>
+                                    <div class="st-people-add">
+                                        <select class="select" aria-label="Person" @bind="selectedAudienceUserId">
+                                            <option value="">Add a person…</option>
+                                            @foreach (var u in assignableUsers.Where(u => !string.IsNullOrEmpty(u.Id)).OrderBy(u => u.Email ?? u.UserName))
+                                            {
+                                                <option value="@u.Id">@(u.Email ?? u.UserName)</option>
+                                            }
+                                        </select>
+                                        <select class="select" aria-label="Role" @bind="selectedAudienceType">
+                                            <option value="@EntityAudienceType.Owner">Owner</option>
+                                            <option value="@EntityAudienceType.Maintainer">Maintainer</option>
+                                            <option value="@EntityAudienceType.Stakeholder">Stakeholder</option>
+                                        </select>
+                                        <button class="btn btn-secondary" type="button" disabled="@(string.IsNullOrEmpty(selectedAudienceUserId) || isSavingAudience)" @onclick="AddAudienceMember">
+                                            @(isSavingAudience ? "Adding…" : "Add")
+                                        </button>
+                                    </div>
+                                </Authorized>
+                            </AuthorizeView>
                         </div>
                     </div>
 
-                    <!-- Entity Metadata -->
-                    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                        <h3 class="text-base font-semibold text-gray-900 mb-4">Entity Info</h3>
-                        <dl class="space-y-4">
-                            <div>
-                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Created</dt>
-                                <dd class="mt-1 text-sm text-gray-900">@(entity.CreatedOn?.ToString("MMM dd, yyyy") ?? "Unknown")</dd>
-                            </div>
-                            <div>
-                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Last Modified</dt>
-                                <dd class="mt-1 text-sm text-gray-900">@(entity.ModifiedOn?.ToString("MMM dd, yyyy") ?? "Never")</dd>
-                            </div>
-                            <div>
-                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Entity ID</dt>
-                                <dd class="mt-1 text-xs text-gray-500 font-mono break-all">@entity.Id</dd>
-                            </div>
-                        </dl>
-                    </div>
-
-                    <!-- Audience -->
-                    <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                        <div class="flex items-center justify-between mb-5">
-                            <div>
-                                <h3 class="text-base font-semibold text-gray-900">Audience</h3>
-                                <p class="text-xs text-gray-500 mt-0.5">Notified by email when an incident is opened on this entity (or anything it depends on).</p>
-                            </div>
+                    @if (!string.IsNullOrWhiteSpace(entity.Metadata))
+                    {
+                        <div class="card">
+                            <div class="card-head"><h3 class="card-title">Metadata</h3><span class="st-card-spacer"></span><span class="chip">json</span></div>
+                            <div class="card-body"><pre class="code">@PrettyJson(entity.Metadata)</pre></div>
                         </div>
-
-                        <AuthorizeView Roles="@writeRoles" Context="audienceCtx">
-                            <Authorized>
-                                <div class="flex flex-col gap-2 mb-4">
-                                    <FluentCombobox TOption="EntityAudienceClientService.AssignableUser"
-                                                    Items="@assignableUsers"
-                                                    OptionText="@(u => string.IsNullOrWhiteSpace(u.UserName) ? u.Email : $"{u.UserName} ({u.Email})")"
-                                                    OptionValue="@(u => u.Id)"
-                                                    @bind-SelectedOption="selectedAudienceUser"
-                                                    Autocomplete="ComboboxAutocomplete.Both"
-                                                    Placeholder="Search users by name or email…"
-                                                    Class="w-full" />
-                                    <div class="flex gap-2">
-                                        <FluentSelect @bind-Value="selectedAudienceTypeString" TOption="string" Class="flex-1">
-                                            <FluentOption Value="Owner" TOption="string">Owner</FluentOption>
-                                            <FluentOption Value="Maintainer" TOption="string">Maintainer</FluentOption>
-                                            <FluentOption Value="Stakeholder" TOption="string">Stakeholder</FluentOption>
-                                        </FluentSelect>
-                                        <FluentButton Appearance="Appearance.Accent" @onclick="AddAudienceMember"
-                                                      Disabled="@(selectedAudienceUser is null || isSavingAudience)">
-                                            @(isSavingAudience ? "Adding..." : "Add")
-                                        </FluentButton>
-                                    </div>
-                                </div>
-                            </Authorized>
-                        </AuthorizeView>
-
-                        @if (audience.Any())
-                        {
-                            <div class="space-y-2.5">
-                                @foreach (var member in audience)
-                                {
-                                    <div class="flex items-center p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium @GetAudienceTypeClass(member.AudienceType) flex-shrink-0 mr-3">
-                                            @member.AudienceType.ToString()
-                                        </span>
-                                        <div class="flex-1 min-w-0">
-                                            <span class="text-sm font-medium text-gray-900">@(string.IsNullOrWhiteSpace(member.DisplayName) ? member.Email : member.DisplayName)</span>
-                                            <p class="mt-0.5 text-xs text-gray-500 break-all">@member.Email</p>
-                                        </div>
-                                        <AuthorizeView Roles="@writeRoles" Context="removeCtx">
-                                            <Authorized>
-                                                <button @onclick="() => RemoveAudienceMember(member.Id)" title="Remove"
-                                                        class="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-lg border border-gray-300 text-red-600 bg-white hover:bg-red-50 hover:border-red-200 transition-colors ml-3">
-                                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
-                                                    </svg>
-                                                </button>
-                                            </Authorized>
-                                        </AuthorizeView>
-                                    </div>
-                                }
-                            </div>
-                        }
-                        else
-                        {
-                            <div class="text-center py-8 border border-dashed border-gray-200 rounded-lg">
-                                <svg class="mx-auto h-7 w-7 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a4 4 0 00-3-3.87M9 20H4v-2a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4z"></path>
-                                </svg>
-                                <p class="mt-2 text-sm text-gray-400">No audience members yet</p>
-                            </div>
-                        }
-                    </div>
+                    }
                 </div>
             </div>
-        </div>
-    }
-</div>
 
-<!-- Update Status Modal -->
-@if (showStatusUpdateModal)
-{
-    <FluentDialog>
-        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full sd-scope">
-            <div class="flex items-center justify-between p-6 border-b border-gray-200 bg-gray-50 rounded-t-lg">
-                <div class="flex items-center space-x-3">
-                    <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                        </svg>
-                    </div>
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-900">Update Entity Status</h3>
-                        <p class="text-sm text-gray-500">Change the entity status and manage incidents</p>
-                    </div>
-                </div>
-            </div>
-            <div class="p-6">
-                <EditForm Model="statusUpdateModel" OnValidSubmit="HandleStatusUpdate">
-                    <DataAnnotationsValidator />
-                    <ValidationSummary class="text-red-600 text-sm mb-4" />
-
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Current Status</label>
-                            <div class="p-3 bg-gray-50 rounded-lg">
-                                <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium @GetAssetStatusClass(currentEntityStatus)">
-                                    @currentEntityStatus.ToString()
+            @if (showStatusUpdateModal)
+            {
+                <div class="fb-modal-backdrop" @onclick="CloseStatusUpdateModal">
+                    <div class="fb-modal" role="dialog" aria-modal="true" aria-labelledby="st-status-title" @onclick:stopPropagation="true">
+                        <div class="fb-modal-head">
+                            <div class="fb-modal-title" id="st-status-title">Update status of @entity.Name</div>
+                            <button type="button" class="st-modal-x" aria-label="Close" @onclick="CloseStatusUpdateModal">@StatusUi.Icon("x", 15)</button>
+                        </div>
+                        <div class="fb-modal-body">
+                            <div class="field">
+                                <span class="field-label">Current</span>
+                                <span class="st-status is-lg @StatusUi.Cls(currentStatus)"><span class="st-dot"></span> @StatusUi.Label(currentStatus)
+                                    @if (latest?.CheckedAt is not null) { <span class="st-muted" style="font-weight:400">· since @StatusUi.When(latest.CheckedAt)</span> }
                                 </span>
                             </div>
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                New Status <span class="text-red-500">*</span>
-                            </label>
-                            <FluentSelect @bind-Value="selectedStatusString" TOption="string" Class="w-full">
-                                <FluentOption Value="Unknown" TOption="string">Unknown</FluentOption>
-                                <FluentOption Value="Online" TOption="string">Online</FluentOption>
-                                <FluentOption Value="Offline" TOption="string">Offline</FluentOption>
-                                <FluentOption Value="Degraded" TOption="string">Degraded</FluentOption>
-                                <FluentOption Value="Maintenance" TOption="string">Maintenance</FluentOption>
-                                <FluentOption Value="Error" TOption="string">Error</FluentOption>
-                            </FluentSelect>
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">
-                                Status Message <span class="text-red-500">*</span>
-                            </label>
-                            <FluentTextArea @bind-Value="statusUpdateModel.StatusMessage" Rows="3"
-                                            Placeholder="Provide details about this status change..."
-                                            Class="w-full" Required="true" />
-                        </div>
-
-                        @if (statusUpdateModel.Status != AssetStatus.Online && currentEntityStatus == AssetStatus.Online)
-                        {
-                            <div class="bg-yellow-50 border border-yellow-200 rounded-md p-3">
-                                <p class="text-sm text-yellow-700">
-                                    This will create a new incident for the status change from Online to @statusUpdateModel.Status.
-                                </p>
+                            <div class="field">
+                                <label class="field-label" for="st-new-status">New status <b>*</b></label>
+                                <select class="select" id="st-new-status" @bind="newStatus">
+                                    @foreach (var s in new[] { AssetStatus.Online, AssetStatus.Degraded, AssetStatus.Maintenance, AssetStatus.Offline, AssetStatus.Error, AssetStatus.Unknown })
+                                    {
+                                        <option value="@s">@StatusUi.Label(s)</option>
+                                    }
+                                </select>
                             </div>
-                        }
-                        else if (statusUpdateModel.Status == AssetStatus.Online && currentEntityStatus != AssetStatus.Online)
-                        {
-                            <div class="bg-green-50 border border-green-200 rounded-md p-3">
-                                <p class="text-sm text-green-700">
-                                    This will resolve any open incidents for this entity and update them as resolved.
-                                </p>
+                            <div class="field">
+                                <label class="field-label" for="st-status-msg">Message <b>*</b></label>
+                                <textarea class="textarea" id="st-status-msg" rows="3" placeholder="What changed, and why" @bind="statusMessage" @bind:event="oninput"></textarea>
+                                <span class="field-help">Recorded in the check history.</span>
                             </div>
-                        }
+                            @if (newStatus != AssetStatus.Online && currentStatus == AssetStatus.Online)
+                            {
+                                <div class="st-callout is-warning">@StatusUi.Icon("alert", 14)<div>Moving from Online to @StatusUi.Label(newStatus) <b>opens a new incident</b> for this entity.</div></div>
+                            }
+                            else if (newStatus == AssetStatus.Online && currentStatus != AssetStatus.Online)
+                            {
+                                <div class="st-callout is-success">@StatusUi.Icon("check-circle", 14)<div>Moving to Online <b>resolves this entity's open incidents</b>.</div></div>
+                            }
+                        </div>
+                        <div class="fb-modal-foot">
+                            <button type="button" class="btn btn-ghost" @onclick="CloseStatusUpdateModal">Cancel</button>
+                            <button type="button" class="btn btn-primary" disabled="@(string.IsNullOrWhiteSpace(statusMessage) || isUpdatingStatus)" @onclick="HandleStatusUpdate">
+                                @(isUpdatingStatus ? "Updating…" : "Update status")
+                            </button>
+                        </div>
                     </div>
+                </div>
+            }
+        }
+    </div>
 
-                    <div class="flex justify-end space-x-3 pt-6 mt-6 border-t border-gray-200">
-                        <FluentButton Appearance="Appearance.Neutral" @onclick="CloseStatusUpdateModal">Cancel</FluentButton>
-                        <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Submit"
-                                      Disabled="@(string.IsNullOrWhiteSpace(statusUpdateModel.StatusMessage) || isUpdatingStatus)">
-                            @(isUpdatingStatus ? "Updating..." : "Update Status")
-                        </FluentButton>
-                    </div>
-                </EditForm>
-            </div>
-        </div>
-    </FluentDialog>
-}
+    <StatusConfirm @ref="confirm" />
+    <StatusToast @ref="toast" />
+</div>
 
 @code {
     [Parameter] public string AssetId { get; set; } = string.Empty;
 
     private MonitoredAsset? entity;
     private bool isLoading = true;
+    private AssetStatusHistory? latest;
+    private AssetStatus currentStatus = AssetStatus.Unknown;
 
+    private StatusOverviewEntity? overviewEntity;
+    private int stripDays = 90;
+    private DateTime? openDate;
+    private List<StatusDayEventDto> dayEvents = new();
+    private bool dayLoading;
+
+    private List<AssetStatusHistory> history = new();
+    private int historyDays = 1;
+    private bool historyLoading;
+    private string tab = "checks";
+    private bool changesOnly;
+    private int checksShown = 25;
+
+    private List<Incident> incidents = new();
+
+    private List<EntityAudience> audience = new();
+    private List<EntityAudienceClientService.AssignableUser> assignableUsers = new();
+    private string selectedAudienceUserId = "";
+    private EntityAudienceType selectedAudienceType = EntityAudienceType.Stakeholder;
+    private bool isSavingAudience;
+
+    private bool showStatusUpdateModal;
+    private bool isUpdatingStatus;
+    private AssetStatus newStatus = AssetStatus.Online;
+    private string statusMessage = "";
+
+    private StatusConfirm confirm = default!;
+    private StatusToast toast = default!;
+
+    private string CompanyId => StateContainer.Company?.Id ?? "";
     private string queryParam => StateContainer.Company is null ? "" : $"?c={StateContainer.Company.Id}";
+    private string QueryWith(string key, string value) =>
+        (string.IsNullOrEmpty(queryParam) ? "?" : queryParam + "&") + $"{key}={Uri.EscapeDataString(value)}";
 
     // Status write actions require the company INCIDENTS role (ADMIN always allowed).
     private string writeRoles => $"{StateContainer.Company?.Id}_INCIDENTS,{StateContainer.Company?.Id}_ADMIN";
 
-    private bool showStatusUpdateModal = false;
-    private bool isUpdatingStatus = false;
-    private StatusUpdateModel statusUpdateModel = new();
-    private AssetStatus currentEntityStatus = AssetStatus.Unknown;
-
-    // Audience
-    private List<EntityAudience> audience = new();
-    private List<EntityAudienceClientService.AssignableUser> assignableUsers = new();
-    private EntityAudienceClientService.AssignableUser? selectedAudienceUser;
-    private string selectedAudienceTypeString = nameof(EntityAudienceType.Stakeholder);
-    private bool isSavingAudience = false;
-
-    private string selectedStatusString
+    private double? AvgResponse
     {
-        get => statusUpdateModel.Status.ToString();
-        set => statusUpdateModel.Status = Enum.Parse<AssetStatus>(value);
+        get
+        {
+            var v = history.Where(h => h.ResponseTime.HasValue).Select(h => h.ResponseTime!.Value).ToList();
+            return v.Any() ? v.Average() : null;
+        }
     }
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
-        if (!string.IsNullOrEmpty(AssetId))
-        {
-            await LoadEntity();
-        }
+        if (string.IsNullOrEmpty(AssetId)) return;
+        isLoading = true;
+        openDate = null;
+        await LoadEntity();
     }
 
     private async Task LoadEntity()
@@ -577,16 +529,23 @@
         try
         {
             entity = await EntityService.GetEntityAsync(AssetId);
+            if (entity is null) return;
 
-            if (entity != null)
-            {
-                var companyId = StateContainer.Company?.Id ?? "";
-                var latestStatus = await HistoryService.GetLatestEntityStatusAsync(AssetId, companyId);
-                currentEntityStatus = latestStatus?.Status ?? AssetStatus.Unknown;
+            var latestTask = HistoryService.GetLatestEntityStatusAsync(AssetId, CompanyId);
+            var overviewTask = OverviewService.GetOverviewAsync(CompanyId, 90);
+            var incidentsTask = IncidentService.GetIncidentsByEntityAsync(AssetId);
+            var audienceTask = AudienceService.GetAudienceAsync(CompanyId, AssetId);
+            var usersTask = AudienceService.GetAssignableUsersAsync(CompanyId, AssetId);
+            var historyTask = HistoryService.GetEntityStatusHistoryAsync(AssetId, CompanyId, historyDays);
+            await Task.WhenAll(latestTask, overviewTask, incidentsTask, audienceTask, usersTask, historyTask);
 
-                audience = await AudienceService.GetAudienceAsync(companyId, AssetId);
-                assignableUsers = await AudienceService.GetAssignableUsersAsync(companyId, AssetId);
-            }
+            latest = latestTask.Result;
+            currentStatus = latest?.Status ?? AssetStatus.Unknown;
+            overviewEntity = overviewTask.Result?.Groups.SelectMany(g => g.Entities).FirstOrDefault(e => e.EntityId == AssetId);
+            incidents = incidentsTask.Result;
+            audience = audienceTask.Result;
+            assignableUsers = usersTask.Result;
+            history = historyTask.Result;
         }
         catch (Exception ex)
         {
@@ -598,72 +557,101 @@
         }
     }
 
-    private void BackToEntities()
+    private (double? pct, int online, int withData) UptimeFor(int days)
     {
-        Navigation.NavigateTo($"/status/entities{queryParam}");
+        var d = StatusUi.LastDays(overviewEntity?.Days, days);
+        var withData = d.Count(x => x.Status.HasValue);
+        var online = d.Count(x => x.Status == AssetStatus.Online);
+        return (withData == 0 ? null : Math.Round(online * 100.0 / withData, 1), online, withData);
     }
 
-    private void EditEntity()
+    private IEnumerable<AssetStatusHistory> StatusChanges()
     {
-        if (entity != null)
-            Navigation.NavigateTo($"/status/entities/{entity.Id}/edit{queryParam}");
+        AssetStatus? prev = null;
+        var changes = new List<AssetStatusHistory>();
+        foreach (var h in history.OrderBy(h => h.CheckedAt))
+        {
+            if (h.Status != prev) changes.Add(h);
+            prev = h.Status;
+        }
+        changes.Reverse();
+        return changes;
+    }
+
+    private async Task SetHistoryDays(int d)
+    {
+        if (historyDays == d) return;
+        historyDays = d;
+        checksShown = 25;
+        historyLoading = true;
+        history = await HistoryService.GetEntityStatusHistoryAsync(AssetId, CompanyId, d);
+        historyLoading = false;
+    }
+
+    private void CloseDay()
+    {
+        openDate = null;
+        dayEvents = new();
+    }
+
+    private async Task ToggleDay(DateTime date)
+    {
+        if (openDate == date) { CloseDay(); return; }
+        openDate = date;
+        dayEvents = new();
+        dayLoading = true;
+        dayEvents = (await OverviewService.GetDayEventsAsync(CompanyId, AssetId, date)).OrderByDescending(e => e.CheckedAt).ToList();
+        dayLoading = false;
     }
 
     private async Task DeleteEntity()
     {
-        if (entity == null) return;
-
-        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", $"Are you sure you want to delete '{entity.Name}'? This action cannot be undone.");
-        if (confirmed)
+        if (entity is null) return;
+        if (!await confirm.Ask($"Delete {entity.Name}?", "It is removed from monitoring and the status board. Its history and incidents stay in the database.")) return;
+        try
         {
-            try
-            {
-                await EntityService.DeleteEntityAsync(entity.Id);
+            if (await EntityService.DeleteEntityAsync(entity.Id))
                 Navigation.NavigateTo($"/status/entities{queryParam}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error deleting entity: {ex.Message}");
-                await JSRuntime.InvokeVoidAsync("alert", "Error deleting entity. Please try again.");
-            }
+            else
+                toast.Show("Could not delete the entity. Try again.", error: true);
         }
-    }
-
-    private void ManageDependencies()
-    {
-        Navigation.NavigateTo($"/status/entities/{AssetId}/dependencies{queryParam}");
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error deleting entity: {ex.Message}");
+            toast.Show("Could not delete the entity. Try again.", error: true);
+        }
     }
 
     private void OpenUpdateStatusModal()
     {
-        statusUpdateModel = new StatusUpdateModel { Status = currentEntityStatus };
+        newStatus = currentStatus == AssetStatus.Online ? AssetStatus.Maintenance : AssetStatus.Online;
+        statusMessage = "";
         showStatusUpdateModal = true;
     }
 
-    private void CloseStatusUpdateModal()
-    {
-        showStatusUpdateModal = false;
-        statusUpdateModel = new();
-    }
+    private void CloseStatusUpdateModal() => showStatusUpdateModal = false;
 
     private async Task HandleStatusUpdate()
     {
-        if (entity == null || string.IsNullOrWhiteSpace(statusUpdateModel.StatusMessage)) return;
-
+        if (entity is null || string.IsNullOrWhiteSpace(statusMessage)) return;
         isUpdatingStatus = true;
-
         try
         {
-            await EntityService.UpdateEntityStatusAsync(AssetId, statusUpdateModel.Status, statusUpdateModel.StatusMessage);
-            await JSRuntime.InvokeVoidAsync("alert", "Entity status updated successfully!");
-            CloseStatusUpdateModal();
-            currentEntityStatus = statusUpdateModel.Status;
-            await LoadEntity();
+            if (await EntityService.UpdateEntityStatusAsync(AssetId, newStatus, statusMessage))
+            {
+                showStatusUpdateModal = false;
+                toast.Show($"Status set to {StatusUi.Label(newStatus)}");
+                await LoadEntity();
+            }
+            else
+            {
+                toast.Show("Could not update the status. Try again.", error: true);
+            }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error updating entity status: {ex.Message}");
-            await JSRuntime.InvokeVoidAsync("alert", "Error updating entity status. Please try again.");
+            toast.Show("Could not update the status. Try again.", error: true);
         }
         finally
         {
@@ -673,27 +661,26 @@
 
     private async Task AddAudienceMember()
     {
-        if (selectedAudienceUser is null) return;
-
+        if (string.IsNullOrEmpty(selectedAudienceUserId)) return;
         isSavingAudience = true;
         try
         {
-            var companyId = StateContainer.Company?.Id ?? "";
-            var type = Enum.Parse<EntityAudienceType>(selectedAudienceTypeString);
-            var created = await AudienceService.AddAsync(companyId, AssetId, selectedAudienceUser.Id, type);
+            var created = await AudienceService.AddAsync(CompanyId, AssetId, selectedAudienceUserId, selectedAudienceType);
             if (created != null)
             {
-                audience = await AudienceService.GetAudienceAsync(companyId, AssetId);
-                selectedAudienceUser = null;
+                audience = await AudienceService.GetAudienceAsync(CompanyId, AssetId);
+                selectedAudienceUserId = "";
+                toast.Show($"Added {created.DisplayName ?? created.Email} as {created.AudienceType}");
             }
             else
             {
-                await JSRuntime.InvokeVoidAsync("alert", "Could not add audience member. They may already be assigned with this role, or have no email.");
+                toast.Show("Could not add this person. They may already have this role, or have no email address.", error: true);
             }
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error adding audience member: {ex.Message}");
+            toast.Show("Could not add this person. Try again.", error: true);
         }
         finally
         {
@@ -701,16 +688,17 @@
         }
     }
 
-    private async Task RemoveAudienceMember(string id)
+    private async Task RemoveAudienceMember(EntityAudience member)
     {
-        var confirmed = await JSRuntime.InvokeAsync<bool>("confirm", "Remove this audience member?");
-        if (!confirmed) return;
-
+        var name = member.DisplayName ?? member.Email;
+        if (!await confirm.Ask($"Remove {name}?", "They stop receiving incident notifications for this entity.", "Remove")) return;
         try
         {
-            var companyId = StateContainer.Company?.Id ?? "";
-            if (await AudienceService.RemoveAsync(companyId, id))
-                audience = await AudienceService.GetAudienceAsync(companyId, AssetId);
+            if (await AudienceService.RemoveAsync(CompanyId, member.Id))
+            {
+                audience = await AudienceService.GetAudienceAsync(CompanyId, AssetId);
+                toast.Show($"Removed {name}");
+            }
         }
         catch (Exception ex)
         {
@@ -718,27 +706,16 @@
         }
     }
 
-    private string GetAudienceTypeClass(EntityAudienceType type) => type switch
-    {
-        EntityAudienceType.Owner => "bg-indigo-100 text-indigo-800",
-        EntityAudienceType.Maintainer => "bg-blue-100 text-blue-800",
-        EntityAudienceType.Stakeholder => "bg-gray-100 text-gray-700",
-        _ => "bg-gray-100 text-gray-700"
-    };
+    private static bool IsHttpUrl(string url) =>
+        url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
 
-    private string GetAssetStatusClass(AssetStatus status) => status switch
+    private static string PrettyJson(string raw)
     {
-        AssetStatus.Online => "bg-green-100 text-green-800",
-        AssetStatus.Offline => "bg-gray-100 text-gray-800",
-        AssetStatus.Degraded => "bg-yellow-100 text-yellow-800",
-        AssetStatus.Maintenance => "bg-blue-100 text-blue-800",
-        AssetStatus.Error => "bg-red-100 text-red-800",
-        _ => "bg-gray-100 text-gray-800"
-    };
-
-    private class StatusUpdateModel
-    {
-        public AssetStatus Status { get; set; } = AssetStatus.Unknown;
-        public string StatusMessage { get; set; } = string.Empty;
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch { return raw; }
     }
 }

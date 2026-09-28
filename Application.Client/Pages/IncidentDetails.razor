@@ -1,609 +1,362 @@
 @page "/status/incidents/{IncidentId}"
-@using Application.Shared.Models
 @using Application.Shared.Enums
-@using Microsoft.AspNetCore.Authorization
-@using Microsoft.AspNetCore.Components.Forms
-@using Microsoft.FluentUI.AspNetCore.Components
 @rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
 @inject NavigationManager Navigation
-@inject IJSRuntime JSRuntime
 @inject IncidentClientService IncidentService
+@inject AssetStatusHistoryClientService HistoryService
+@inject EntityAudienceClientService AudienceService
 @inject StateContainer StateContainer
 @attribute [Authorize(Policy = PolicyNames.StatusRead)]
 
-<PageTitle>Incident Details - @(incident?.Title ?? "Loading...")</PageTitle>
+<PageTitle>@(incident?.Title ?? "Incident") · Status</PageTitle>
 
-<style>
-    /* ── Dark theme (data-theme="dark") — override hardcoded Tailwind light colors ── */
-    [data-theme="dark"] .sd-scope.min-h-screen { background-color: #0e1117; }
-    [data-theme="dark"] .sd-scope.bg-white { background-color: #181a20; }
-
-    [data-theme="dark"] .sd-scope .bg-white { background-color: #181a20; }
-    [data-theme="dark"] .sd-scope .bg-white\/60 { background-color: rgba(24,26,32,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-50 { background-color: #1e222b; }
-    [data-theme="dark"] .sd-scope .bg-gray-50\/60 { background-color: rgba(30,34,43,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-100 { background-color: #20242c; }
-
-    [data-theme="dark"] .sd-scope .text-gray-900 { color: #f3f4f6; }
-    [data-theme="dark"] .sd-scope .text-gray-800 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-700 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-600 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-500 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-400 { color: #767d89; }
-    [data-theme="dark"] .sd-scope .text-gray-300 { color: #4b515e; }
-
-    [data-theme="dark"] .sd-scope .border-gray-100 { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .border-gray-200 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-200\/80 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-300 { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-50:hover { background-color: #20242c; }
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-100:hover { background-color: #262b34; }
-    [data-theme="dark"] .sd-scope .hover\:bg-red-50:hover { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .hover\:bg-indigo-100:hover { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .hover\:border-gray-400:hover { border-color: #3a4150; }
-    [data-theme="dark"] .sd-scope .hover\:border-red-200:hover { border-color: rgba(239,68,68,0.30); }
-
-    [data-theme="dark"] .sd-scope input:not([type="checkbox"]):not([type="radio"]),
-    [data-theme="dark"] .sd-scope select,
-    [data-theme="dark"] .sd-scope textarea {
-        background-color: #12141a !important;
-        border-color: #2b303b !important;
-        color: #e6e9ef !important;
-    }
-    [data-theme="dark"] .sd-scope input::placeholder,
-    [data-theme="dark"] .sd-scope textarea::placeholder { color: #767d89 !important; }
-
-    [data-theme="dark"] .sd-scope .bg-red-50 { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .bg-red-100 { background-color: rgba(239,68,68,0.15); }
-    [data-theme="dark"] .sd-scope .border-red-200 { border-color: rgba(239,68,68,0.30); }
-    [data-theme="dark"] .sd-scope .text-red-400,
-    [data-theme="dark"] .sd-scope .text-red-500,
-    [data-theme="dark"] .sd-scope .text-red-600,
-    [data-theme="dark"] .sd-scope .text-red-700,
-    [data-theme="dark"] .sd-scope .text-red-800 { color: #f87171; }
-    [data-theme="dark"] .sd-scope .hover\:text-red-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-red-800:hover { color: #fca5a5; }
-
-    [data-theme="dark"] .sd-scope .bg-green-50 { background-color: rgba(34,197,94,0.12); }
-    [data-theme="dark"] .sd-scope .bg-green-100 { background-color: rgba(34,197,94,0.15); }
-    [data-theme="dark"] .sd-scope .border-green-200 { border-color: rgba(34,197,94,0.30); }
-    [data-theme="dark"] .sd-scope .text-green-500,
-    [data-theme="dark"] .sd-scope .text-green-600,
-    [data-theme="dark"] .sd-scope .text-green-700,
-    [data-theme="dark"] .sd-scope .text-green-800 { color: #4ade80; }
-
-    [data-theme="dark"] .sd-scope .bg-yellow-50 { background-color: rgba(245,158,11,0.10); }
-    [data-theme="dark"] .sd-scope .bg-yellow-100 { background-color: rgba(245,158,11,0.15); }
-    [data-theme="dark"] .sd-scope .border-yellow-200 { border-color: rgba(245,158,11,0.30); }
-    [data-theme="dark"] .sd-scope .text-yellow-700,
-    [data-theme="dark"] .sd-scope .text-yellow-800 { color: #fcd34d; }
-
-    [data-theme="dark"] .sd-scope .bg-orange-50 { background-color: rgba(249,115,22,0.10); }
-    [data-theme="dark"] .sd-scope .bg-orange-100 { background-color: rgba(249,115,22,0.15); }
-    [data-theme="dark"] .sd-scope .border-orange-200 { border-color: rgba(249,115,22,0.30); }
-    [data-theme="dark"] .sd-scope .text-orange-600,
-    [data-theme="dark"] .sd-scope .text-orange-700,
-    [data-theme="dark"] .sd-scope .text-orange-800 { color: #fdba74; }
-
-    [data-theme="dark"] .sd-scope .bg-blue-50 { background-color: rgba(59,130,246,0.10); }
-    [data-theme="dark"] .sd-scope .bg-blue-100 { background-color: rgba(59,130,246,0.15); }
-    [data-theme="dark"] .sd-scope .border-blue-200 { border-color: rgba(59,130,246,0.30); }
-    [data-theme="dark"] .sd-scope .text-blue-600,
-    [data-theme="dark"] .sd-scope .text-blue-700,
-    [data-theme="dark"] .sd-scope .text-blue-800 { color: #93c5fd; }
-    [data-theme="dark"] .sd-scope .text-blue-900 { color: #bfdbfe; }
-
-    [data-theme="dark"] .sd-scope .bg-purple-50 { background-color: rgba(168,85,247,0.12); }
-    [data-theme="dark"] .sd-scope .bg-purple-100 { background-color: rgba(168,85,247,0.18); }
-    [data-theme="dark"] .sd-scope .text-purple-700,
-    [data-theme="dark"] .sd-scope .text-purple-800 { color: #d8b4fe; }
-
-    [data-theme="dark"] .sd-scope .bg-indigo-50 { background-color: rgba(129,140,248,0.14); }
-    [data-theme="dark"] .sd-scope .bg-indigo-100 { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .border-indigo-200 { border-color: rgba(129,140,248,0.30); }
-    [data-theme="dark"] .sd-scope .text-indigo-600,
-    [data-theme="dark"] .sd-scope .text-indigo-700 { color: #a5b4fc; }
-    [data-theme="dark"] .sd-scope .text-indigo-800 { color: #c7d2fe; }
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-800:hover { color: #c7d2fe; }
-
-    [data-theme="dark"] .sd-scope .bg-gray-200 { background-color: #23272f; }
-    [data-theme="dark"] .sd-scope .bg-gray-300 { background-color: #363c48; }
-
-    [data-theme="dark"] .sd-scope .ring-white { --tw-ring-color: #181a20; }
-    [data-theme="dark"] .sd-scope .ring-offset-1 { --tw-ring-offset-color: #181a20; }
-</style>
-
-<div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sd-scope">
-    @if (isLoading)
-    {
-        <div class="flex justify-center items-center h-64">
-            <div class="animate-spin rounded-full h-10 w-10 border-2 border-indigo-600 border-t-transparent"></div>
-        </div>
-    }
-    else if (incident == null)
-    {
-        <div class="bg-white rounded-xl border border-gray-200 shadow-sm text-center py-16 px-4">
-            <div class="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto">
-                <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
+@* Styles: Application/wwwroot/status.css (.st-steps, .st-tl, .st-compose). *@
+<div class="sc">
+    <div class="page-wrap st-wrap">
+        @if (isLoading)
+        {
+            <div class="card"><div class="st-loading"><span class="spin"></span> Loading incident…</div></div>
+        }
+        else if (incident is null)
+        {
+            <div class="card">
+                <div class="empty">
+                    <div class="dl-empty-icon">@StatusUi.Icon("inbox", 20)</div>
+                    <div class="empty-title">Incident not found</div>
+                    <div class="empty-text">It may have been deleted, or it belongs to another company.</div>
+                    <a class="btn btn-secondary btn-sm" href="@($"status/incidents{queryParam}")">Back to incidents</a>
+                </div>
             </div>
-            <h3 class="mt-3 text-base font-semibold text-gray-900">Incident not found</h3>
-            <p class="mt-1 text-sm text-gray-500">The incident you're looking for doesn't exist.</p>
-            <button @onclick="BackToIncidents"
-                    class="mt-6 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
-                Back to Incidents
-            </button>
-        </div>
-    }
-    else
-    {
-        <!-- Back link -->
-        <button @onclick="BackToIncidents"
-                class="inline-flex items-center gap-1.5 mb-5 text-sm font-medium text-gray-500 hover:text-indigo-600 transition-colors">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-            </svg>
-            Back to Incidents
-        </button>
-
-        <!-- Header card -->
-        <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-            <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-                <div class="flex items-start gap-4 min-w-0">
-                    <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 @SeverityTileClass(incident.Severity)">
-                        @incident.GetSeverityIcon()
-                    </div>
-                    <div class="min-w-0">
-                        <h1 class="text-xl font-bold text-gray-900 truncate">@incident.Title</h1>
-                        <div class="mt-2 flex flex-wrap items-center gap-2">
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium @incident.GetSeverityClass()">@incident.Severity</span>
-                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium @incident.GetStatusClass()">@incident.Status</span>
-                            @if (incident.Entity != null)
+        }
+        else
+        {
+            var resolved = incident.Status == IncidentStatus.Resolved;
+            <div class="st-head">
+                <div class="st-head-left">
+                    <a class="st-back" href="@($"status/incidents{queryParam}")" title="Back to incidents" aria-label="Back to incidents">@StatusUi.Icon("arrow-left", 16)</a>
+                    <div class="st-head-main">
+                        <div class="st-crumbs">
+                            <a href="@($"status/incidents{queryParam}")">Incidents</a>
+                            @StatusUi.Icon("chev-right", 12)<span class="st-mono">@ShortId</span>
+                        </div>
+                        <div class="st-title-row">
+                            <h1 class="page-title">@incident.Title</h1>
+                            <span class="badge @StatusUi.Cls(incident.Severity)"><i></i>@incident.Severity</span>
+                            <span class="badge @StatusUi.Cls(incident.Status)"><i></i>@incident.Status</span>
+                        </div>
+                        <div class="st-meta">
+                            @if (incident.Entity is not null)
                             {
-                                <span class="text-xs text-gray-400">·</span>
-                                <span class="text-xs text-gray-500">@incident.Entity.GetEntityTypeIcon() @incident.Entity.Name</span>
+                                <span class="st-meta-item">
+                                    @StatusUi.TypeSvg(incident.Entity.EntityType, 12)
+                                    <a href="@($"status/entities/{incident.EntityId}{queryParam}")">@incident.Entity.Name</a>
+                                    @if (entityStatus.HasValue)
+                                    {
+                                        <span class="st-status @StatusUi.Cls(entityStatus.Value)" style="margin-left:4px"><span class="st-dot"></span> @StatusUi.Label(entityStatus.Value)</span>
+                                    }
+                                </span>
                             }
-                            <span class="text-xs text-gray-400">·</span>
-                            <span class="text-xs text-gray-500">
-                                @(incident.IsResolved ? $"Resolved · {FormatDuration(incident.Duration)}" : $"Ongoing · {FormatDuration(incident.Duration)}")
-                            </span>
+                            <span>Opened @StatusUi.FullWhen(incident.StartedAt)@(string.IsNullOrWhiteSpace(incident.ReportedBy) ? "" : $" by {incident.ReportedBy}")</span>
+                            <span>@(resolved ? "Lasted" : "Ongoing") <b class="st-mono" style="color:var(--text-primary)">@StatusUi.Duration(incident.Duration)</b></span>
+                            @if (!string.IsNullOrWhiteSpace(incident.ExternalIncidentId)) { <span class="chip">@incident.ExternalIncidentId</span> }
                         </div>
                     </div>
                 </div>
                 <AuthorizeView Roles="@writeRoles">
                     <Authorized>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                            <button @onclick="OpenAddUpdateDialog"
-                                    class="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium rounded-lg text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                                </svg>
-                                Add Update
-                            </button>
-                            @if (incident.Status != IncidentStatus.Resolved)
+                        <div class="st-head-actions">
+                            @if (!resolved)
                             {
-                                <button @onclick="() => ShowStatusUpdateModal = true"
-                                        class="inline-flex items-center px-3.5 py-2 text-sm font-medium rounded-lg border border-gray-300 text-gray-700 bg-white hover:bg-gray-50 transition-colors">
-                                    Update Status
-                                </button>
-                                <button @onclick="() => ShowResolveModal = true"
-                                        class="inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-medium rounded-lg text-white bg-green-600 hover:bg-green-700 transition-colors">
-                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
-                                    </svg>
-                                    Resolve
-                                </button>
+                                <button class="btn btn-secondary st-btn-success" type="button" @onclick="OpenResolve">@StatusUi.Icon("check-circle", 14) Resolve…</button>
                             }
-                            <button @onclick="EditIncident" title="Edit"
-                                    class="inline-flex items-center justify-center w-9 h-9 rounded-lg border border-gray-300 text-gray-600 bg-white hover:bg-gray-50 transition-colors">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path>
-                                </svg>
-                            </button>
+                            <a class="btn btn-secondary" href="@($"status/incidents/{IncidentId}/edit{queryParam}")">@StatusUi.Icon("edit", 14) Edit</a>
                         </div>
                     </Authorized>
                 </AuthorizeView>
             </div>
-        </div>
 
-        <!-- Main content -->
-        <div class="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <!-- Main column -->
-            <div class="lg:col-span-2 space-y-6">
-                <!-- Details card -->
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                    <h3 class="text-base font-semibold text-gray-900 mb-5">Incident Details</h3>
-
-                    <dl class="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2">
-                        <div>
-                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Affected Entity</dt>
-                            <dd class="mt-1 text-sm text-gray-900">
-                                @if (incident.Entity != null)
+            <div class="card" style="margin-bottom:16px">
+                <div class="st-steps" role="list" aria-label="Incident progress">
+                    @{ var currentIdx = Array.IndexOf(StatusUi.Flow, incident.Status); }
+                    @for (var i = 0; i < StatusUi.Flow.Length; i++)
+                    {
+                        var s = StatusUi.Flow[i];
+                        var reached = StepTime(s);
+                        var state = i < currentIdx ? "is-done" : i == currentIdx ? $"is-current {StatusUi.Cls(s)}" : "";
+                        if (resolved && i == currentIdx) state = "is-done";
+                        <div class="st-step @state" role="listitem">
+                            <div class="st-step-bar"></div>
+                            <div class="st-step-name">@s</div>
+                            <div class="st-step-time">
+                                @if (i == currentIdx && !resolved && reached.HasValue)
                                 {
-                                    <span class="inline-flex items-center gap-2">
-                                        <span>@incident.Entity.GetEntityTypeIcon()</span>
-                                        @incident.Entity.Name
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium @incident.Entity.GetEntityTypeClass()">
-                                            @incident.Entity.EntityType
-                                        </span>
-                                    </span>
+                                    <span>since @StatusUi.When(reached) · @StatusUi.Duration(DateTime.UtcNow - DateTime.SpecifyKind(reached.Value, DateTimeKind.Utc))</span>
+                                }
+                                else if (reached.HasValue && i <= currentIdx)
+                                {
+                                    <span>@StatusUi.When(reached)</span>
+                                }
+                                else if (i < currentIdx)
+                                {
+                                    <span>skipped</span>
                                 }
                                 else
                                 {
-                                    <span class="text-gray-400">Unknown</span>
+                                    <span>—</span>
                                 }
-                            </dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Duration</dt>
-                            <dd class="mt-1 text-sm text-gray-900">@FormatDuration(incident.Duration) @(incident.IsResolved ? "(Resolved)" : "(Ongoing)")</dd>
-                        </div>
-
-                        <div>
-                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Started</dt>
-                            <dd class="mt-1 text-sm text-gray-900">@incident.StartedAt.Value.ToString("MMM dd, yyyy 'at' h:mm tt")</dd>
-                        </div>
-
-                        @if (incident.ResolvedAt.HasValue)
-                        {
-                            <div>
-                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Resolved</dt>
-                                <dd class="mt-1 text-sm text-gray-900">@incident.ResolvedAt.Value.ToString("MMM dd, yyyy 'at' h:mm tt")</dd>
                             </div>
-                        }
-
-                        @if (!string.IsNullOrEmpty(incident.ReportedBy))
-                        {
-                            <div>
-                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Reported By</dt>
-                                <dd class="mt-1 text-sm text-gray-900">@incident.ReportedBy</dd>
-                            </div>
-                        }
-
-                        @if (!string.IsNullOrEmpty(incident.AssignedTo))
-                        {
-                            <div>
-                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Assigned To</dt>
-                                <dd class="mt-1 text-sm text-gray-900">@incident.AssignedTo</dd>
-                            </div>
-                        }
-
-                        @if (!string.IsNullOrEmpty(incident.ExternalIncidentId))
-                        {
-                            <div class="sm:col-span-2">
-                                <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">External Reference</dt>
-                                <dd class="mt-1 text-sm text-gray-900">@incident.ExternalIncidentId</dd>
-                            </div>
-                        }
-                    </dl>
-
-                    <div class="mt-6 pt-6 border-t border-gray-100">
-                        <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Description</dt>
-                        <dd class="mt-1 text-sm text-gray-700 whitespace-pre-line">@incident.Description</dd>
-                    </div>
-
-                    @if (!string.IsNullOrEmpty(incident.ImpactDescription))
-                    {
-                        <div class="mt-5">
-                            <dt class="text-xs font-medium uppercase tracking-wide text-gray-400">Impact</dt>
-                            <dd class="mt-1 text-sm text-gray-700 whitespace-pre-line">@incident.ImpactDescription</dd>
-                        </div>
-                    }
-
-                    @if (!string.IsNullOrEmpty(incident.ResolutionDetails))
-                    {
-                        <div class="mt-5 rounded-lg bg-green-50 border border-green-200 p-4">
-                            <dt class="text-xs font-medium uppercase tracking-wide text-green-700">Resolution</dt>
-                            <dd class="mt-1 text-sm text-green-800 whitespace-pre-line">@incident.ResolutionDetails</dd>
                         </div>
                     }
                 </div>
+            </div>
 
-                <!-- Updates timeline -->
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                    <div class="flex items-center justify-between mb-5">
-                        <h3 class="text-base font-semibold text-gray-900">Timeline</h3>
-                        <AuthorizeView Roles="@writeRoles" Context="addCtx">
-                            <Authorized>
-                                <button @onclick="OpenAddUpdateDialog"
-                                        class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md text-indigo-700 bg-indigo-50 hover:bg-indigo-100 transition-colors">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                                    </svg>
-                                    Add Update
-                                </button>
-                            </Authorized>
-                        </AuthorizeView>
-                    </div>
-
-                    @if (incidentUpdates?.Any() == true)
-                    {
-                        <div class="flow-root">
-                            <ul class="-mb-8">
-                                @for (int i = 0; i < incidentUpdates.Count; i++)
-                                {
-                                    var update = incidentUpdates[i];
-                                    <li>
-                                        <div class="relative pb-8">
-                                            @if (i != incidentUpdates.Count - 1)
-                                            {
-                                                <span class="absolute top-4 left-4 -ml-px h-full w-0.5 bg-gray-200" aria-hidden="true"></span>
-                                            }
-                                            <div class="relative flex space-x-3">
-                                                <div>
-                                                    <span class="h-8 w-8 rounded-full flex items-center justify-center ring-8 ring-white @(update.StatusChange.HasValue ? "bg-indigo-500" : "bg-gray-400")">
-                                                        @if (update.StatusChange.HasValue)
-                                                        {
-                                                            <svg class="h-4 w-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                                            </svg>
-                                                        }
-                                                        else
-                                                        {
-                                                            <svg class="h-4 w-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-3.582 8-8 8a8.001 8.001 0 01-7.999-8c0-4.418 3.582-8 8-8s8 3.582 8 8z"></path>
-                                                            </svg>
-                                                        }
-                                                    </span>
-                                                </div>
-                                                <div class="min-w-0 flex-1 pt-1.5">
-                                                    @if (update.StatusChange.HasValue)
-                                                    {
-                                                        <p class="text-sm text-gray-500 mb-1">
-                                                            Status changed to
-                                                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium @GetStatusClass(update.StatusChange.Value)">
-                                                                @update.StatusChange.Value
-                                                            </span>
-                                                        </p>
-                                                    }
-                                                    <p class="text-sm text-gray-900">@update.Message</p>
-                                                    <p class="text-xs text-gray-400 mt-1">
-                                                        by @(update.Author ?? "System") • @update.PostedAt.ToString("MMM dd, yyyy 'at' h:mm tt")
-                                                    </p>
-                                                </div>
-                                            </div>
+            <div class="st-cols">
+                <div class="st-col">
+                    <div class="card">
+                        <div class="card-head">
+                            <h3 class="card-title">Timeline</h3>
+                            <span class="st-card-sub">newest first · local time</span>
+                            <span class="st-card-spacer"></span>
+                            <span class="tab-count">@(incidentUpdates?.Count ?? 0)</span>
+                        </div>
+                        @if (!resolved)
+                        {
+                            <AuthorizeView Roles="@writeRoles" Context="composeCtx">
+                                <Authorized>
+                                    <div class="st-compose">
+                                        <label class="dl-sr-only" for="st-compose-msg">Update</label>
+                                        <textarea class="textarea" id="st-compose-msg" rows="2" maxlength="2000"
+                                                  placeholder="Post an update for the people following this incident…"
+                                                  @bind="composeMessage" @bind:event="oninput"></textarea>
+                                        <div class="st-compose-row">
+                                            <label class="st-muted" style="font-size:12px" for="st-compose-status">Also move to</label>
+                                            <select class="select" id="st-compose-status" @bind="composeStatus">
+                                                <option value="">Keep @incident.Status</option>
+                                                @foreach (var s in StatusUi.Flow.Where(s => s != incident.Status))
+                                                {
+                                                    <option value="@s">@s</option>
+                                                }
+                                            </select>
+                                            <button class="btn btn-primary btn-sm" type="button" disabled="@(!CanPost || isPosting)" @onclick="PostUpdate">
+                                                @(isPosting ? "Posting…" : ComposeTarget == IncidentStatus.Resolved ? "Resolve…" : "Post update")
+                                            </button>
                                         </div>
-                                    </li>
-                                }
-                            </ul>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="text-center py-8">
-                            <p class="text-sm text-gray-400">No updates yet.</p>
-                        </div>
-                    }
-                </div>
-            </div>
-
-            <!-- Sidebar -->
-            <div class="space-y-6">
-                <div class="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
-                    <h3 class="text-base font-semibold text-gray-900 mb-4">Quick Actions</h3>
-                    <div class="space-y-1.5">
-                        <AuthorizeView Roles="@writeRoles" Context="quickCtx">
-                            <Authorized>
-                                @if (incident.Status != IncidentStatus.Resolved)
-                                {
-                                    <button @onclick="() => UpdateStatus(IncidentStatus.Investigating)"
-                                            class="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                                        <span class="w-2 h-2 rounded-full bg-yellow-500"></span> Mark as Investigating
-                                    </button>
-                                    <button @onclick="() => UpdateStatus(IncidentStatus.Identified)"
-                                            class="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                                        <span class="w-2 h-2 rounded-full bg-blue-500"></span> Mark as Identified
-                                    </button>
-                                    <button @onclick="() => UpdateStatus(IncidentStatus.Monitoring)"
-                                            class="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                                        <span class="w-2 h-2 rounded-full bg-purple-500"></span> Mark as Monitoring
-                                    </button>
-                                }
-                            </Authorized>
-                        </AuthorizeView>
-                        @if (incident.Entity != null)
-                        {
-                            <button @onclick="() => ViewEntity(incident.EntityId)"
-                                    class="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg text-gray-700 hover:bg-gray-50 transition-colors">
-                                <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
-                                </svg>
-                                View Entity Details
-                            </button>
+                                    </div>
+                                </Authorized>
+                            </AuthorizeView>
                         }
+                        <ul class="st-tl">
+                            @if (incident.ResolvedAt.HasValue)
+                            {
+                                <li>
+                                    <span class="st-tl-ico is-status s-resolved">@StatusUi.Icon("check-circle", 13)</span>
+                                    <div>
+                                        <div class="st-tl-head"><b>Resolved</b> after @StatusUi.Duration(incident.Duration)<time>@StatusUi.When(incident.ResolvedAt)</time></div>
+                                        @if (!string.IsNullOrWhiteSpace(incident.ResolutionDetails))
+                                        {
+                                            <div class="st-tl-msg is-resolution">@incident.ResolutionDetails</div>
+                                        }
+                                    </div>
+                                </li>
+                            }
+                            @foreach (var u in (incidentUpdates ?? new()).OrderByDescending(u => u.PostedAt))
+                            {
+                                <li>
+                                    @if (u.StatusChange.HasValue)
+                                    {
+                                        <span class="st-tl-ico is-status @StatusUi.Cls(u.StatusChange.Value)">@StatusUi.Icon("activity", 13)</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="st-tl-ico">@StatusUi.Icon("message", 13)</span>
+                                    }
+                                    <div>
+                                        <div class="st-tl-head">
+                                            <b>@(string.IsNullOrWhiteSpace(u.Author) ? "System" : u.Author)</b>
+                                            @if (u.StatusChange.HasValue)
+                                            {
+                                                <span>moved to</span><span class="badge @StatusUi.Cls(u.StatusChange.Value)"><i></i>@u.StatusChange</span>
+                                            }
+                                            <time title="@StatusUi.FullWhen(u.PostedAt)">@StatusUi.When(u.PostedAt)</time>
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(u.Message) && u.Message != $"Status changed to {u.StatusChange}")
+                                        {
+                                            <div class="st-tl-msg">@u.Message</div>
+                                        }
+                                    </div>
+                                </li>
+                            }
+                            <li>
+                                <span class="st-tl-ico is-status s-open">@StatusUi.Icon("alert", 13)</span>
+                                <div>
+                                    <div class="st-tl-head">
+                                        <b>@(string.IsNullOrWhiteSpace(incident.ReportedBy) ? "Someone" : incident.ReportedBy)</b>
+                                        <span>opened the incident as</span><span class="badge @StatusUi.Cls(incident.Severity)"><i></i>@incident.Severity</span>
+                                        <time title="@StatusUi.FullWhen(incident.StartedAt)">@StatusUi.When(incident.StartedAt)</time>
+                                    </div>
+                                </div>
+                            </li>
+                        </ul>
                     </div>
                 </div>
+
+                <div class="st-col">
+                    <div class="card">
+                        <div class="card-head">
+                            <h3 class="card-title">Details</h3>
+                            <span class="st-card-spacer"></span>
+                            <AuthorizeView Roles="@writeRoles" Context="editCtx">
+                                <Authorized><a class="st-link" href="@($"status/incidents/{IncidentId}/edit{queryParam}")">Edit</a></Authorized>
+                            </AuthorizeView>
+                        </div>
+                        <div class="card-body">
+                            <dl class="st-dl">
+                                <dt>Entity</dt>
+                                <dd>
+                                    @if (incident.Entity is not null)
+                                    {
+                                        <a href="@($"status/entities/{incident.EntityId}{queryParam}")">@incident.Entity.Name</a><span class="st-muted"> · @StatusUi.TypeLabel(incident.Entity.EntityType)</span>
+                                    }
+                                    else { <span class="st-muted">Unknown</span> }
+                                </dd>
+                                <dt>Severity</dt><dd><span class="badge @StatusUi.Cls(incident.Severity)"><i></i>@incident.Severity</span></dd>
+                                <dt>Status</dt><dd><span class="badge @StatusUi.Cls(incident.Status)"><i></i>@incident.Status</span></dd>
+                                <dt>Assigned to</dt>
+                                <dd>
+                                    @if (string.IsNullOrWhiteSpace(incident.AssignedTo)) { <span class="st-muted">Unassigned</span> }
+                                    else { <span class="st-av is-sm" style="vertical-align:middle;margin-right:6px">@StatusUi.Initials(incident.AssignedTo)</span>@incident.AssignedTo }
+                                </dd>
+                                <dt>Reported by</dt><dd>@(string.IsNullOrWhiteSpace(incident.ReportedBy) ? "—" : incident.ReportedBy)</dd>
+                                <dt>Started</dt><dd>@StatusUi.FullWhen(incident.StartedAt)</dd>
+                                <dt>Resolved</dt><dd class="@(incident.ResolvedAt.HasValue ? "" : "st-muted")">@StatusUi.FullWhen(incident.ResolvedAt)</dd>
+                                <dt>Duration</dt><dd><span class="st-mono">@StatusUi.Duration(incident.Duration)</span>@(resolved ? "" : " and counting")</dd>
+                                @if (!string.IsNullOrWhiteSpace(incident.ExternalIncidentId)) { <dt>External ID</dt><dd><span class="st-mono">@incident.ExternalIncidentId</span></dd> }
+                            </dl>
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-head"><h3 class="card-title">Description</h3></div>
+                        <div class="card-body st-prose">@incident.Description</div>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(incident.ImpactDescription))
+                    {
+                        <div class="card">
+                            <div class="card-head"><h3 class="card-title">Impact</h3></div>
+                            <div class="card-body st-prose">@incident.ImpactDescription</div>
+                        </div>
+                    }
+
+                    @if (audience.Any())
+                    {
+                        <div class="card">
+                            <div class="card-head"><h3 class="card-title">Following</h3><span class="st-card-sub">people on @(incident.Entity?.Name ?? "the entity")</span></div>
+                            <div class="card-body">
+                                <ul class="st-people">
+                                    @foreach (var m in audience.OrderBy(a => a.AudienceType))
+                                    {
+                                        <li>
+                                            <span class="st-av">@StatusUi.Initials(m.DisplayName ?? m.Email)</span>
+                                            <div class="st-who"><b>@(m.DisplayName ?? m.Email)</b><small>@m.AudienceType</small></div>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        </div>
+                    }
+                </div>
             </div>
-        </div>
-    }
+
+            @if (showResolveModal)
+            {
+                <div class="fb-modal-backdrop" @onclick="() => showResolveModal = false">
+                    <div class="fb-modal" role="dialog" aria-modal="true" aria-labelledby="st-resolve-title" @onclick:stopPropagation="true">
+                        <div class="fb-modal-head">
+                            <div class="fb-modal-title" id="st-resolve-title">Resolve incident</div>
+                            <button type="button" class="st-modal-x" aria-label="Close" @onclick="() => showResolveModal = false">@StatusUi.Icon("x", 15)</button>
+                        </div>
+                        <div class="fb-modal-body">
+                            <div class="field">
+                                <label class="field-label" for="st-resolution">What fixed it <b>*</b></label>
+                                <textarea class="textarea" id="st-resolution" rows="4" maxlength="2000" placeholder="Root cause and the fix, for whoever reads this later"
+                                          @bind="resolutionDetails" @bind:event="oninput"></textarea>
+                            </div>
+                            <div class="st-callout is-success">@StatusUi.Icon("check-circle", 14)<div>The incident closes now, after <b>@StatusUi.Duration(incident.Duration)</b>. It stays in the history.</div></div>
+                        </div>
+                        <div class="fb-modal-foot">
+                            <button type="button" class="btn btn-ghost" @onclick="() => showResolveModal = false">Cancel</button>
+                            <button type="button" class="btn btn-primary" disabled="@(string.IsNullOrWhiteSpace(resolutionDetails) || isPosting)" @onclick="HandleResolve">
+                                @(isPosting ? "Resolving…" : "Resolve incident")
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+
+    <StatusToast @ref="toast" />
 </div>
-
-<!-- Status Update Modal -->
-@if (ShowStatusUpdateModal)
-{
-    <FluentDialog>
-        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full sd-scope">
-            <div class="flex items-center justify-between p-6 border-b border-gray-200 bg-gray-50 rounded-t-lg">
-                <div class="flex items-center space-x-3">
-                    <div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
-                        <svg class="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                        </svg>
-                    </div>
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-900">Update Status</h3>
-                        <p class="text-sm text-gray-500">Change the incident status and add an update</p>
-                    </div>
-                </div>
-            </div>
-            <div class="p-6">
-                <EditForm Model="statusUpdateModel" OnValidSubmit="HandleStatusUpdate">
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">New Status</label>
-                            <FluentSelect @bind-Value="selectedStatusString" TOption="string" Class="w-full">
-                                <FluentOption Value="Open" TOption="string">Open</FluentOption>
-                                <FluentOption Value="Investigating" TOption="string">Investigating</FluentOption>
-                                <FluentOption Value="Identified" TOption="string">Identified</FluentOption>
-                                <FluentOption Value="Monitoring" TOption="string">Monitoring</FluentOption>
-                                <FluentOption Value="Resolved" TOption="string">Resolved</FluentOption>
-                            </FluentSelect>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Update Message</label>
-                            <FluentTextArea @bind-Value="statusUpdateModel.Message" Rows="3"
-                                            Placeholder="Enter status update details..." Class="w-full" />
-                        </div>
-                        <div class="bg-orange-50 rounded-lg p-4 border border-orange-200">
-                            <p class="text-sm text-orange-700">This will update the incident status and post a timeline entry with your message.</p>
-                        </div>
-                    </div>
-                    <div class="flex justify-end space-x-3 pt-6 mt-6 border-t border-gray-200">
-                        <FluentButton Appearance="Appearance.Neutral" @onclick="() => ShowStatusUpdateModal = false">Cancel</FluentButton>
-                        <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Submit">Update Status</FluentButton>
-                    </div>
-                </EditForm>
-            </div>
-        </div>
-    </FluentDialog>
-}
-
-<!-- Resolve Modal -->
-@if (ShowResolveModal)
-{
-    <FluentDialog>
-        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full sd-scope">
-            <div class="flex items-center justify-between p-6 border-b border-gray-200 bg-gray-50 rounded-t-lg">
-                <div class="flex items-center space-x-3">
-                    <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                        <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </div>
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-900">Resolve Incident</h3>
-                        <p class="text-sm text-gray-500">Mark this incident as resolved with details</p>
-                    </div>
-                </div>
-            </div>
-            <div class="p-6">
-                <EditForm Model="resolveModel" OnValidSubmit="HandleResolve">
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Resolution Details</label>
-                            <FluentTextArea @bind-Value="resolveModel.ResolutionDetails" Rows="4"
-                                            Placeholder="Describe how the incident was resolved..."
-                                            Class="w-full" Required="true" />
-                        </div>
-                        <div class="bg-green-50 rounded-lg p-4 border border-green-200">
-                            <p class="text-sm text-green-700">This will permanently mark the incident as resolved and record the resolution details.</p>
-                        </div>
-                    </div>
-                    <div class="flex justify-end space-x-3 pt-6 mt-6 border-t border-gray-200">
-                        <FluentButton Appearance="Appearance.Neutral" @onclick="() => ShowResolveModal = false">Cancel</FluentButton>
-                        <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Submit"
-                                      Disabled="string.IsNullOrWhiteSpace(resolveModel.ResolutionDetails)">
-                            Resolve Incident
-                        </FluentButton>
-                    </div>
-                </EditForm>
-            </div>
-        </div>
-    </FluentDialog>
-}
-
-@* Add Update Dialog *@
-@if (ShowAddUpdateModal)
-{
-    <FluentDialog>
-        <div class="bg-white rounded-lg shadow-xl max-w-lg w-full sd-scope">
-            <div class="flex items-center justify-between p-6 border-b border-gray-200 bg-gray-50 rounded-t-lg">
-                <div class="flex items-center space-x-3">
-                    <div class="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center">
-                        <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                        </svg>
-                    </div>
-                    <div>
-                        <h3 class="text-lg font-semibold text-gray-900">Add Update</h3>
-                        <p class="text-sm text-gray-500">Add a new update to this incident</p>
-                    </div>
-                </div>
-            </div>
-            <div class="p-6">
-                <EditForm Model="updateModel" OnValidSubmit="HandleAddUpdateFromDialog">
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">Update Message</label>
-                            <FluentTextArea @bind-Value="updateModel.Message" Rows="4"
-                                            Placeholder="Enter update details..." Class="w-full" Required="true" />
-                        </div>
-                        <div class="bg-blue-50 rounded-lg p-4 border border-blue-200">
-                            <p class="text-sm text-blue-700">This update will be posted to the incident timeline and will be visible to all team members.</p>
-                        </div>
-                    </div>
-                    <div class="flex justify-end space-x-3 pt-6 mt-6 border-t border-gray-200">
-                        <FluentButton Appearance="Appearance.Neutral" @onclick="CloseAddUpdateDialog">Cancel</FluentButton>
-                        <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Submit"
-                                      Disabled="string.IsNullOrWhiteSpace(updateModel.Message)">
-                            Add Update
-                        </FluentButton>
-                    </div>
-                </EditForm>
-            </div>
-        </div>
-    </FluentDialog>
-}
 
 @code {
     [Parameter] public string IncidentId { get; set; } = string.Empty;
 
     private Incident? incident;
     private List<IncidentUpdate>? incidentUpdates;
+    private List<EntityAudience> audience = new();
+    private AssetStatus? entityStatus;
     private bool isLoading = true;
 
+    private string composeMessage = "";
+    private string composeStatus = "";
+    private bool isPosting;
+    private bool showResolveModal;
+    private string resolutionDetails = "";
+
+    private StatusToast toast = default!;
+
+    private string CompanyId => StateContainer.Company?.Id ?? "";
     private string queryParam => StateContainer.Company is null ? "" : $"?c={StateContainer.Company.Id}";
 
     // Incident write actions require the company INCIDENTS role (ADMIN always allowed).
     private string writeRoles => $"{StateContainer.Company?.Id}_INCIDENTS,{StateContainer.Company?.Id}_ADMIN";
 
-    private bool ShowStatusUpdateModal = false;
-    private bool ShowResolveModal = false;
-    private bool ShowAddUpdateModal = false;
+    private string ShortId => incident is null ? "" : incident.Id.Length > 8 ? incident.Id[..8] : incident.Id;
 
-    private StatusUpdateModel statusUpdateModel = new();
-    private ResolveModel resolveModel = new();
-    private UpdateModel updateModel = new();
-
-    private string selectedStatusString
-    {
-        get => statusUpdateModel.Status.ToString();
-        set => statusUpdateModel.Status = Enum.Parse<IncidentStatus>(value);
-    }
+    private IncidentStatus? ComposeTarget => Enum.TryParse<IncidentStatus>(composeStatus, out var s) ? s : null;
+    private bool CanPost => ComposeTarget.HasValue || !string.IsNullOrWhiteSpace(composeMessage);
 
     protected override async Task OnInitializedAsync()
     {
         await LoadIncident();
         await LoadIncidentUpdates();
+        if (incident is not null)
+        {
+            var statusTask = HistoryService.GetLatestEntityStatusAsync(incident.EntityId, CompanyId);
+            var audienceTask = AudienceService.GetAudienceAsync(CompanyId, incident.EntityId);
+            try
+            {
+                await Task.WhenAll(statusTask, audienceTask);
+                entityStatus = statusTask.Result?.Status;
+                audience = audienceTask.Result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading incident context: {ex.Message}");
+            }
+        }
     }
 
     private async Task LoadIncident()
     {
         try
         {
-            isLoading = true;
             incident = await IncidentService.GetIncidentAsync(IncidentId);
         }
         catch (Exception ex)
         {
-            await JSRuntime.InvokeVoidAsync("console.error", "Error loading incident:", ex.Message);
+            Console.WriteLine($"Error loading incident: {ex.Message}");
         }
         finally
         {
@@ -619,152 +372,104 @@
         }
         catch (Exception ex)
         {
-            await JSRuntime.InvokeVoidAsync("console.error", "Error loading incident updates:", ex.Message);
+            Console.WriteLine($"Error loading incident updates: {ex.Message}");
         }
     }
 
-    private async Task UpdateStatus(IncidentStatus status)
+    /// <summary>When the incident first reached a step: Open is its start, later steps come from the timeline.</summary>
+    private DateTime? StepTime(IncidentStatus s)
     {
-        statusUpdateModel.Status = status;
-        statusUpdateModel.Message = $"Status changed to {status}";
-        await HandleStatusUpdate();
+        if (incident is null) return null;
+        if (s == IncidentStatus.Open) return incident.StartedAt;
+        if (s == IncidentStatus.Resolved && incident.ResolvedAt.HasValue) return incident.ResolvedAt;
+        return incidentUpdates?.Where(u => u.StatusChange == s).OrderBy(u => u.PostedAt).Select(u => (DateTime?)u.PostedAt).FirstOrDefault();
     }
 
-    private async Task HandleStatusUpdate()
+    private async Task PostUpdate()
     {
+        if (incident is null || !CanPost) return;
+        if (ComposeTarget == IncidentStatus.Resolved)
+        {
+            resolutionDetails = composeMessage;
+            showResolveModal = true;
+            return;
+        }
+
+        isPosting = true;
         try
         {
-            if (incident != null)
+            if (ComposeTarget is IncidentStatus target)
             {
-                incident.Status = statusUpdateModel.Status;
-                await IncidentService.UpdateIncidentAsync(incident);
-                if (!string.IsNullOrEmpty(statusUpdateModel.Message))
+                incident.Status = target;
+                if (!await IncidentService.UpdateIncidentAsync(incident))
                 {
-                    var update = new IncidentUpdate { IncidentId = IncidentId, Message = statusUpdateModel.Message, StatusChange = statusUpdateModel.Status };
-                    await IncidentService.AddIncidentUpdateAsync(IncidentId, update);
+                    toast.Show("Could not change the status. Try again.", error: true);
+                    await LoadIncident();
+                    return;
                 }
-                ShowStatusUpdateModal = false;
-                await LoadIncident();
-                await LoadIncidentUpdates();
-                statusUpdateModel = new();
+                var message = string.IsNullOrWhiteSpace(composeMessage) ? $"Status changed to {target}" : composeMessage.Trim();
+                await IncidentService.AddIncidentUpdateAsync(IncidentId, new IncidentUpdate { IncidentId = IncidentId, Message = message, StatusChange = target });
+                toast.Show($"Moved to {target}");
             }
+            else
+            {
+                var added = await IncidentService.AddIncidentUpdateAsync(IncidentId, new IncidentUpdate { IncidentId = IncidentId, Message = composeMessage.Trim() });
+                if (added is null) { toast.Show("Could not post the update. Try again.", error: true); return; }
+                toast.Show("Update posted");
+            }
+            composeMessage = "";
+            composeStatus = "";
+            await LoadIncident();
+            await LoadIncidentUpdates();
         }
         catch (Exception ex)
         {
-            await JSRuntime.InvokeVoidAsync("console.error", "Error updating status:", ex.Message);
+            Console.WriteLine($"Error posting update: {ex.Message}");
+            toast.Show("Could not post the update. Try again.", error: true);
         }
+        finally
+        {
+            isPosting = false;
+        }
+    }
+
+    private void OpenResolve()
+    {
+        resolutionDetails = "";
+        showResolveModal = true;
     }
 
     private async Task HandleResolve()
     {
+        if (incident is null || string.IsNullOrWhiteSpace(resolutionDetails)) return;
+        isPosting = true;
         try
         {
-            if (incident != null)
+            incident.Status = IncidentStatus.Resolved;
+            incident.ResolvedAt = DateTime.UtcNow;
+            incident.ResolutionDetails = resolutionDetails.Trim();
+            if (await IncidentService.UpdateIncidentAsync(incident))
             {
-                incident.Status = IncidentStatus.Resolved;
-                incident.ResolvedAt = DateTime.UtcNow;
-                incident.ResolutionDetails = resolveModel.ResolutionDetails;
-                await IncidentService.UpdateIncidentAsync(incident);
-                ShowResolveModal = false;
-                await LoadIncident();
-                await LoadIncidentUpdates();
-                resolveModel = new();
+                showResolveModal = false;
+                composeMessage = "";
+                composeStatus = "";
+                toast.Show("Incident resolved");
             }
-        }
-        catch (Exception ex)
-        {
-            await JSRuntime.InvokeVoidAsync("console.error", "Error resolving incident:", ex.Message);
-        }
-    }
-
-    private async Task HandleAddUpdate()
-    {
-        try
-        {
-            var update = new IncidentUpdate { IncidentId = IncidentId, Message = updateModel.Message };
-            await IncidentService.AddIncidentUpdateAsync(IncidentId, update);
+            else
+            {
+                toast.Show("Could not resolve the incident. Try again.", error: true);
+            }
+            await LoadIncident();
             await LoadIncidentUpdates();
-            updateModel = new();
         }
         catch (Exception ex)
         {
-            await JSRuntime.InvokeVoidAsync("console.error", "Error adding update:", ex.Message);
+            Console.WriteLine($"Error resolving incident: {ex.Message}");
+            toast.Show("Could not resolve the incident. Try again.", error: true);
         }
-    }
-
-    private void OpenAddUpdateDialog()
-    {
-        updateModel = new();
-        ShowAddUpdateModal = true;
-    }
-
-    private void CloseAddUpdateDialog()
-    {
-        ShowAddUpdateModal = false;
-    }
-
-    private async Task HandleAddUpdateFromDialog()
-    {
-        await HandleAddUpdate();
-        CloseAddUpdateDialog();
-    }
-
-    private void EditIncident()
-    {
-        Navigation.NavigateTo($"/status/incidents/{IncidentId}/edit{queryParam}");
-    }
-
-    private void ViewEntity(string entityId)
-    {
-        Navigation.NavigateTo($"/status/entities/{entityId}{queryParam}");
-    }
-
-    private void BackToIncidents()
-    {
-        Navigation.NavigateTo($"/status/incidents{queryParam}");
-    }
-
-    private string FormatDuration(TimeSpan? duration)
-    {
-        if (!duration.HasValue) return "0m";
-        var d = duration.Value;
-        if (d.TotalDays >= 1) return $"{(int)d.TotalDays}d {d.Hours}h";
-        if (d.TotalHours >= 1) return $"{(int)d.TotalHours}h {d.Minutes}m";
-        return $"{(int)d.TotalMinutes}m";
-    }
-
-    private string SeverityTileClass(IncidentSeverity severity) => severity switch
-    {
-        IncidentSeverity.Low => "bg-blue-50",
-        IncidentSeverity.Medium => "bg-yellow-50",
-        IncidentSeverity.High => "bg-orange-50",
-        IncidentSeverity.Critical => "bg-red-50",
-        _ => "bg-gray-100"
-    };
-
-    private string GetStatusClass(IncidentStatus status) => status switch
-    {
-        IncidentStatus.Open => "bg-red-100 text-red-800",
-        IncidentStatus.Investigating => "bg-yellow-100 text-yellow-800",
-        IncidentStatus.Identified => "bg-blue-100 text-blue-800",
-        IncidentStatus.Monitoring => "bg-purple-100 text-purple-800",
-        IncidentStatus.Resolved => "bg-green-100 text-green-800",
-        _ => "bg-gray-100 text-gray-800"
-    };
-
-    private class StatusUpdateModel
-    {
-        public IncidentStatus Status { get; set; } = IncidentStatus.Open;
-        public string Message { get; set; } = string.Empty;
-    }
-
-    private class ResolveModel
-    {
-        public string ResolutionDetails { get; set; } = string.Empty;
-    }
-
-    private class UpdateModel
-    {
-        public string Message { get; set; } = string.Empty;
+        finally
+        {
+            isPosting = false;
+        }
     }
 }

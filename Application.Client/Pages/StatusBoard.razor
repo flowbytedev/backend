@@ -7,250 +7,145 @@
 
 <PageTitle>Status</PageTitle>
 
-<style>
-    /* ── Dark theme (data-theme="dark") — override hardcoded Tailwind light colors ── */
-    [data-theme="dark"] .sd-scope.min-h-screen { background-color: #0e1117; }
-    [data-theme="dark"] .sd-scope.bg-white { background-color: #181a20; }
-
-    [data-theme="dark"] .sd-scope .bg-white { background-color: #181a20; }
-    [data-theme="dark"] .sd-scope .bg-white\/60 { background-color: rgba(24,26,32,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-50 { background-color: #1e222b; }
-    [data-theme="dark"] .sd-scope .bg-gray-50\/60 { background-color: rgba(30,34,43,0.6); }
-    [data-theme="dark"] .sd-scope .bg-gray-100 { background-color: #20242c; }
-
-    [data-theme="dark"] .sd-scope .text-gray-900 { color: #f3f4f6; }
-    [data-theme="dark"] .sd-scope .text-gray-800 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-700 { color: #e6e9ef; }
-    [data-theme="dark"] .sd-scope .text-gray-600 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-500 { color: #9aa1ac; }
-    [data-theme="dark"] .sd-scope .text-gray-400 { color: #767d89; }
-    [data-theme="dark"] .sd-scope .text-gray-300 { color: #4b515e; }
-
-    [data-theme="dark"] .sd-scope .border-gray-100 { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .border-gray-200 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-200\/80 { border-color: #2b303b; }
-    [data-theme="dark"] .sd-scope .border-gray-300 { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .divide-gray-100 > :not([hidden]) ~ :not([hidden]) { border-color: #23272f; }
-    [data-theme="dark"] .sd-scope .divide-gray-200 > :not([hidden]) ~ :not([hidden]) { border-color: #2b303b; }
-
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-50:hover { background-color: #20242c; }
-    [data-theme="dark"] .sd-scope .hover\:bg-gray-100:hover { background-color: #262b34; }
-    [data-theme="dark"] .sd-scope .hover\:bg-red-50:hover { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .hover\:bg-indigo-100:hover { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .hover\:border-gray-400:hover { border-color: #3a4150; }
-    [data-theme="dark"] .sd-scope .hover\:border-red-200:hover { border-color: rgba(239,68,68,0.30); }
-
-    [data-theme="dark"] .sd-scope input:not([type="checkbox"]):not([type="radio"]),
-    [data-theme="dark"] .sd-scope select,
-    [data-theme="dark"] .sd-scope textarea {
-        background-color: #12141a !important;
-        border-color: #2b303b !important;
-        color: #e6e9ef !important;
-    }
-    [data-theme="dark"] .sd-scope input::placeholder,
-    [data-theme="dark"] .sd-scope textarea::placeholder { color: #767d89 !important; }
-
-    [data-theme="dark"] .sd-scope .bg-red-50 { background-color: rgba(239,68,68,0.12); }
-    [data-theme="dark"] .sd-scope .bg-red-100 { background-color: rgba(239,68,68,0.15); }
-    [data-theme="dark"] .sd-scope .border-red-200 { border-color: rgba(239,68,68,0.30); }
-    [data-theme="dark"] .sd-scope .text-red-400,
-    [data-theme="dark"] .sd-scope .text-red-500,
-    [data-theme="dark"] .sd-scope .text-red-600,
-    [data-theme="dark"] .sd-scope .text-red-700,
-    [data-theme="dark"] .sd-scope .text-red-800 { color: #f87171; }
-    [data-theme="dark"] .sd-scope .hover\:text-red-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-red-800:hover { color: #fca5a5; }
-
-    [data-theme="dark"] .sd-scope .bg-green-50 { background-color: rgba(34,197,94,0.12); }
-    [data-theme="dark"] .sd-scope .bg-green-100 { background-color: rgba(34,197,94,0.15); }
-    [data-theme="dark"] .sd-scope .border-green-200 { border-color: rgba(34,197,94,0.30); }
-    [data-theme="dark"] .sd-scope .text-green-500,
-    [data-theme="dark"] .sd-scope .text-green-600,
-    [data-theme="dark"] .sd-scope .text-green-700,
-    [data-theme="dark"] .sd-scope .text-green-800 { color: #4ade80; }
-
-    [data-theme="dark"] .sd-scope .bg-yellow-50 { background-color: rgba(245,158,11,0.10); }
-    [data-theme="dark"] .sd-scope .bg-yellow-100 { background-color: rgba(245,158,11,0.15); }
-    [data-theme="dark"] .sd-scope .border-yellow-200 { border-color: rgba(245,158,11,0.30); }
-    [data-theme="dark"] .sd-scope .text-yellow-700,
-    [data-theme="dark"] .sd-scope .text-yellow-800 { color: #fcd34d; }
-
-    [data-theme="dark"] .sd-scope .bg-orange-50 { background-color: rgba(249,115,22,0.10); }
-    [data-theme="dark"] .sd-scope .bg-orange-100 { background-color: rgba(249,115,22,0.15); }
-    [data-theme="dark"] .sd-scope .border-orange-200 { border-color: rgba(249,115,22,0.30); }
-    [data-theme="dark"] .sd-scope .text-orange-600,
-    [data-theme="dark"] .sd-scope .text-orange-700,
-    [data-theme="dark"] .sd-scope .text-orange-800 { color: #fdba74; }
-
-    [data-theme="dark"] .sd-scope .bg-blue-50 { background-color: rgba(59,130,246,0.10); }
-    [data-theme="dark"] .sd-scope .bg-blue-100 { background-color: rgba(59,130,246,0.15); }
-    [data-theme="dark"] .sd-scope .border-blue-200 { border-color: rgba(59,130,246,0.30); }
-    [data-theme="dark"] .sd-scope .text-blue-600,
-    [data-theme="dark"] .sd-scope .text-blue-700,
-    [data-theme="dark"] .sd-scope .text-blue-800 { color: #93c5fd; }
-    [data-theme="dark"] .sd-scope .text-blue-900 { color: #bfdbfe; }
-
-    [data-theme="dark"] .sd-scope .bg-purple-50 { background-color: rgba(168,85,247,0.12); }
-    [data-theme="dark"] .sd-scope .bg-purple-100 { background-color: rgba(168,85,247,0.18); }
-    [data-theme="dark"] .sd-scope .text-purple-700,
-    [data-theme="dark"] .sd-scope .text-purple-800 { color: #d8b4fe; }
-
-    [data-theme="dark"] .sd-scope .bg-indigo-50 { background-color: rgba(129,140,248,0.14); }
-    [data-theme="dark"] .sd-scope .bg-indigo-100 { background-color: rgba(129,140,248,0.20); }
-    [data-theme="dark"] .sd-scope .border-indigo-200 { border-color: rgba(129,140,248,0.30); }
-    [data-theme="dark"] .sd-scope .text-indigo-600,
-    [data-theme="dark"] .sd-scope .text-indigo-700 { color: #a5b4fc; }
-    [data-theme="dark"] .sd-scope .text-indigo-800 { color: #c7d2fe; }
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-600:hover,
-    [data-theme="dark"] .sd-scope .hover\:text-indigo-800:hover { color: #c7d2fe; }
-
-    [data-theme="dark"] .sd-scope .bg-gray-200 { background-color: #23272f; }
-    [data-theme="dark"] .sd-scope .bg-gray-300 { background-color: #363c48; }
-
-    [data-theme="dark"] .sd-scope .ring-white { --tw-ring-color: #181a20; }
-    [data-theme="dark"] .sd-scope .ring-offset-1 { --tw-ring-offset-color: #181a20; }
-</style>
-
-<div class="min-h-screen bg-gray-50 p-6 sd-scope">
-    <!-- Header -->
-    <div class="mb-6 flex items-start justify-between gap-4">
-        <div>
-            <h1 class="text-2xl font-bold text-gray-900">Status</h1>
-            <p class="mt-1 text-sm text-gray-500">Last 30 days of uptime, grouped by type. Click a type to expand.</p>
-        </div>
-        <div class="flex items-center gap-2">
-            <div class="relative">
-                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"
-                     class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input type="text" value="@filter" @oninput="OnFilterChanged" placeholder="Filter entities…"
-                       class="w-56 rounded-md border border-gray-300 bg-white pl-8 pr-8 py-1.5 text-sm text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-indigo-400" />
-                @if (HasFilter)
-                {
-                    <button @onclick="ClearFilter" title="Clear filter"
-                            class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
-                        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                    </button>
-                }
+@* Read-only status page for every signed-in user. Styles: Application/wwwroot/status.css (.st-*). *@
+<div class="sc">
+    <div class="page-wrap st-wrap">
+        <div class="st-head">
+            <div class="page-header">
+                <h1 class="page-title">Status</h1>
+                <p class="page-subtitle">Availability of every monitored entity over the last @days days, grouped by type.</p>
             </div>
-            <button @onclick="Reload" disabled="@isLoading"
-                    class="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50">
-                <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-                Reload
-            </button>
-        </div>
-    </div>
-
-    @if (isLoading)
-    {
-        <div class="flex justify-center items-center h-64">
-            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-        </div>
-    }
-    else if (overview is null || !overview.Groups.Any())
-    {
-        <div class="bg-white rounded-lg border border-gray-200 text-center py-16 text-sm text-gray-500">
-            No monitored assets yet.
-        </div>
-    }
-    else
-    {
-        var banner = GetBanner();
-        <!-- Overall banner -->
-        <div class="rounded-lg border @banner.Border @banner.Bg px-4 py-3 mb-6 flex items-center gap-3">
-            <span class="w-2.5 h-2.5 rounded-full @banner.Dot"></span>
-            <span class="text-sm font-semibold @banner.Text">@banner.Message</span>
+            <div class="st-head-actions">
+                <div class="dl-search">
+                    @StatusUi.Icon("search", 14)
+                    <input class="input" type="search" placeholder="Filter entities…" aria-label="Filter entities"
+                           @bind="filter" @bind:event="oninput" />
+                </div>
+                <div class="dl-seg" role="group" aria-label="Range">
+                    @foreach (var d in new[] { 30, 90 })
+                    {
+                        var dd = d;
+                        <button type="button" class="dl-seg-btn @(days == dd ? "is-active" : "")" @onclick="() => SetRange(dd)">@(dd)d</button>
+                    }
+                </div>
+                <button class="btn btn-secondary" type="button" @onclick="Reload" disabled="@isLoading">
+                    @StatusUi.Icon("refresh", 14) Reload
+                </button>
+            </div>
         </div>
 
-        var filteredGroups = FilteredGroups().ToList();
-        @if (!filteredGroups.Any())
+        @if (isLoading && overview is null)
         {
-            <div class="bg-white rounded-lg border border-gray-200 text-center py-16 text-sm text-gray-500">
-                No entities match "<span class="font-medium text-gray-700">@filter</span>".
+            <div class="card"><div class="st-loading"><span class="spin"></span> Loading status…</div></div>
+        }
+        else if (overview is null || !overview.Groups.Any())
+        {
+            <div class="card">
+                <div class="empty">
+                    <div class="dl-empty-icon">@StatusUi.Icon("activity", 20)</div>
+                    <div class="empty-title">Nothing is monitored yet</div>
+                    <div class="empty-text">Entities added under Status → Entities appear here with their daily availability.</div>
+                </div>
             </div>
         }
-        <div class="space-y-4">
-            @foreach (var group in filteredGroups)
-            {
-                var isOpen = expanded.Contains(group.EntityType) || HasFilter;
-                <div class="bg-white rounded-lg border border-gray-200">
-                    <!-- Card header -->
-                    <button @onclick="() => Toggle(group.EntityType)"
-                            class="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 rounded-lg">
-                        <div class="flex items-center gap-3">
-                            <span class="text-lg">@TypeIcon(group.EntityType)</span>
-                            <span class="text-sm font-semibold text-gray-900">@group.TypeLabel</span>
-                            @{ var shown = FilteredEntities(group).Count(); }
-                            <span class="text-xs text-gray-400">@(HasFilter ? $"{shown} / {group.EntityCount}" : group.EntityCount.ToString())</span>
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <span class="inline-flex items-center gap-1 text-xs font-medium @StatusTextClass(group.WorstCurrentStatus)">
-                                <span class="w-1.5 h-1.5 rounded-full @StatusDotClass(group.WorstCurrentStatus)"></span>
-                                @StatusLabel(group.WorstCurrentStatus)
-                            </span>
-                            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"
-                                 class="text-gray-400 transition-transform @(isOpen ? "rotate-180" : "")"><polyline points="6 9 12 15 18 9"/></svg>
-                        </div>
-                    </button>
+        else
+        {
+            var all = overview.Groups.SelectMany(g => g.Entities).ToList();
+            var down = all.Where(e => StatusUi.IsDown(e.CurrentStatus)).ToList();
+            var degraded = all.Where(e => e.CurrentStatus is AssetStatus.Degraded).ToList();
+            var maint = all.Where(e => e.CurrentStatus is AssetStatus.Maintenance).ToList();
+            var bannerCls = down.Any() ? "s-offline" : degraded.Any() ? "s-degraded" : maint.Any() ? "s-maintenance" : "s-online";
 
+            <div class="st-banner @bannerCls">
+                <span class="st-banner-dot"></span>
+                <div class="st-banner-text">
+                    <h2 class="st-banner-title">@BannerTitle(down.Count, degraded.Count, maint.Count)</h2>
+                    <div class="st-banner-sub">@BannerDetail(down, degraded, maint)</div>
+                </div>
+                <div class="st-banner-right">
+                    Updated<strong>@StatusUi.FullWhen(overview.GeneratedAtUtc)</strong>@StatusUi.Plural(all.Count, "entity", "entities") monitored
+                </div>
+            </div>
+
+            <div class="st-legend" style="margin: 0 0 12px 2px">
+                <span><i class="s-online"></i> Online</span>
+                <span><i class="s-degraded"></i> Degraded</span>
+                <span><i class="s-offline"></i> Offline / error</span>
+                <span><i class="s-maintenance"></i> Maintenance</span>
+                <span><i class="s-unknown"></i> Unknown</span>
+                <span><i class="s-none"></i> No data</span>
+                <span class="st-legend-note">Click a day to see its checks</span>
+            </div>
+
+            var groups = FilteredGroups().ToList();
+            @if (!groups.Any())
+            {
+                <div class="card">
+                    <div class="empty">
+                        <div class="empty-title">No entities match “@filter”</div>
+                        <button class="btn btn-ghost btn-sm" type="button" @onclick='() => filter = ""'>Clear filter</button>
+                    </div>
+                </div>
+            }
+
+            @foreach (var group in groups)
+            {
+                var g = group;
+                var isOpen = HasFilter || !collapsed.Contains(g.EntityType);
+                var shown = FilteredEntities(g).ToList();
+                var bad = g.Entities.Where(e => StatusUi.NeedsAttention(e.CurrentStatus)).ToList();
+                <div class="card st-group @(isOpen ? "is-open" : "")">
+                    <button class="st-group-head" type="button" @onclick="() => Toggle(g.EntityType)" aria-expanded="@(isOpen ? "true" : "false")">
+                        <span class="st-tile">@StatusUi.TypeSvg(g.EntityType, 18)</span>
+                        <span class="st-group-name">@StatusUi.TypePlural(g.EntityType)</span>
+                        <span class="st-group-count">@(HasFilter ? $"{shown.Count} / {g.EntityCount}" : g.EntityCount.ToString())</span>
+                        <span class="st-status @StatusUi.Cls(g.WorstCurrentStatus)"><span class="st-dot"></span> @GroupSummary(g, bad)</span>
+                        <span class="st-group-strip"><AvailabilityStrip Days="@StatusUi.WorstDays(g.Entities)" Size="sm" Name="@StatusUi.TypePlural(g.EntityType)" /></span>
+                        <span class="st-group-chev">@StatusUi.Icon("chev-down", 16)</span>
+                    </button>
                     @if (isOpen)
                     {
-                        <div class="border-t border-gray-100 divide-y divide-gray-100">
-                            @foreach (var entity in FilteredEntities(group))
+                        <div>
+                            @foreach (var entity in shown)
                             {
-                                <div class="px-4 py-3">
-                                    <div class="flex items-center justify-between mb-2">
-                                        <div class="flex items-center gap-2">
-                                            <span class="inline-flex items-center gap-1 text-xs font-medium @StatusTextClass(entity.CurrentStatus)">
-                                                <span class="w-1.5 h-1.5 rounded-full @StatusDotClass(entity.CurrentStatus)"></span>
-                                            </span>
-                                            <span class="text-sm font-medium text-gray-900">@entity.Name</span>
-                                        </div>
-                                        <span class="text-xs text-gray-400">@(HasData(entity) ? $"{entity.UptimePercent}% uptime" : "No data")</span>
+                                var e = entity;
+                                var hasData = StatusUi.HasData(e);
+                                <div class="st-row">
+                                    <div class="st-row-head">
+                                        <span class="st-status @StatusUi.Cls(e.CurrentStatus)" title="@StatusUi.Label(e.CurrentStatus)"><span class="st-dot @(StatusUi.IsUnhealthy(e.CurrentStatus) ? "is-live" : "")"></span></span>
+                                        <span class="st-row-name">@e.Name</span>
+                                        <span class="st-muted" style="font-size:12px">@StatusUi.Label(e.CurrentStatus)</span>
+                                        <span class="st-spacer"></span>
+                                        <span class="st-uptime @(hasData ? StatusUi.UptimeCls(e.UptimePercent) : "")">@(hasData ? $"{e.UptimePercent:0.0}% uptime" : "No data")</span>
                                     </div>
-
-                                    <!-- 30-day bar -->
-                                    <div class="flex gap-0.5 items-stretch">
-                                        @foreach (var day in entity.Days)
-                                        {
-                                            var isDayOpen = openEntityId == entity.EntityId && openDate == day.Date;
-                                            <button @onclick="() => ToggleDay(entity.EntityId, day.Date)"
-                                                    title="@($"{day.Date:MMM d} — {(day.Status.HasValue ? StatusLabel(day.Status.Value) : "No data")}")"
-                                                    class="flex-1 h-8 rounded-sm cursor-pointer hover:opacity-80 @DayCellClass(day.Status) @(isDayOpen ? "ring-2 ring-offset-1 ring-indigo-400" : "")"></button>
-                                        }
-                                    </div>
-
-                                    @if (openEntityId == entity.EntityId && openDate.HasValue)
+                                    <AvailabilityStrip Days="@e.Days" Interactive="true" MarkToday="true" Name="@e.Name"
+                                                       SelectedDate="@(openEntityId == e.EntityId ? openDate : null)"
+                                                       OnDayClick="@(d => ToggleDay(e.EntityId, d))" />
+                                    @if (openEntityId == e.EntityId && openDate.HasValue)
                                     {
-                                        <div class="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
-                                            <div class="text-xs font-semibold text-gray-700 mb-2">@openDate.Value.ToString("MMMM d, yyyy") — events (UTC)</div>
+                                        <div class="st-day">
+                                            <div class="st-day-head">
+                                                <span>@openDate.Value.ToString("d MMMM yyyy") · @(dayLoading ? "loading…" : StatusUi.Plural(dayEvents.Count, "check"))</span>
+                                                <button type="button" class="st-link" @onclick="CloseDay">Close</button>
+                                            </div>
                                             @if (dayLoading)
                                             {
-                                                <div class="text-xs text-gray-500">Loading…</div>
+                                                <div class="st-day-empty">Loading checks…</div>
                                             }
                                             else if (!dayEvents.Any())
                                             {
-                                                <div class="text-xs text-gray-500">No events recorded this day.</div>
+                                                <div class="st-day-empty">No checks were recorded on this day.</div>
                                             }
                                             else
                                             {
-                                                <ul class="space-y-1">
+                                                <ul class="st-day-list">
                                                     @foreach (var ev in dayEvents)
                                                     {
-                                                        <li class="flex items-center gap-3 text-xs">
-                                                            <span class="text-gray-400 tabular-nums w-12">@ev.CheckedAt.ToString("HH:mm")</span>
-                                                            <span class="inline-flex items-center gap-1 font-medium @StatusTextClass(ev.Status)">
-                                                                <span class="w-1.5 h-1.5 rounded-full @StatusDotClass(ev.Status)"></span>
-                                                                @StatusLabel(ev.Status)
-                                                            </span>
-                                                            @if (ev.ResponseTime.HasValue)
-                                                            {
-                                                                <span class="text-gray-400">@($"{ev.ResponseTime.Value:0} ms")</span>
-                                                            }
-                                                            @if (!string.IsNullOrWhiteSpace(ev.StatusMessage))
-                                                            {
-                                                                <span class="text-gray-600 truncate">@ev.StatusMessage</span>
-                                                            }
+                                                        <li>
+                                                            <time>@StatusUi.Local(ev.CheckedAt).ToString("HH:mm")</time>
+                                                            <span class="st-status @StatusUi.Cls(ev.Status)"><span class="st-dot"></span> @StatusUi.Label(ev.Status)</span>
+                                                            <span class="st-day-ms">@(ev.ResponseTime.HasValue ? StatusUi.Ms(ev.ResponseTime) : "")</span>
+                                                            <span class="st-day-msg" title="@ev.StatusMessage">@ev.StatusMessage</span>
                                                         </li>
                                                     }
                                                 </ul>
@@ -263,16 +158,17 @@
                     }
                 </div>
             }
-        </div>
-    }
+        }
+    </div>
 </div>
 
 @code {
     private StatusOverviewDto? overview;
     private bool isLoading = true;
+    private int days = 90;
 
-    private readonly HashSet<AssetType> expanded = new();
-
+    private readonly HashSet<AssetType> collapsed = new();
+    private bool collapseApplied;
     private string filter = "";
     private bool HasFilter => !string.IsNullOrWhiteSpace(filter);
 
@@ -289,49 +185,58 @@
         if (string.IsNullOrEmpty(companyId)) { isLoading = false; return; }
 
         isLoading = true;
-        overview = await OverviewService.GetOverviewAsync(companyId, 30);
+        overview = await OverviewService.GetOverviewAsync(companyId, days);
         isLoading = false;
+
+        // Healthy groups start collapsed when there are several, so the problems are what you see first.
+        if (overview is not null && !collapseApplied)
+        {
+            collapseApplied = true;
+            if (overview.Groups.Count > 3)
+                foreach (var g in overview.Groups.Where(g => !g.Entities.Any(e => StatusUi.NeedsAttention(e.CurrentStatus))))
+                    collapsed.Add(g.EntityType);
+        }
     }
 
     private async Task Reload()
     {
-        openEntityId = null;
-        openDate = null;
+        CloseDay();
         await Load();
+    }
+
+    private async Task SetRange(int d)
+    {
+        if (days == d) return;
+        days = d;
+        await Reload();
     }
 
     private void Toggle(AssetType type)
     {
-        if (!expanded.Remove(type)) expanded.Add(type);
+        if (!collapsed.Remove(type)) collapsed.Add(type);
     }
 
-    private void OnFilterChanged(ChangeEventArgs e) => filter = e.Value?.ToString() ?? "";
-
-    private void ClearFilter() => filter = "";
-
-    private IEnumerable<StatusOverviewTypeGroup> FilteredGroups()
-    {
-        if (!HasFilter) return overview!.Groups;
-        return overview!.Groups.Where(g => FilteredEntities(g).Any());
-    }
+    private IEnumerable<StatusOverviewTypeGroup> FilteredGroups() =>
+        HasFilter ? overview!.Groups.Where(g => FilteredEntities(g).Any()) : overview!.Groups;
 
     private IEnumerable<StatusOverviewEntity> FilteredEntities(StatusOverviewTypeGroup group)
     {
-        if (!HasFilter) return group.Entities;
+        var ordered = group.Entities.OrderByDescending(e => StatusUi.Rank(e.CurrentStatus) >= 3).ThenBy(e => e.Name);
+        if (!HasFilter) return ordered;
         var f = filter.Trim();
-        return group.Entities.Where(e => e.Name.Contains(f, StringComparison.OrdinalIgnoreCase));
+        return ordered.Where(e => e.Name.Contains(f, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private void CloseDay()
+    {
+        openEntityId = null;
+        openDate = null;
+        dayEvents = new();
     }
 
     private async Task ToggleDay(string entityId, DateTime date)
     {
-        // Clicking the open cell again closes it.
-        if (openEntityId == entityId && openDate == date)
-        {
-            openEntityId = null;
-            openDate = null;
-            dayEvents = new();
-            return;
-        }
+        if (openEntityId == entityId && openDate == date) { CloseDay(); return; }
 
         openEntityId = entityId;
         openDate = date;
@@ -340,71 +245,37 @@
 
         var companyId = StateContainer.Company?.Id;
         if (!string.IsNullOrEmpty(companyId))
-            dayEvents = await OverviewService.GetDayEventsAsync(companyId, entityId, date);
+            dayEvents = (await OverviewService.GetDayEventsAsync(companyId, entityId, date)).OrderByDescending(e => e.CheckedAt).ToList();
 
         dayLoading = false;
     }
 
-    private static bool HasData(StatusOverviewEntity e) => e.Days.Any(d => d.Status.HasValue);
-
-    private (string Bg, string Border, string Dot, string Text, string Message) GetBanner()
+    private static string GroupSummary(StatusOverviewTypeGroup g, List<StatusOverviewEntity> bad)
     {
-        var all = overview!.Groups.SelectMany(g => g.Entities).ToList();
-        var down = all.Count(e => e.CurrentStatus is AssetStatus.Offline or AssetStatus.Error);
-        var degraded = all.Count(e => e.CurrentStatus is AssetStatus.Degraded or AssetStatus.Maintenance);
-
-        if (down > 0)
-            return ("bg-red-50", "border-red-200", "bg-red-500", "text-red-700",
-                $"{down} component{(down == 1 ? "" : "s")} down{(degraded > 0 ? $", {degraded} degraded" : "")}");
-        if (degraded > 0)
-            return ("bg-yellow-50", "border-yellow-200", "bg-yellow-500", "text-yellow-700",
-                $"{degraded} component{(degraded == 1 ? "" : "s")} degraded");
-        return ("bg-green-50", "border-green-200", "bg-green-500", "text-green-700", "All systems operational");
+        if (!bad.Any()) return g.Entities.All(e => e.CurrentStatus == AssetStatus.Online) ? "All online" : "No problems";
+        var worst = g.WorstCurrentStatus;
+        var n = bad.Count(e => StatusUi.Rank(e.CurrentStatus) == StatusUi.Rank(worst));
+        return $"{n} {StatusUi.Label(worst).ToLowerInvariant()}";
     }
 
-    private static string DayCellClass(AssetStatus? status) => status switch
+    private static string BannerTitle(int down, int degraded, int maint)
     {
-        AssetStatus.Online => "bg-green-500",
-        AssetStatus.Offline => "bg-red-500",
-        AssetStatus.Error => "bg-red-500",
-        AssetStatus.Degraded => "bg-yellow-500",
-        AssetStatus.Maintenance => "bg-yellow-500",
-        AssetStatus.Unknown => "bg-gray-300",
-        null => "bg-gray-200",
-        _ => "bg-gray-200"
-    };
+        if (down == 0 && degraded == 0 && maint == 0) return "All systems operational";
+        var parts = new List<string>();
+        if (down > 0) parts.Add($"{down} {(down == 1 ? "component" : "components")} down");
+        if (degraded > 0) parts.Add($"{degraded} degraded");
+        if (maint > 0) parts.Add($"{maint} in maintenance");
+        var s = string.Join(", ", parts);
+        return char.ToUpperInvariant(s[0]) + s[1..];
+    }
 
-    private static string StatusTextClass(AssetStatus status) => status switch
+    private static string BannerDetail(List<StatusOverviewEntity> down, List<StatusOverviewEntity> degraded, List<StatusOverviewEntity> maint)
     {
-        AssetStatus.Online => "text-green-700",
-        AssetStatus.Offline => "text-red-700",
-        AssetStatus.Error => "text-red-700",
-        AssetStatus.Degraded => "text-yellow-700",
-        AssetStatus.Maintenance => "text-blue-700",
-        _ => "text-gray-500"
-    };
-
-    private static string StatusDotClass(AssetStatus status) => status switch
-    {
-        AssetStatus.Online => "bg-green-500",
-        AssetStatus.Offline => "bg-red-500",
-        AssetStatus.Error => "bg-red-500",
-        AssetStatus.Degraded => "bg-yellow-500",
-        AssetStatus.Maintenance => "bg-blue-500",
-        _ => "bg-gray-400"
-    };
-
-    private static string StatusLabel(AssetStatus status) => status.ToString();
-
-    private static string TypeIcon(AssetType type) => type switch
-    {
-        AssetType.Server => "🖥️",
-        AssetType.Database => "🗄️",
-        AssetType.Report => "📊",
-        AssetType.Dataset => "📈",
-        AssetType.DataPipeline => "🔄",
-        AssetType.Table => "📋",
-        AssetType.DataJob => "⚙️",
-        _ => "📦"
-    };
+        static string Names(List<StatusOverviewEntity> l) => string.Join(", ", l.Take(3).Select(e => e.Name)) + (l.Count > 3 ? $" +{l.Count - 3} more" : "");
+        var parts = new List<string>();
+        if (down.Any()) parts.Add($"{Names(down)} {(down.Count == 1 ? "is" : "are")} down");
+        if (degraded.Any()) parts.Add($"{Names(degraded)} {(degraded.Count == 1 ? "is" : "are")} degraded");
+        if (maint.Any()) parts.Add($"{Names(maint)} in maintenance");
+        return parts.Any() ? string.Join(" · ", parts) : "Every monitored entity reported online on its latest check.";
+    }
 }
