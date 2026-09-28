@@ -1,0 +1,221 @@
+/* =====================================================================================================
+   Data list pages — datasets (/data/datasets) and tables (/data/tables). Class names are `.dl-*`.
+
+   The shared recipe for a "list of things" page on the shadcn design system: a head row with the title
+   and its actions, a card with a search + segmented-filter toolbar, a fixed-layout table whose first
+   column absorbs the spare width, row actions that stay quiet until the row is hovered, skeleton rows
+   while loading, a footer pager and an empty state. Everything is built on the tokens in shadcn.css
+   (light and dark both come from the tokens), so load this after it.
+
+   Like pipeline.css the names are unique to these pages and NOT scoped to `.sc`, except the handful of
+   rules that must out-rank a `.sc` recipe (page-wrap, card, badge, links, buttons) — those carry the
+   `.sc` prefix and say why. Column widths (`.dl-col-*` / `.tl-col-*`) stay in each page's own <style>.
+   ===================================================================================================== */
+
+/* ---- page frame: edge to edge. The wrap cancels .al-main's 20px/24px padding, the head keeps that
+        gutter for itself, and the card drops its side borders and corners so the table runs to the
+        viewport edges. `.sc` prefix: out-ranks `.sc .page-wrap` / `.sc .card`. ---- */
+.sc .dl-wrap { max-width: none; padding: 0; margin: -20px -24px 0; }
+.dl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 24px 0; margin-bottom: 18px; }
+.dl-head .page-header { margin-bottom: 0; min-width: 0; }
+.dl-head-left { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.dl-head-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.dl-back {
+    appearance: none; flex: 0 0 auto; width: 32px; height: 32px; margin-top: 2px; border-radius: 6px; border: 0;
+    background: transparent; color: var(--text-muted); display: inline-flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: background .12s ease, color .12s ease;
+}
+.dl-back:hover { background: var(--surface-subtle); color: var(--text-primary); }
+.dl-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dl-title-crumb { color: var(--text-muted); font-weight: 500; }
+.dl-title-sep { color: var(--border-strong); margin: 0 8px; font-weight: 400; }
+.dl-sep { color: var(--border-strong); margin: 0 7px; }
+.dl-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+.sc .dl-card { border-radius: 0; border-left: 0; border-right: 0; overflow: hidden; }
+@media (max-width: 767px) {
+    .sc .dl-wrap { margin: -14px -16px 0; }
+    .dl-head { padding: 14px 16px 0; flex-direction: column; align-items: stretch; }
+}
+
+/* ---- toolbar: search + segmented filters ---- */
+.dl-toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--surface);
+}
+.dl-search { position: relative; flex: 1 1 220px; max-width: 340px; }
+.dl-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-muted); pointer-events: none; }
+.sc .dl-search .input { padding-left: 32px; }
+.sc .dl-search .input::-webkit-search-cancel-button { cursor: pointer; }
+.dl-toolbar-spacer { flex: 1 1 auto; }
+.dl-toolbar-label { font-size: 12px; color: var(--text-muted); }
+
+.dl-seg {
+    display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+    background: var(--surface-subtle); border: 1px solid var(--border); border-radius: var(--radius-md);
+}
+.dl-seg-btn {
+    appearance: none; border: 0; background: transparent; font: inherit; font-size: 12.5px; font-weight: 500;
+    color: var(--text-muted); padding: 5px 10px; border-radius: 6px; cursor: pointer; line-height: 1;
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+    transition: background .12s ease, color .12s ease, box-shadow .12s ease;
+}
+.dl-seg-btn:hover { color: var(--text-primary); }
+.dl-seg-btn.is-active { background: var(--surface); color: var(--text-primary); box-shadow: var(--shadow-sm); }
+.dl-seg-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dl-seg-count {
+    font-size: 10.5px; font-weight: 600; line-height: 1; padding: 3px 5px; border-radius: 999px;
+    color: var(--text-muted); background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+    font-variant-numeric: tabular-nums;
+}
+.dl-seg-btn.is-active .dl-seg-count { color: var(--text-on-accent); background: var(--accent); }
+
+/* ---- table. Fixed layout: the page's fixed-width columns take what they need and the first column
+        absorbs the rest, so nothing is clipped on a normal screen; below the min-width the wrap scrolls
+        sideways. ---- */
+.dl-table-wrap { overflow-x: auto; }
+.dl-table { width: 100%; min-width: 1040px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.dl-th {
+    text-align: left; font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-muted); padding: 9px 12px; border-bottom: 1px solid var(--border);
+    background: var(--surface-subtle); white-space: nowrap; user-select: none;
+}
+.dl-th-inner { display: inline-flex; align-items: center; gap: 4px; }
+.dl-th-sort { cursor: pointer; transition: color .12s ease; }
+.dl-th-sort:hover, .dl-th-sort.is-active { color: var(--text-primary); }
+.dl-sort-ico { opacity: 0; transition: opacity .12s ease; }
+.dl-th-sort:hover .dl-sort-ico { opacity: .45; }
+.dl-th-sort.is-active .dl-sort-ico { opacity: 1; }
+.dl-th-num, .dl-td-num { text-align: right; }
+.dl-th-num .dl-th-inner { flex-direction: row-reverse; }
+.dl-th-actions, .dl-td-actions { white-space: nowrap; text-align: right; }
+
+.dl-td { padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-primary); vertical-align: middle; }
+.dl-row { cursor: pointer; }
+.dl-row .dl-td { transition: background .1s ease; }
+.dl-row:hover .dl-td { background: var(--surface-muted); }
+.dl-row:focus-visible { outline: none; }
+.dl-row:focus-visible .dl-td { background: var(--accent-subtle); }
+.dl-row:last-child .dl-td { border-bottom: 0; }
+.dl-row.is-pinned .dl-td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.dl-row-skel { cursor: default; }
+.dl-row-skel:hover .dl-td { background: transparent; }
+
+/* ---- identity cell: icon tile, name row, muted second line ---- */
+.dl-ident { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.dl-tile {
+    flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); background: var(--surface-subtle); color: var(--text-secondary);
+}
+.dl-tile-ext { background: var(--accent-subtle); border-color: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--accent); }
+.dl-ident-text { min-width: 0; }
+.dl-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dl-name { font-weight: 600; font-size: 13.5px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-name-mono { font-family: var(--font-mono); font-size: 13px; }
+.dl-pin-mark { color: var(--accent); flex: 0 0 auto; }
+.sc .dl-mini-badge { padding: 0 6px; font-size: 10px; line-height: 1.5; letter-spacing: .02em; flex: 0 0 auto; }
+.dl-desc { font-size: 12px; color: var(--text-muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- secondary cells ---- */
+.dl-source { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.sc .dl-entity {
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--text-muted); text-decoration: none;
+    display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sc a.dl-entity:hover, .sc a.dl-entity:focus-visible { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; outline: none; }
+.sc .dl-entity-static { cursor: default; }
+
+.dl-num { font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.dl-unit { color: var(--text-muted); font-size: 11.5px; margin-left: 2px; }
+.dl-na { color: var(--text-muted); }
+.dl-cell-main { font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-cell-sub { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dl-status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; color: var(--text-secondary); white-space: nowrap; }
+.dl-dot { width: 7px; height: 7px; border-radius: 50%; flex: 0 0 auto; background: var(--text-muted); box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 18%, transparent); }
+.dl-dot-success { background: var(--success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent); }
+.dl-dot-accent  { background: var(--accent);  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.dl-dot-warning { background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 24%, transparent); }
+.dl-dot-danger  { background: var(--danger);  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent); }
+
+.dl-access {
+    display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12.5px; font-weight: 500;
+    color: var(--text-secondary); background: none; border: 0; padding: 3px 7px; margin-left: -7px;
+    border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; transition: background .12s ease, color .12s ease;
+}
+.dl-access:hover, .dl-access:focus-visible { background: var(--accent-subtle); color: var(--accent); outline: none; }
+.dl-access-private { color: var(--text-muted); cursor: default; font-weight: 400; }
+.dl-access-private:hover { background: none; color: var(--text-muted); }
+
+.dl-td-date { color: var(--text-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* ---- row actions: quiet until the row is hovered or focused; active states always show ---- */
+.dl-actions { display: inline-flex; align-items: center; gap: 2px; }
+.dl-act {
+    appearance: none; width: 28px; height: 28px; border-radius: 6px; border: 0; background: transparent;
+    color: var(--text-muted); display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+    opacity: 0; transition: opacity .12s ease, background .12s ease, color .12s ease;
+}
+.dl-row:hover .dl-act, .dl-row:focus-within .dl-act, .dl-act.is-on, .dl-act-more { opacity: 1; }
+.dl-act:hover { background: var(--surface-subtle); color: var(--text-primary); }
+.dl-act.is-on { color: var(--accent); }
+.dl-act-star.is-on { color: var(--warning); }
+.dl-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; opacity: 1; }
+@media (hover: none) { .dl-act { opacity: 1; } }
+
+/* ---- skeleton rows. The shared recipe is nearly invisible on the light table surface; step it up. ---- */
+.dl-skel { height: 12px; }
+.dl-skel-tile { width: 34px; height: 34px; border-radius: 8px; flex: 0 0 auto; }
+.dl-row-skel .skeleton { background-image: linear-gradient(90deg, var(--border) 25%, var(--border-strong) 37%, var(--border) 63%); }
+
+/* ---- footer / pager ---- */
+.dl-footer {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    padding: 10px 14px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--text-muted);
+}
+.dl-footer-text strong { font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.dl-pager { display: inline-flex; align-items: center; gap: 2px; }
+.dl-page-btn {
+    appearance: none; min-width: 30px; height: 30px; padding: 0 8px; border-radius: 6px;
+    border: 1px solid transparent; background: transparent; color: var(--text-secondary);
+    font: inherit; font-size: 12.5px; font-variant-numeric: tabular-nums; cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: background .12s ease, color .12s ease;
+}
+.dl-page-btn:hover:not(:disabled) { background: var(--surface-subtle); color: var(--text-primary); }
+.dl-page-btn.is-active { background: var(--accent); color: var(--text-on-accent); border-color: var(--accent); }
+.dl-page-btn:disabled { opacity: .4; cursor: default; }
+.dl-page-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dl-page-gap { min-width: 22px; text-align: center; color: var(--text-muted); }
+
+/* ---- empty state ---- */
+.dl-empty-icon {
+    width: 44px; height: 44px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center;
+    background: var(--surface-subtle); border: 1px solid var(--border); color: var(--text-muted); margin-bottom: 6px;
+}
+
+/* ---- context menu: app.css hard codes .ctx-menu to light; retheme it through the tokens ---- */
+.dl-ctx-label {
+    padding: 0.3rem 0.6rem 0.35rem; font-size: 0.6875rem; font-weight: 600; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--text-muted); max-width: 240px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+[data-theme="dark"] .dl-ctx { background: var(--surface); border-color: var(--border); box-shadow: var(--shadow-md); }
+[data-theme="dark"] .dl-ctx .ctx-item { color: var(--text-primary); }
+[data-theme="dark"] .dl-ctx .ctx-item:hover { background: var(--surface-subtle); }
+[data-theme="dark"] .dl-ctx .ctx-item svg { color: var(--text-muted); }
+[data-theme="dark"] .dl-ctx .ctx-item-danger, [data-theme="dark"] .dl-ctx .ctx-item-danger svg { color: var(--danger); }
+[data-theme="dark"] .dl-ctx .ctx-item-danger:hover { background: var(--danger-subtle); }
+[data-theme="dark"] .dl-ctx .ctx-sep { background: var(--border); }
+
+/* ---- modal furniture shared by the "shared with" / share / connect dialogs ---- */
+.dl-modal-sub { color: var(--text-muted); font-weight: 400; }
+.dl-share-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--border); }
+.dl-share-row:first-of-type { border-top: 0; }
+.dl-share-name { font-weight: 500; font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dl-share-meta { font-size: 12px; color: var(--text-muted); }
+.dl-share-meta-mono { font-family: var(--font-mono); }
+.sc .dl-btn-danger-outline { color: var(--danger); border-color: var(--danger-border) !important; }
+.sc .dl-btn-danger-outline:hover:not(:disabled) { background: var(--danger-subtle); }
+.sc .dl-btn-warn { color: var(--warning); border-color: var(--warning-border) !important; }
+.sc .dl-btn-warn:hover:not(:disabled) { background: var(--warning-subtle); }

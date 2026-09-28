@@ -16,338 +16,455 @@
 
 <PageTitle>Tables</PageTitle>
 
-@if (!canView && !isLoading)
-{
-    <div class="flex flex-col items-center justify-center h-64 text-gray-500 gap-2">
-        <svg class="w-10 h-10 text-gray-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <p class="text-sm font-semibold text-gray-700">Access Denied</p>
-        <p class="text-xs text-gray-400">You don't have permission to view tables.</p>
-    </div>
-}
-else
-{
-<div class="ds-page">
-    <div class="ds-header">
-        <div style="display:flex;align-items:center;gap:0.75rem">
-            <button class="btn-icon" title="Back to Datasets" @onclick="GoBack">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
-            </button>
-            <div>
-                <h1 class="ds-title">
-                    @if (!string.IsNullOrEmpty(datasetName)) { @datasetName<span style="font-weight:400;color:#71717a"> / Tables</span> }
-                    else { <span>Tables</span> }
-                </h1>
-                <p class="ds-subtitle">
-                    @if (!isLoading) { <span>@(tables?.Count ?? 0) table@(tables?.Count == 1 ? "" : "s")</span> }
-                </p>
+<div class="sc dl">
+    <div class="page-wrap dl-wrap">
+    @if (!canView && !isLoading)
+    {
+        <div class="card">
+            <div class="empty">
+                <div class="dl-empty-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <div class="empty-title">Access denied</div>
+                <div class="empty-text">You don't have permission to view tables.</div>
             </div>
         </div>
-        @if (canEdit)
-        {
-        <div style="display:flex;align-items:center;gap:0.5rem">
-            @if (!dbExists && !isLoading)
-            {
-                <button class="btn btn-outline" style="color:#b45309;border-color:#fcd34d" @onclick="CreateDatabase" disabled="@isCreatingDb"
-                        title="This dataset has no database file on disk yet. Create it so ingestion and tables can run.">
-                    @if (isCreatingDb)
-                    {
-                        <span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px"></span>
-                        <span>Creating…</span>
-                    }
-                    else
-                    {
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
-                        <span>Create Database</span>
-                    }
+    }
+    else
+    {
+        <div class="dl-head">
+            <div class="dl-head-left">
+                <button type="button" class="dl-back" @onclick="GoBack" title="Back to datasets" aria-label="Back to datasets">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
                 </button>
-            }
-            <button class="btn btn-default" @onclick="CreateTable">
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-                New Table
-            </button>
-        </div>
-        }
-    </div>
-
-    <div class="ds-card">
-        <div class="ds-card-toolbar">
-            <div class="ds-search-wrap">
-                <svg class="ds-search-icon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
-                <input class="ds-search" type="search" placeholder="Search tables..." @bind="searchTerm" @bind:event="oninput" @bind:after="HandleSearch" />
+                <div class="page-header">
+                    <h1 class="page-title">
+                        @if (!string.IsNullOrEmpty(datasetName))
+                        {
+                            <span class="dl-title-crumb" title="@datasetName">@datasetName</span><span class="dl-title-sep">/</span><span>Tables</span>
+                        }
+                        else
+                        {
+                            <span>Tables</span>
+                        }
+                    </h1>
+                    <p class="page-subtitle">
+                        @if (isLoading)
+                        {
+                            <span class="skeleton dl-skel" style="display:inline-block;width:160px;vertical-align:middle;"></span>
+                        }
+                        else
+                        {
+                            var total = tables?.Count ?? 0;
+                            var documented = CountFor("docs");
+                            var ingested = CountFor("ingested");
+                            var pinned = CountFor("pinned");
+                            <span>@total table@(total == 1 ? "" : "s")</span>
+                            @if (isExternal) { <span class="dl-sep">·</span><span>@(SourceMode ? "live source" : "snapshot")</span> }
+                            @if (documented > 0) { <span class="dl-sep">·</span><span>@documented documented</span> }
+                            @if (ingested > 0) { <span class="dl-sep">·</span><span>@ingested ingested</span> }
+                            @if (pinned > 0) { <span class="dl-sep">·</span><span>@pinned pinned</span> }
+                        }
+                    </p>
+                </div>
             </div>
-            <button type="button" class="btn @(docsOnly ? "btn-default" : "btn-outline")" @onclick="ToggleDocsOnly"
-                    title="@(docsOnly ? "Showing only documented tables — click to show all" : "Show only tables that have column documentation")"
-                    style="white-space:nowrap">
-                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
-                Docs only
-            </button>
-            @if (isExternal && canViewSource)
+            @if (canEdit)
             {
-                <div style="display:flex;align-items:center;gap:0.4rem;margin-left:auto" title="View the external source's live tables, or the saved local snapshots">
-                    <span style="font-size:0.75rem;color:#71717a">View</span>
-                    <div style="display:flex;border:1px solid #e4e4e7;border-radius:8px;overflow:hidden">
-                        <button type="button" @onclick="() => SetMode(false)" style="padding:0.4rem 0.85rem;font-size:0.8125rem;font-weight:600;border:none;cursor:pointer;background:@(!snapshotMode ? "#eef2ff" : "transparent");color:@(!snapshotMode ? "#4338ca" : "#52525b")">Source</button>
-                        <button type="button" @onclick="() => SetMode(true)" style="padding:0.4rem 0.85rem;font-size:0.8125rem;font-weight:600;border:none;border-left:1px solid #e4e4e7;cursor:pointer;background:@(snapshotMode ? "#eef2ff" : "transparent");color:@(snapshotMode ? "#4338ca" : "#52525b")">Snapshot</button>
-                    </div>
+                <div class="dl-head-actions">
+                    @if (!dbExists && !isLoading)
+                    {
+                        <button class="btn btn-secondary dl-btn-warn" @onclick="CreateDatabase" disabled="@isCreatingDb"
+                                title="This dataset has no database file on disk yet. Create it so ingestion and tables can run.">
+                            @if (isCreatingDb)
+                            {
+                                <span class="spin"></span>
+                                <span>Creating…</span>
+                            }
+                            else
+                            {
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
+                                <span>Create database</span>
+                            }
+                        </button>
+                    }
+                    <button class="btn btn-primary" @onclick="CreateTable">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                        New table
+                    </button>
                 </div>
             }
         </div>
 
-        @if (isLoading)
-        {
-            <div class="ds-loading">
-                <div class="ds-spinner"></div>
-                <span>Loading tables...</span>
+        <div class="card dl-card">
+            <div class="dl-toolbar">
+                <div class="dl-search">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+                    <input class="input" type="search" placeholder="Search tables…"
+                           @bind="searchTerm" @bind:event="oninput" @bind:after="HandleSearch" />
+                </div>
+
+                <div class="dl-seg" role="group" aria-label="Filter tables">
+                    @foreach (var (key, label) in SegmentFilters)
+                    {
+                        var f = key;
+                        <button type="button" class="dl-seg-btn @(tableFilter == f ? "is-active" : "")" @onclick="() => SetTableFilter(f)">
+                            @label
+                            @if (!isLoading) { <span class="dl-seg-count">@CountFor(f)</span> }
+                        </button>
+                    }
+                </div>
+
+                @if (isExternal && canViewSource)
+                {
+                    <span class="dl-toolbar-spacer"></span>
+                    <span class="dl-toolbar-label">View</span>
+                    <div class="dl-seg" role="group" aria-label="Which layer to list" title="List the external source's live tables, or the saved local snapshots">
+                        <button type="button" class="dl-seg-btn @(!snapshotMode ? "is-active" : "")" @onclick="() => SetMode(false)">Source</button>
+                        <button type="button" class="dl-seg-btn @(snapshotMode ? "is-active" : "")" @onclick="() => SetMode(true)">Snapshot</button>
+                    </div>
+                }
             </div>
-        }
-        else if (pagedItems?.Any() == true)
-        {
-            <div class="ds-table-wrap">
-                <table class="ds-table">
-                    <thead>
-                        <tr>
-                            <th class="ds-th ds-th-sortable" @onclick="ToggleSort">
-                                <span>Table Name</span>
-                                @if (sortAsc)
+
+            @if (isLoading)
+            {
+                <div class="dl-table-wrap">
+                    <table class="dl-table" aria-busy="true">
+                        <colgroup>
+                            <col class="dl-col-name" /><col class="tl-col-rows" /><col class="tl-col-size" /><col class="tl-col-cols" />
+                            <col class="tl-col-ingest" /><col class="tl-col-owner" /><col class="tl-col-access" /><col class="tl-col-actions" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="dl-th">Table</th>
+                                <th class="dl-th dl-th-num">Rows</th>
+                                <th class="dl-th dl-th-num">Size</th>
+                                <th class="dl-th dl-th-num">Columns</th>
+                                <th class="dl-th">Ingestion</th>
+                                <th class="dl-th">Owner</th>
+                                <th class="dl-th">Access</th>
+                                <th class="dl-th dl-th-actions"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @for (int i = 0; i < 5; i++)
+                            {
+                                <tr class="dl-row dl-row-skel">
+                                    <td class="dl-td">
+                                        <div class="dl-ident">
+                                            <span class="skeleton dl-skel-tile"></span>
+                                            <div class="dl-ident-text" style="flex:1;">
+                                                <div class="skeleton dl-skel" style="width:@(150 + (i * 29) % 90)px;"></div>
+                                                <div class="skeleton dl-skel" style="width:@(120 + (i * 37) % 80)px;margin-top:6px;height:10px;"></div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="dl-td dl-td-num"><div class="skeleton dl-skel" style="width:60px;margin-left:auto;"></div></td>
+                                    <td class="dl-td dl-td-num"><div class="skeleton dl-skel" style="width:48px;margin-left:auto;"></div></td>
+                                    <td class="dl-td dl-td-num"><div class="skeleton dl-skel" style="width:24px;margin-left:auto;"></div></td>
+                                    <td class="dl-td"><div class="skeleton dl-skel" style="width:80px;"></div></td>
+                                    <td class="dl-td"><div class="skeleton dl-skel" style="width:110px;"></div></td>
+                                    <td class="dl-td"><div class="skeleton dl-skel" style="width:52px;"></div></td>
+                                    <td class="dl-td dl-td-actions"></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else if (pagedItems?.Any() == true)
+            {
+                <div class="dl-table-wrap">
+                    <table class="dl-table">
+                        <colgroup>
+                            <col class="dl-col-name" /><col class="tl-col-rows" /><col class="tl-col-size" /><col class="tl-col-cols" />
+                            <col class="tl-col-ingest" /><col class="tl-col-owner" /><col class="tl-col-access" /><col class="tl-col-actions" />
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th class="dl-th dl-th-sort @(sortField == "name" ? "is-active" : "")" aria-sort="@AriaSort("name")" @onclick='() => SetSort("name")'>
+                                    <span class="dl-th-inner"><span>Table</span>@SortIcon("name")</span>
+                                </th>
+                                <th class="dl-th dl-th-num dl-th-sort @(sortField == "rows" ? "is-active" : "")" aria-sort="@AriaSort("rows")" @onclick='() => SetSort("rows")'>
+                                    <span class="dl-th-inner"><span>Rows</span>@SortIcon("rows")</span>
+                                </th>
+                                <th class="dl-th dl-th-num dl-th-sort @(sortField == "size" ? "is-active" : "")" aria-sort="@AriaSort("size")" @onclick='() => SetSort("size")'>
+                                    <span class="dl-th-inner"><span>Size</span>@SortIcon("size")</span>
+                                </th>
+                                <th class="dl-th dl-th-num dl-th-sort @(sortField == "columns" ? "is-active" : "")" aria-sort="@AriaSort("columns")" @onclick='() => SetSort("columns")'>
+                                    <span class="dl-th-inner"><span>Columns</span>@SortIcon("columns")</span>
+                                </th>
+                                <th class="dl-th">Ingestion</th>
+                                <th class="dl-th">Owner</th>
+                                <th class="dl-th">Access</th>
+                                <th class="dl-th dl-th-actions"><span class="dl-sr-only">Actions</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var tableName in pagedItems)
+                            {
+                                var item = tableName;
+                                var ts = TableStatFor(item);
+                                var pinned = IsTablePinned(item);
+
+                                <tr @key="item" class="dl-row @(pinned ? "is-pinned" : "")" tabindex="0"
+                                    @onclick="() => ViewTable(item)"
+                                    @onkeydown="e => OnRowKey(e, item)"
+                                    @oncontextmenu="e => OnRowContextMenu(e, item)" @oncontextmenu:preventDefault="true">
+
+                                    <td class="dl-td dl-td-name">
+                                        <div class="dl-ident">
+                                            <span class="dl-tile @(SourceMode ? "dl-tile-ext" : "")" aria-hidden="true">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
+                                            </span>
+                                            <div class="dl-ident-text">
+                                                <div class="dl-name-row">
+                                                    <span class="dl-name dl-name-mono" title="@item">@item</span>
+                                                    @if (pinned)
+                                                    {
+                                                        <svg class="dl-pin-mark" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Pinned"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+                                                    }
+                                                    @if (IsDocumented(item))
+                                                    {
+                                                        <span class="badge badge-accent dl-mini-badge" title="This table has column documentation">Docs</span>
+                                                    }
+                                                    @if (ts?.HasPrimaryKey == true)
+                                                    {
+                                                        <span class="badge badge-warning dl-mini-badge" title="Has a primary key">PK</span>
+                                                    }
+                                                </div>
+                                                <div class="dl-desc">
+                                                    @if (ts != null && !string.IsNullOrWhiteSpace(ts.TypeSummary)) { @ts.TypeSummary }
+                                                    else if (ts != null) { <text>No columns</text> }
+                                                    else { <text>&nbsp;</text> }
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+
+                                    <td class="dl-td dl-td-num">
+                                        @if (ts != null) { <span class="dl-num" title="@ts.RowCount.ToString("N0") rows">@ts.RowCount.ToString("N0")</span> } else { <span class="dl-na">—</span> }
+                                    </td>
+                                    <td class="dl-td dl-td-num">
+                                        @if (ts != null)
+                                        {
+                                            var (num, unit) = FormatBytesParts(ts.SizeBytes);
+                                            <span class="dl-num">@num<span class="dl-unit">@unit</span></span>
+                                        }
+                                        else { <span class="dl-na">—</span> }
+                                    </td>
+                                    <td class="dl-td dl-td-num">
+                                        @if (ts != null) { <span class="dl-num">@ts.ColumnCount</span> } else { <span class="dl-na">—</span> }
+                                    </td>
+
+                                    <td class="dl-td">
+                                        @if (ts != null && ts.IsIngested)
+                                        {
+                                            var ingestLabel = !ts.IngestionEnabled ? "Paused" : (ts.LastRunStatus ?? "Scheduled");
+                                            <span class="dl-status tl-ingest"><span class="dl-dot dl-dot-@IngestionTone(ts.LastRunStatus, ts.IngestionEnabled)"></span>@ingestLabel</span>
+                                            <div class="dl-cell-sub" title="@(ts.LastSyncedAt?.ToLocalTime().ToString("dddd, dd MMMM yyyy HH:mm"))">
+                                                @if (ts.LastSyncedAt.HasValue) { <text>synced @RelativeTime(ts.LastSyncedAt)</text> } else { <text>never synced</text> }
+                                            </div>
+                                        }
+                                        else if (ts != null)
+                                        {
+                                            <span class="dl-na" title="Filled by imports or the API, not by a scheduled ingestion">Manual</span>
+                                        }
+                                        else { <span class="dl-na">—</span> }
+                                    </td>
+
+                                    <td class="dl-td">
+                                        @if (ts != null && !string.IsNullOrEmpty(ts.Owner))
+                                        {
+                                            <div class="dl-cell-main" title="@ts.Owner">@ts.Owner</div>
+                                            @if (ts.CreatedAt.HasValue)
+                                            {
+                                                <div class="dl-cell-sub" title="@ts.CreatedAt.Value.ToLocalTime().ToString("dddd, dd MMMM yyyy HH:mm")">@ts.CreatedAt.Value.ToLocalTime().ToString("dd MMM yyyy")</div>
+                                            }
+                                        }
+                                        else { <span class="dl-na">—</span> }
+                                    </td>
+
+                                    <td class="dl-td">
+                                        @if ((ts?.SharedWith ?? 0) > 0)
+                                        {
+                                            <button type="button" class="dl-access"
+                                                    title="@($"Shared with {ts!.SharedWith} {(ts.SharedWith == 1 ? "person" : "people")} — click to manage")"
+                                                    @onclick="() => OpenSharedWith(item)" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                                                <span>@ts.SharedWith @(ts.SharedWith == 1 ? "person" : "people")</span>
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <span class="dl-access dl-access-private">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                                                <span>Private</span>
+                                            </span>
+                                        }
+                                    </td>
+
+                                    <td class="dl-td dl-td-actions" @onclick:stopPropagation="true" @onkeydown:stopPropagation="true">
+                                        <div class="dl-actions">
+                                            <button type="button" class="dl-act @(pinned ? "is-on" : "")" title="@(pinned ? "Unpin" : "Pin to top")" @onclick="() => ToggleTablePin(item)">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(pinned ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+                                            </button>
+                                            <button type="button" class="dl-act dl-act-more" title="More actions" @onclick="e => OpenActionsMenu(e, item)">
+                                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="dl-footer">
+                    <span class="dl-footer-text">
+                        Showing <strong>@(currentPage * pageSize + 1)–@Math.Min((currentPage + 1) * pageSize, filteredItems?.Count ?? 0)</strong>
+                        of <strong>@(filteredItems?.Count ?? 0)</strong>
+                    </span>
+                    @if (totalPages > 1)
+                    {
+                        <nav class="dl-pager" aria-label="Pagination">
+                            <button type="button" class="dl-page-btn" disabled="@(currentPage == 0)" @onclick="PrevPage" aria-label="Previous page">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                            </button>
+                            @foreach (var p in PageItems())
+                            {
+                                if (p < 0)
                                 {
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+                                    <span class="dl-page-gap" aria-hidden="true">…</span>
                                 }
                                 else
                                 {
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                                    var pageIndex = p;
+                                    <button type="button" class="dl-page-btn @(currentPage == pageIndex ? "is-active" : "")"
+                                            aria-current="@(currentPage == pageIndex ? "page" : null)"
+                                            @onclick="() => GoToPage(pageIndex)">@(pageIndex + 1)</button>
                                 }
-                            </th>
-                            <th class="ds-th">Rows</th>
-                            <th class="ds-th">Size</th>
-                            <th class="ds-th">Columns</th>
-                            <th class="ds-th">Schema</th>
-                            <th class="ds-th">Ingestion</th>
-                            <th class="ds-th">Owner</th>
-                            <th class="ds-th">Shared</th>
-                            <th class="ds-th ds-th-actions">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var tableName in pagedItems)
-                        {
-                            <tr class="ds-tr ds-tr-clickable" @onclick="() => ViewTable(tableName)"
-                                @oncontextmenu="e => OnRowContextMenu(e, tableName)" @oncontextmenu:preventDefault="true">
-                                <td class="ds-td ds-td-name">
-                                    <div style="display:flex;align-items:center;gap:0.5rem">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#71717a;flex-shrink:0"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
-                                        <span class="ds-dataset-name">@tableName</span>
-                                        @if (IsTablePinned(tableName))
-                                        {
-                                            <svg title="Pinned" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:#4f46e5;flex-shrink:0"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
-                                        }
-                                        @if (IsDocumented(tableName))
-                                        {
-                                            <span title="This table has column documentation" style="font-size:0.625rem;font-weight:700;letter-spacing:0.03em;padding:0.05rem 0.4rem;border-radius:9999px;background:#e0f2fe;color:#0369a1;text-transform:uppercase;flex-shrink:0">Docs</span>
-                                        }
-                                    </div>
-                                </td>
-                                @{ var ts = TableStatFor(tableName); }
-                                <td class="ds-td">
-                                    @if (ts != null) { <span class="ds-stat">@ts.RowCount.ToString("N0")</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
-                                </td>
-                                <td class="ds-td">
-                                    @if (ts != null) { <span class="ds-stat">@FormatBytes(ts.SizeBytes)</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
-                                </td>
-                                <td class="ds-td">
-                                    @if (ts != null) { <span class="ds-stat">@ts.ColumnCount</span> } else { <span class="ds-stat" style="color:#a1a1aa">—</span> }
-                                </td>
-                                <td class="ds-td">
-                                    @if (ts != null)
-                                    {
-                                        <div style="display:flex;align-items:center;gap:0.375rem;flex-wrap:wrap">
-                                            @if (ts.HasPrimaryKey)
-                                            {
-                                                <span title="Has a primary key" style="font-size:0.625rem;font-weight:700;padding:0.05rem 0.35rem;border-radius:4px;background:#fef3c7;color:#92400e">PK</span>
-                                            }
-                                            <span style="font-size:0.75rem;color:#71717a">@ts.TypeSummary</span>
-                                        </div>
-                                    }
-                                    else { <span style="color:#a1a1aa">—</span> }
-                                </td>
-                                <td class="ds-td">
-                                    @if (ts != null && ts.IsIngested)
-                                    {
-                                        var (bg, fg) = IngestionColors(ts.LastRunStatus, ts.IngestionEnabled);
-                                        var label = !ts.IngestionEnabled ? "Paused" : (ts.LastRunStatus ?? "Scheduled");
-                                        <div style="display:flex;flex-direction:column;gap:0.15rem">
-                                            <span style="display:inline-flex;align-items:center;width:fit-content;font-size:0.625rem;font-weight:600;padding:0.1rem 0.45rem;border-radius:9999px;background:@bg;color:@fg;text-transform:capitalize">@label</span>
-                                            <span style="font-size:0.6875rem;color:#a1a1aa" title="@(ts.LastSyncedAt?.ToLocalTime().ToString("g"))">
-                                                @if (ts.LastSyncedAt.HasValue) { <text>synced @RelativeTime(ts.LastSyncedAt)</text> } else { <text>never synced</text> }
-                                            </span>
-                                        </div>
-                                    }
-                                    else if (ts != null)
-                                    {
-                                        <span style="font-size:0.75rem;color:#a1a1aa">Manual</span>
-                                    }
-                                    else { <span style="color:#a1a1aa">—</span> }
-                                </td>
-                                <td class="ds-td">
-                                    @if (ts != null && !string.IsNullOrEmpty(ts.Owner))
-                                    {
-                                        <div style="display:flex;flex-direction:column;gap:0.15rem">
-                                            <span style="font-size:0.8125rem;color:#3f3f46">@ts.Owner</span>
-                                            @if (ts.CreatedAt.HasValue)
-                                            {
-                                                <span style="font-size:0.6875rem;color:#a1a1aa">@ts.CreatedAt.Value.ToLocalTime().ToString("MMM dd, yyyy")</span>
-                                            }
-                                        </div>
-                                    }
-                                    else { <span style="color:#a1a1aa">—</span> }
-                                </td>
-                                <td class="ds-td">
-                                    @if ((ts?.SharedWith ?? 0) > 0)
-                                    {
-                                        <button type="button" title="@($"Shared with {ts!.SharedWith} {(ts.SharedWith == 1 ? "person" : "people")} — click to manage")"
-                                                @onclick="() => OpenSharedWith(tableName)" @onclick:stopPropagation="true"
-                                                style="display:inline-flex;align-items:center;gap:0.25rem;font-size:0.75rem;font-weight:500;color:#4f46e5;background:none;border:none;cursor:pointer;padding:0">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-                                            <span>@ts.SharedWith</span>
-                                        </button>
-                                    }
-                                    else { <span style="font-size:0.75rem;color:#a1a1aa">Private</span> }
-                                </td>
-                                <td class="ds-td ds-td-actions-cell" @onclick:stopPropagation="true">
-                                    <div class="ds-actions">
-                                        <button class="btn-icon" title="@(IsTablePinned(tableName) ? "Unpin" : "Pin to top")" @onclick="() => ToggleTablePin(tableName)" style="@(IsTablePinned(tableName) ? "color:#4f46e5" : "color:#71717a")">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsTablePinned(tableName) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
-                                        </button>
-                                        <button class="btn-icon" title="More actions" @onclick="e => OpenActionsMenu(e, tableName)">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
-                                        </button>
-                                    </div>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-
-            @if (contextMenuTable != null)
-            {
-                var t = contextMenuTable;
-                <div class="ctx-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault="true"></div>
-                <div class="ctx-menu" style="left:@(contextMenuX)px; top:@(contextMenuY)px;">
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = ToggleTablePin(t); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsTablePinned(t) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
-                        @(IsTablePinned(t) ? "Unpin" : "Pin to top")
-                    </button>
-                    <div class="ctx-sep"></div>
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); ViewTable(t); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
-                        View / edit table data
-                    </button>
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); QueryTable(t); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
-                        Query this table
-                    </button>
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); OpenApiDocs(t); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-                        API docs
-                    </button>
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); DocumentTable(t); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
-                        Document this table's columns
-                    </button>
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = DownloadTable(t); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
-                        Download CSV
-                    </button>
-                    @if (canEdit)
-                    {
-                        <div class="ctx-sep"></div>
-                        <button class="ctx-item" @onclick="() => { CloseContextMenu(); OpenShareTable(t); }">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
-                            Share this table
-                        </button>
-                        <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = OpenConnect(t); }">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                            Connect to a dashboard
-                        </button>
-                        @if (!SourceMode)
-                        {
-                            <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = OpenMoveTable(t); }">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v4"/><path d="M3 5h4"/><path d="M6 17v4"/><path d="M4 19h4"/><path d="M13 3l8.5 8.5a2.12 2.12 0 0 1 0 3L13 23"/></svg>
-                                Move to another dataset
+                            }
+                            <button type="button" class="dl-page-btn" disabled="@(currentPage >= totalPages - 1)" @onclick="NextPage" aria-label="Next page">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
                             </button>
-                        }
-                    }
-                    <div class="ctx-sep"></div>
-                    <button class="ctx-item" @onclick="() => { CloseContextMenu(); EditTable(t); }">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
-                        Edit table structure
-                    </button>
-                    @if (!SourceMode)
-                    {
-                        <button class="ctx-item ctx-item-danger" @onclick="() => { CloseContextMenu(); _ = DeleteTable(t); }">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                            Delete table
-                        </button>
+                        </nav>
                     }
                 </div>
             }
-
-            @if (totalPages > 1)
+            else
             {
-                <div class="ds-pagination">
-                    <span>Page @(currentPage + 1) of @totalPages</span>
-                    <div class="ds-page-btns">
-                        <button class="btn-page" disabled="@(currentPage == 0)" @onclick="PrevPage">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-                        </button>
-                        @for (int i = 0; i < totalPages; i++)
-                        {
-                            var pageIndex = i;
-                            <button class="btn-page @(currentPage == pageIndex ? "btn-page-active" : "")" @onclick="() => GoToPage(pageIndex)">@(i + 1)</button>
-                        }
-                        <button class="btn-page" disabled="@(currentPage >= totalPages - 1)" @onclick="NextPage">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-                        </button>
+                <div class="empty dl-empty">
+                    <div class="dl-empty-icon">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
                     </div>
+                    <div class="empty-title">
+                        @if (!string.IsNullOrWhiteSpace(searchTerm) || tableFilter != "all") { <text>Nothing matches</text> }
+                        else { <text>No tables yet</text> }
+                    </div>
+                    <div class="empty-text">
+                        @if (!string.IsNullOrWhiteSpace(searchTerm))
+                        {
+                            <span>No tables match “<strong>@searchTerm</strong>”@(tableFilter != "all" ? $" in {FilterLabel(tableFilter)}" : ""). Try a different search.</span>
+                        }
+                        else if (tableFilter != "all")
+                        {
+                            <span>No @FilterLabel(tableFilter).ToLowerInvariant() tables in this view.</span>
+                        }
+                        else if (string.IsNullOrEmpty(companyId) || string.IsNullOrEmpty(datasetId))
+                        {
+                            <span>Company ID and Dataset ID are required to load tables.</span>
+                        }
+                        else if (SourceMode)
+                        {
+                            <span>The source database has no tables this dataset can see.</span>
+                        }
+                        else
+                        {
+                            <span>Get started by creating your first table in this dataset.</span>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(searchTerm) || tableFilter != "all")
+                    {
+                        <button class="btn btn-secondary btn-sm" style="margin-top:6px;" @onclick="ClearFilters">Clear filters</button>
+                    }
+                    else if (canEdit && !string.IsNullOrEmpty(companyId) && !string.IsNullOrEmpty(datasetId) && !SourceMode)
+                    {
+                        <button class="btn btn-primary btn-sm" style="margin-top:6px;" @onclick="CreateTable">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                            Create table
+                        </button>
+                    }
                 </div>
             }
-        }
-        else
-        {
-            <div class="ds-empty">
-                <div class="ds-empty-icon">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
-                </div>
-                <h3 class="ds-empty-title">No tables found</h3>
-                <p class="ds-empty-sub">
-                    @if (!string.IsNullOrWhiteSpace(searchTerm))
-                    {
-                        <span>No tables match "<strong>@searchTerm</strong>". Try a different search.</span>
-                    }
-                    else if (docsOnly)
-                    {
-                        <span>No documented tables in this view. Turn off <strong>Docs only</strong> to see all tables.</span>
-                    }
-                    else if (string.IsNullOrEmpty(companyId) || string.IsNullOrEmpty(datasetId))
-                    {
-                        <span>Company ID and Dataset ID are required to load tables.</span>
-                    }
-                    else
-                    {
-                        <span>Get started by creating your first table in this dataset.</span>
-                    }
-                </p>
-                @if (canEdit && !string.IsNullOrEmpty(companyId) && !string.IsNullOrEmpty(datasetId) && string.IsNullOrWhiteSpace(searchTerm) && !docsOnly)
-                {
-                    <button class="btn btn-default" @onclick="CreateTable">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-                        Create Table
-                    </button>
-                }
-            </div>
-        }
+        </div>
+    }
     </div>
 </div>
+
+@* ---------- row context menu (mirrors the row's own action buttons) ---------- *@
+@if (contextMenuTable != null)
+{
+    var t = contextMenuTable;
+    <div class="ctx-backdrop" @onclick="CloseContextMenu" @oncontextmenu="CloseContextMenu" @oncontextmenu:preventDefault="true"></div>
+    <div class="ctx-menu dl-ctx" style="left:@(contextMenuX)px; top:@(contextMenuY)px;">
+        <div class="dl-ctx-label" title="@t">@t</div>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = ToggleTablePin(t); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="@(IsTablePinned(t) ? "currentColor" : "none")" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" x2="12" y1="17" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"/></svg>
+            @(IsTablePinned(t) ? "Unpin" : "Pin to top")
+        </button>
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); ViewTable(t); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
+            View / edit table data
+        </button>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); QueryTable(t); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
+            Query this table
+        </button>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); OpenApiDocs(t); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            API docs
+        </button>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); DocumentTable(t); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="13" y2="17"/></svg>
+            Document this table's columns
+        </button>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = DownloadTable(t); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+            Download CSV
+        </button>
+        @if (canEdit)
+        {
+            <div class="ctx-sep"></div>
+            <button class="ctx-item" @onclick="() => { CloseContextMenu(); OpenShareTable(t); }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>
+                Share this table
+            </button>
+            <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = OpenConnect(t); }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                Connect to a dashboard
+            </button>
+            @if (!SourceMode)
+            {
+                <button class="ctx-item" @onclick="() => { CloseContextMenu(); _ = OpenMoveTable(t); }">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3v4"/><path d="M3 5h4"/><path d="M6 17v4"/><path d="M4 19h4"/><path d="M13 3l8.5 8.5a2.12 2.12 0 0 1 0 3L13 23"/></svg>
+                    Move to another dataset
+                </button>
+            }
+        }
+        <div class="ctx-sep"></div>
+        <button class="ctx-item" @onclick="() => { CloseContextMenu(); EditTable(t); }">
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+            Edit table structure
+        </button>
+        @if (!SourceMode)
+        {
+            <button class="ctx-item ctx-item-danger" @onclick="() => { CloseContextMenu(); _ = DeleteTable(t); }">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                Delete table
+            </button>
+        }
+    </div>
 }
 
 <ApiDocsDialog IsVisible="@showApiDocs"
@@ -359,40 +476,39 @@ else
                IsExternalSource="@isExternal"
                LiveSource="@SourceMode" />
 
+@* ---------- Share table ---------- *@
 @if (showShareTable)
 {
-    <div class="ds-modal-backdrop" @onclick="() => showShareTable = false">
-        <div class="ds-modal" @onclick:stopPropagation="true">
-            <div class="ds-modal-header">
-                <h2 class="ds-modal-title">
-                    Share Table <span style="color:#71717a;font-weight:400">— @shareTableName</span>
-                </h2>
-                <button class="ds-modal-close" @onclick="() => showShareTable = false" aria-label="Close">
+    <div class="fb-modal-backdrop" @onclick="() => showShareTable = false">
+        <div class="fb-modal sc" role="dialog" aria-modal="true" aria-label="Share table" @onclick:stopPropagation="true">
+            <div class="fb-modal-head">
+                <div class="fb-modal-title">Share table <span class="dl-modal-sub">— @shareTableName</span></div>
+                <button class="btn btn-ghost btn-icon" @onclick="() => showShareTable = false" aria-label="Close">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
             </div>
-            <div class="ds-modal-body">
-                <div class="ds-field">
-                    <label class="ds-label">Email Address</label>
-                    <div class="sd-autocomplete">
-                        <input class="ds-input" type="text" autocomplete="off"
+            <div class="fb-modal-body">
+                <div class="field">
+                    <label class="field-label">Email address</label>
+                    <div class="tl-autocomplete">
+                        <input class="input" type="text" autocomplete="off"
                                placeholder="Search company members by name or email"
                                value="@shareTableEmail"
                                @oninput="OnShareTableEmailInput" @onfocus="OnShareTableEmailFocus" @onblur="OnShareTableEmailBlur" />
                         @if (showShareTableSuggestions && shareTableMemberSuggestions.Any())
                         {
-                            <div class="sd-suggestions">
+                            <div class="tl-suggestions">
                                 @foreach (var m in shareTableMemberSuggestions)
                                 {
                                     var member = m;
-                                    <div class="sd-suggestion" @onmousedown="() => SelectShareTableMember(member)">
-                                        <div class="sd-suggestion-avatar">@(string.IsNullOrEmpty(member.Email) ? "?" : member.Email[..1].ToUpper())</div>
-                                        <div style="min-width:0">
+                                    <div class="tl-suggestion" @onmousedown="() => SelectShareTableMember(member)">
+                                        <div class="tl-suggestion-avatar">@(string.IsNullOrEmpty(member.Email) ? "?" : member.Email[..1].ToUpper())</div>
+                                        <div style="min-width:0;">
                                             @if (!string.IsNullOrWhiteSpace(member.FullName) && member.FullName != member.Email)
                                             {
-                                                <div class="sd-suggestion-name">@member.FullName</div>
+                                                <div class="tl-suggestion-name">@member.FullName</div>
                                             }
-                                            <div class="sd-suggestion-email">@member.Email</div>
+                                            <div class="tl-suggestion-email">@member.Email</div>
                                         </div>
                                     </div>
                                 }
@@ -400,38 +516,34 @@ else
                         }
                     </div>
                 </div>
-                <div class="ds-field" style="margin-bottom:0">
-                    <label class="ds-label">Access Level</label>
-                    <select class="ds-select" @bind="shareTableType">
-                        <option value="Viewer">Viewer — Can view and query data</option>
-                        <option value="Editor">Editor — Can modify dataset structure</option>
-                        <option value="Admin">Admin — Full access including sharing</option>
+                <div class="field">
+                    <label class="field-label">Access level</label>
+                    <select class="select" @bind="shareTableType">
+                        <option value="Viewer">Viewer — can view and query data</option>
+                        <option value="Editor">Editor — can modify dataset structure</option>
+                        <option value="Admin">Admin — full access including sharing</option>
                     </select>
-                    <span class="ds-hint">Grants access to this table only. Users who already have full dataset access are unaffected.</span>
+                    <span class="field-help">Grants access to this table only. Users who already have full dataset access are unaffected.</span>
                 </div>
-                <div class="ds-field" style="margin-top:0.75rem;margin-bottom:0">
-                    <label class="ds-label">Columns</label>
-                    <div style="display:flex;gap:1.25rem;margin-bottom:0.4rem">
-                        <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.8125rem;cursor:pointer">
-                            <input type="radio" name="stCols" checked="@(!shareTableSpecificColumns)" @onchange="() => SetShareTableColumnMode(false)" /> All columns
-                        </label>
-                        <label style="display:flex;align-items:center;gap:0.375rem;font-size:0.8125rem;cursor:pointer">
-                            <input type="radio" name="stCols" checked="@shareTableSpecificColumns" @onchange="() => SetShareTableColumnMode(true)" /> Specific columns
-                        </label>
+                <div class="field" style="margin-bottom:0;">
+                    <label class="field-label">Columns</label>
+                    <div class="tl-radios">
+                        <label class="tl-check"><input type="radio" name="stCols" checked="@(!shareTableSpecificColumns)" @onchange="() => SetShareTableColumnMode(false)" /> All columns</label>
+                        <label class="tl-check"><input type="radio" name="stCols" checked="@shareTableSpecificColumns" @onchange="() => SetShareTableColumnMode(true)" /> Specific columns</label>
                     </div>
                     @if (shareTableSpecificColumns)
                     {
                         @if (shareTableColumnsLoading)
                         {
-                            <span class="ds-hint" style="display:flex;align-items:center;gap:0.4rem"><span class="ds-spinner" style="width:12px;height:12px;border-width:1.5px"></span> Loading columns…</span>
+                            <span class="field-help" style="display:flex;align-items:center;gap:6px;"><span class="spin"></span> Loading columns…</span>
                         }
                         else if (shareTableColumns.Count > 0)
                         {
-                            <div style="display:flex;flex-wrap:wrap;gap:0.3rem 0.9rem;max-height:150px;overflow-y:auto;border:1px solid #e4e4e7;border-radius:6px;padding:0.4rem 0.5rem">
+                            <div class="tl-cols-box">
                                 @foreach (var col in shareTableColumns)
                                 {
                                     var column = col;
-                                    <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;cursor:pointer;font-family:ui-monospace,Consolas,monospace">
+                                    <label class="tl-check tl-check-mono">
                                         <input type="checkbox" checked="@shareTableSelectedColumns.Contains(column)" @onchange="e => ToggleShareTableColumn(column, (bool)e.Value!)" />
                                         @column
                                     </label>
@@ -440,106 +552,114 @@ else
                         }
                         else
                         {
-                            <span class="ds-hint">No columns available to scope for this table.</span>
+                            <span class="field-help">No columns available to scope for this table.</span>
                         }
                     }
                 </div>
-                <div class="ds-modal-footer">
-                    <button type="button" class="btn btn-default" style="flex:1" @onclick="ShareTableSubmit" disabled="@isSharingTable">
-                        @if (isSharingTable) { <span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px"></span><span>Sharing...</span> }
-                        else { <span>Share Table</span> }
-                    </button>
-                    <button type="button" class="btn btn-outline" style="flex:1" @onclick="() => showShareTable = false">Cancel</button>
-                </div>
+            </div>
+            <div class="fb-modal-foot">
+                <button type="button" class="btn btn-secondary" @onclick="() => showShareTable = false">Cancel</button>
+                <button type="button" class="btn btn-primary" @onclick="ShareTableSubmit" disabled="@isSharingTable">
+                    @if (isSharingTable) { <span class="spin"></span><span>Sharing…</span> }
+                    else { <span>Share table</span> }
+                </button>
             </div>
         </div>
     </div>
 }
 
+@* ---------- Move table ---------- *@
 @if (showMoveTable)
 {
-    <div class="ds-modal-backdrop" @onclick="() => showMoveTable = false">
-        <div class="ds-modal" @onclick:stopPropagation="true">
-            <div class="ds-modal-header">
-                <h2 class="ds-modal-title">
-                    Move Table <span style="color:#71717a;font-weight:400">— @moveTableName</span>
-                </h2>
-                <button class="ds-modal-close" @onclick="() => showMoveTable = false" aria-label="Close">
+    <div class="fb-modal-backdrop" @onclick="() => showMoveTable = false">
+        <div class="fb-modal sc" role="dialog" aria-modal="true" aria-label="Move table" @onclick:stopPropagation="true">
+            <div class="fb-modal-head">
+                <div class="fb-modal-title">Move table <span class="dl-modal-sub">— @moveTableName</span></div>
+                <button class="btn btn-ghost btn-icon" @onclick="() => showMoveTable = false" aria-label="Close">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
             </div>
-            <div class="ds-modal-body">
+            <div class="fb-modal-body">
                 @if (isLoadingMoveDatasets)
                 {
-                    <div class="ds-loading"><div class="ds-spinner"></div><span>Loading datasets…</span></div>
+                    <div class="skeleton dl-skel" style="width:60%;margin-bottom:10px;"></div>
+                    <div class="skeleton dl-skel" style="width:40%;"></div>
                 }
                 else if (!moveTargetOptions.Any())
                 {
-                    <span class="ds-dataset-desc">No other datasets are available to move this table to.</span>
+                    <div class="empty-text">No other datasets are available to move this table to.</div>
                 }
                 else
                 {
-                    <div class="ds-field" style="margin-bottom:0">
-                        <label class="ds-label">Destination Dataset</label>
-                        <select class="ds-select" @bind="moveTargetDatasetId">
+                    <div class="field" style="margin-bottom:0;">
+                        <label class="field-label">Destination dataset</label>
+                        <select class="select" @bind="moveTargetDatasetId">
                             <option value="">Select a dataset…</option>
                             @foreach (var ds in moveTargetOptions)
                             {
                                 <option value="@ds.Id">@ds.Name</option>
                             }
                         </select>
-                        <span class="ds-hint">This moves the table's data and any table-specific sharing to the selected dataset. Users with access will be notified by email.</span>
-                    </div>
-                    <div class="ds-modal-footer">
-                        <button type="button" class="btn btn-default" style="flex:1" @onclick="MoveTableSubmit" disabled="@(isMovingTable || string.IsNullOrEmpty(moveTargetDatasetId))">
-                            @if (isMovingTable) { <span class="ds-spinner" style="width:14px;height:14px;border-width:1.5px"></span><span>Moving...</span> }
-                            else { <span>Move Table</span> }
-                        </button>
-                        <button type="button" class="btn btn-outline" style="flex:1" @onclick="() => showMoveTable = false">Cancel</button>
+                        <span class="field-help">This moves the table's data and any table-specific sharing to the selected dataset. Users with access will be notified by email.</span>
                     </div>
                 }
             </div>
+            @if (!isLoadingMoveDatasets && moveTargetOptions.Any())
+            {
+                <div class="fb-modal-foot">
+                    <button type="button" class="btn btn-secondary" @onclick="() => showMoveTable = false">Cancel</button>
+                    <button type="button" class="btn btn-primary" @onclick="MoveTableSubmit" disabled="@(isMovingTable || string.IsNullOrEmpty(moveTargetDatasetId))">
+                        @if (isMovingTable) { <span class="spin"></span><span>Moving…</span> }
+                        else { <span>Move table</span> }
+                    </button>
+                </div>
+            }
         </div>
     </div>
 }
 
+@* ---------- Connect to a dashboard ---------- *@
 @if (showConnectModal)
 {
-    <div class="ds-modal-backdrop" @onclick="() => showConnectModal = false">
-        <div class="ds-modal" @onclick:stopPropagation="true">
-            <div class="ds-modal-header">
-                <h2 class="ds-modal-title">Connect to Dashboard <span style="color:#71717a;font-weight:400">— @connectTableName</span></h2>
-                <button class="ds-modal-close" @onclick="() => showConnectModal = false" aria-label="Close">
+    <div class="fb-modal-backdrop" @onclick="() => showConnectModal = false">
+        <div class="fb-modal sc" role="dialog" aria-modal="true" aria-label="Connect to dashboard" @onclick:stopPropagation="true">
+            <div class="fb-modal-head">
+                <div class="fb-modal-title">Connect to dashboard <span class="dl-modal-sub">— @connectTableName</span></div>
+                <button class="btn btn-ghost btn-icon" @onclick="() => showConnectModal = false" aria-label="Close">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
             </div>
-            <div class="ds-modal-body">
+            <div class="fb-modal-body">
                 @if (isLoadingLinks)
                 {
-                    <div class="ds-loading"><div class="ds-spinner"></div><span>Loading…</span></div>
+                    <div class="skeleton dl-skel" style="width:60%;margin-bottom:10px;"></div>
+                    <div class="skeleton dl-skel" style="width:40%;"></div>
                 }
                 else if (!availableDashboards.Any())
                 {
-                    <span class="ds-dataset-desc">No dashboards available to connect.</span>
+                    <div class="empty-text">No dashboards available to connect.</div>
                 }
                 else
                 {
-                    <p class="ds-hint" style="margin-top:0">Choose which dashboards open this table for their item-level details. Each dashboard links to one table — connecting reassigns it.</p>
+                    <p class="field-help" style="margin:0 0 6px;">Choose which dashboards open this table for their item-level details. Each dashboard links to one table — connecting reassigns it.</p>
                     @foreach (var dash in availableDashboards)
                     {
                         var connected = connectedPageUrls.Contains(dash.PageUrl);
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.65rem 0;border-top:1px solid #f4f4f5">
-                            <div>
-                                <div style="font-weight:500;color:#18181b">@dash.Label @if (connected) { <span style="color:#15803d;font-size:0.75rem;font-weight:600">· connected</span> }</div>
-                                <div style="font-size:0.75rem;color:#a1a1aa;font-family:ui-monospace,Consolas,monospace">@dash.PageUrl</div>
+                        <div class="dl-share-row">
+                            <div style="min-width:0;">
+                                <div class="dl-share-name">
+                                    @dash.Label
+                                    @if (connected) { <span class="badge badge-success dl-mini-badge" style="margin-left:6px;">Connected</span> }
+                                </div>
+                                <div class="dl-share-meta dl-share-meta-mono">@dash.PageUrl</div>
                             </div>
                             @if (connected)
                             {
-                                <button class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca" @onclick="() => DisconnectDashboard(dash.PageUrl)" disabled="@isSavingLink">Disconnect</button>
+                                <button class="btn btn-secondary btn-sm dl-btn-danger-outline" @onclick="() => DisconnectDashboard(dash.PageUrl)" disabled="@isSavingLink">Disconnect</button>
                             }
                             else
                             {
-                                <button class="btn btn-default" @onclick="() => ConnectDashboard(dash.PageUrl)" disabled="@isSavingLink">Connect</button>
+                                <button class="btn btn-primary btn-sm" @onclick="() => ConnectDashboard(dash.PageUrl)" disabled="@isSavingLink">Connect</button>
                             }
                         </div>
                     }
@@ -549,48 +669,50 @@ else
     </div>
 }
 
+@* ---------- Shared with ---------- *@
 @if (showSharedModal)
 {
-    <div class="ds-modal-backdrop" @onclick="() => showSharedModal = false">
-        <div class="ds-modal" @onclick:stopPropagation="true">
-            <div class="ds-modal-header">
-                <h2 class="ds-modal-title">Shared with <span style="color:#71717a;font-weight:400">— @sharedTableName</span></h2>
-                <button class="ds-modal-close" @onclick="() => showSharedModal = false" aria-label="Close">
+    <div class="fb-modal-backdrop" @onclick="() => showSharedModal = false">
+        <div class="fb-modal sc" role="dialog" aria-modal="true" aria-label="Shared with" @onclick:stopPropagation="true">
+            <div class="fb-modal-head">
+                <div class="fb-modal-title">Shared with <span class="dl-modal-sub">— @sharedTableName</span></div>
+                <button class="btn btn-ghost btn-icon" @onclick="() => showSharedModal = false" aria-label="Close">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
                 </button>
             </div>
-            <div class="ds-modal-body">
+            <div class="fb-modal-body">
                 @if (isLoadingShared)
                 {
-                    <div class="ds-loading"><div class="ds-spinner"></div><span>Loading…</span></div>
+                    <div class="skeleton dl-skel" style="width:60%;margin-bottom:10px;"></div>
+                    <div class="skeleton dl-skel" style="width:40%;"></div>
                 }
                 else if (!sharedTableUsers.Any())
                 {
-                    <span class="ds-dataset-desc">No one has access to this table.</span>
+                    <div class="empty-text">No one has access to this table.</div>
                 }
                 else
                 {
-                    <p class="ds-hint" style="margin-top:0">People who can access <strong>@sharedTableName</strong>. Users with full dataset access are managed from the datasets page.</p>
+                    <p class="field-help" style="margin:0 0 6px;">People who can access <strong>@sharedTableName</strong>. Users with full dataset access are managed from the datasets page.</p>
                     @foreach (var u in sharedTableUsers)
                     {
                         var fullAccess = !u.Tables.Any();
-                        <div style="display:flex;align-items:center;justify-content:space-between;gap:0.75rem;padding:0.65rem 0;border-top:1px solid #f4f4f5">
-                            <div>
-                                <div style="font-weight:500;color:#18181b">@(string.IsNullOrEmpty(u.Email) ? u.UserId : u.Email)</div>
-                                <div style="font-size:0.75rem;color:#a1a1aa">@u.Type · @(fullAccess ? "Full dataset access" : "This table")</div>
+                        <div class="dl-share-row">
+                            <div style="min-width:0;">
+                                <div class="dl-share-name">@(string.IsNullOrEmpty(u.Email) ? u.UserId : u.Email)</div>
+                                <div class="dl-share-meta">@u.Type · @(fullAccess ? "Full dataset access" : "This table")</div>
                             </div>
                             @if (canEdit)
                             {
                                 var lastOne = sharedTableUsers.Count <= 1;
                                 @if (fullAccess)
                                 {
-                                    <button class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca"
+                                    <button class="btn btn-secondary btn-sm dl-btn-danger-outline"
                                             title="@(lastOne ? "Can't remove the only person this table is shared with." : "This person has access to the whole dataset — removing here revokes their entire dataset access.")"
                                             @onclick="() => RemoveFromDataset(u.UserId)" disabled="@(isRemovingShare || lastOne)">Remove from dataset</button>
                                 }
                                 else
                                 {
-                                    <button class="btn btn-outline" style="color:#b91c1c;border-color:#fecaca"
+                                    <button class="btn btn-secondary btn-sm dl-btn-danger-outline"
                                             title="@(lastOne ? "Can't remove the only person this table is shared with." : "Stop sharing this table with this person")"
                                             @onclick="() => StopSharingTable(u.UserId)" disabled="@(isRemovingShare || lastOne)">Stop sharing</button>
                                 }
@@ -604,52 +726,34 @@ else
 }
 
 <style>
-    .sd-autocomplete { position: relative; }
-    .sd-suggestions {
-        position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
-        background: #fff; border: 1px solid #e4e4e7; border-radius: 8px;
-        box-shadow: 0 8px 24px rgba(0,0,0,.12); max-height: 240px; overflow-y: auto; padding: 4px;
-    }
-    .sd-suggestion {
-        display: flex; align-items: center; gap: .5rem; padding: .4rem .5rem;
-        border-radius: 6px; cursor: pointer;
-    }
-    .sd-suggestion:hover { background: #f4f4f5; }
-    .sd-suggestion-avatar {
-        flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%;
-        background: #e4e4e7; color: #3f3f46; font-size: .75rem; font-weight: 600;
-        display: flex; align-items: center; justify-content: center;
-    }
-    .sd-suggestion-name { font-size: .8125rem; font-weight: 600; color: #18181b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .sd-suggestion-email { font-size: .75rem; color: #71717a; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* Page-specific rules only. The shared list design (`.dl-*`) lives in wwwroot/datalist.css. */
+    .tl-col-rows { width: 110px; } .tl-col-size { width: 90px; } .tl-col-cols { width: 92px; }
+    .tl-col-ingest { width: 150px; } .tl-col-owner { width: 170px; } .tl-col-access { width: 104px; } .tl-col-actions { width: 84px; }
+    .tl-ingest { text-transform: capitalize; }
 
-    /* ---- Dark mode ---- */
-    [data-theme="dark"] .sd-suggestions { background:#181a20; border-color:#2b303b; }
-    [data-theme="dark"] .sd-suggestion:hover { background:#20242c; }
-    [data-theme="dark"] .sd-suggestion-avatar { background:#1e222b; color:#e6e9ef; }
-    [data-theme="dark"] .sd-suggestion-name { color:#f3f4f6; }
-    [data-theme="dark"] .sd-suggestion-email { color:#9aa1ac; }
-    /* inline-style color overrides */
-    [data-theme="dark"] [style*="color:#18181b"]{color:#f3f4f6!important}
-    [data-theme="dark"] [style*="color:#71717a"]{color:#9aa1ac!important}
-    [data-theme="dark"] [style*="color:#a1a1aa"]{color:#9aa1ac!important}
-    [data-theme="dark"] [style*="color:#3f3f46"]{color:#e6e9ef!important}
-    [data-theme="dark"] [style*="color:#4f46e5"]{color:#818cf8!important}
-    [data-theme="dark"] [style*="color:#2563eb"]{color:#93c5fd!important}
-    [data-theme="dark"] [style*="color:#15803d"]{color:#4ade80!important}
-    [data-theme="dark"] [style*="color:#b91c1c"]{color:#f87171!important}
-    [data-theme="dark"] [style*="color:#1d4ed8"]{color:#93c5fd!important}
-    [data-theme="dark"] [style*="color:#92400e"]{color:#fcd34d!important}
-    [data-theme="dark"] [style*="color:#0891b2"]{color:#22d3ee!important}
-    [data-theme="dark"] [style*="color:#7c3aed"]{color:#a78bfa!important}
-    [data-theme="dark"] [style*="background:#eef2ff"]{background:rgba(129,140,248,.15)!important}
-    [data-theme="dark"] [style*="background:#f4f4f5"]{background:#1e222b!important}
-    [data-theme="dark"] [style*="background:#dcfce7"]{background:rgba(34,197,94,.15)!important}
-    [data-theme="dark"] [style*="background:#fee2e2"]{background:rgba(239,68,68,.12)!important}
-    [data-theme="dark"] [style*="background:#dbeafe"]{background:rgba(59,130,246,.12)!important}
-    [data-theme="dark"] [style*="background:#fef3c7"]{background:rgba(245,158,11,.12)!important}
-    [data-theme="dark"] [style*="1px solid #f4f4f5"]{border-color:#23272f!important}
-    [data-theme="dark"] [style*="border-color:#fecaca"]{border-color:rgba(239,68,68,.4)!important}
+    /* share dialog: member autocomplete, column pickers */
+    .tl-autocomplete { position: relative; }
+    .tl-suggestions {
+        position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20; padding: 4px;
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md);
+        box-shadow: var(--shadow-md); max-height: 240px; overflow-y: auto;
+    }
+    .tl-suggestion { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; }
+    .tl-suggestion:hover { background: var(--surface-subtle); }
+    .tl-suggestion-avatar {
+        flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+        background: var(--accent-subtle); color: var(--accent); font-size: 12px; font-weight: 600;
+    }
+    .tl-suggestion-name { font-size: 13px; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tl-suggestion-email { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tl-radios { display: flex; gap: 18px; margin-bottom: 6px; }
+    .tl-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-primary); cursor: pointer; }
+    .tl-check input { accent-color: var(--accent); margin: 0; }
+    .tl-check-mono { font-family: var(--font-mono); font-size: 12px; }
+    .tl-cols-box {
+        display: flex; flex-wrap: wrap; gap: 5px 14px; max-height: 150px; overflow-y: auto;
+        border: 1px solid var(--border); border-radius: var(--radius-md); padding: 7px 9px; background: var(--surface-subtle);
+    }
 </style>
 
 @code {
@@ -1066,16 +1170,26 @@ else
         return $"{size:0.#} {units[u]}";
     }
 
-    // Pill colors for an ingestion source's last-run status (paused overrides status).
-    private static (string bg, string fg) IngestionColors(string? status, bool enabled)
+    private static (string num, string unit) FormatBytesParts(long bytes)
     {
-        if (!enabled) return ("#f4f4f5", "#71717a");
+        if (bytes <= 0) return ("0", "B");
+        string[] units = { "B", "KB", "MB", "GB", "TB" };
+        double size = bytes;
+        int u = 0;
+        while (size >= 1024 && u < units.Length - 1) { size /= 1024; u++; }
+        return ($"{size:0.#}", units[u]);
+    }
+
+    // Colour tone for an ingestion source's last-run status (paused overrides status); maps to the
+    // .dl-dot-* classes in datalist.css.
+    private static string IngestionTone(string? status, bool enabled)
+    {
+        if (!enabled) return "neutral";
         return (status?.ToLowerInvariant()) switch
         {
-            "success" or "succeeded" or "completed" => ("#dcfce7", "#15803d"),
-            "failed" or "error" => ("#fee2e2", "#b91c1c"),
-            "running" => ("#dbeafe", "#1d4ed8"),
-            _ => ("#eef2ff", "#4f46e5"),
+            "success" or "succeeded" or "completed" => "success",
+            "failed" or "error" => "danger",
+            _ => "accent", // running or scheduled
         };
     }
 
@@ -1095,7 +1209,16 @@ else
     private List<string>? filteredItems;
     private IEnumerable<string>? pagedItems;
     private string searchTerm = string.Empty;
-    private bool docsOnly = false;   // when true, list only tables that have column documentation
+    // Quick filter in the toolbar: "all" | "docs" (has column documentation) | "ingested" | "pinned".
+    private string tableFilter = "all";
+    private bool docsOnly => tableFilter == "docs";
+    private static readonly (string key, string label)[] SegmentFilters =
+    {
+        ("all", "All"), ("docs", "Documented"), ("ingested", "Ingested"), ("pinned", "Pinned"),
+    };
+    private static string FilterLabel(string key) => SegmentFilters.FirstOrDefault(s => s.key == key).label ?? "All";
+    // Sort: "name" (default) | "rows" | "size" | "columns" — the last three read from tableStats.
+    private string sortField = "name";
     private bool sortAsc = true;
     private int currentPage = 0;
     private const int pageSize = 10;
@@ -1293,7 +1416,7 @@ else
             {
                 var stats = await response.Content.ReadFromJsonAsync<List<TableStats>>() ?? new();
                 tableStats = stats.ToDictionary(s => s.TableName, s => s);
-                StateHasChanged();
+                ApplyFilterAndSort(); // the rows/size/columns sorts and the Ingested filter read from these
             }
         }
         catch { /* stats are supplementary — the table list still renders without them */ }
@@ -1325,35 +1448,120 @@ else
             _ = _activityLog.LogAsync(companyId, "table.search", "table", datasetId, route: "/data/tables", details: searchTerm);
     }
 
-    private void ToggleDocsOnly()
+    private void SetTableFilter(string filter)
     {
-        docsOnly = !docsOnly;
+        if (tableFilter == filter) return;
+        var wasDocs = docsOnly;
+        tableFilter = filter;
         currentPage = 0;
         ApplyFilterAndSort();
-        _ = _activityLog.LogAsync(companyId, "table.filter_docs", "table", datasetId, route: "/data/tables",
-            details: docsOnly ? "on" : "off");
+        // Keep the existing "docs only" audit event for the documented filter; the others get a generic one.
+        if (wasDocs != docsOnly)
+            _ = _activityLog.LogAsync(companyId, "table.filter_docs", "table", datasetId, route: "/data/tables", details: docsOnly ? "on" : "off");
+        else
+            _ = _activityLog.LogAsync(companyId, "table.filter", "table", datasetId, route: "/data/tables", details: filter);
     }
 
-    private void ToggleSort()
+    private void ClearFilters()
     {
-        sortAsc = !sortAsc;
+        searchTerm = string.Empty;
+        tableFilter = "all";
+        currentPage = 0;
+        ApplyFilterAndSort();
+    }
+
+    private bool MatchesFilter(string name, string filter) => filter switch
+    {
+        "docs" => documentedTables.Contains(name),
+        "ingested" => TableStatFor(name)?.IsIngested == true,
+        "pinned" => pinnedTables.Contains(name),
+        _ => true,
+    };
+
+    private int CountFor(string filter) => tables?.Count(t => MatchesFilter(t, filter)) ?? 0;
+
+    private void SetSort(string field)
+    {
+        if (sortField == field) sortAsc = !sortAsc;
+        else { sortField = field; sortAsc = field == "name"; }
+        currentPage = 0;
         ApplyFilterAndSort();
         _ = _activityLog.LogAsync(companyId, "table.sort", "table", datasetId, route: "/data/tables",
-            details: sortAsc ? "asc" : "desc");
+            details: $"{sortField} {(sortAsc ? "asc" : "desc")}");
     }
+
+    private string AriaSort(string field) =>
+        sortField != field ? "none" : (sortAsc ? "ascending" : "descending");
 
     private void ApplyFilterAndSort()
     {
         var query = tables?.AsEnumerable() ?? [];
         if (!string.IsNullOrWhiteSpace(searchTerm))
             query = query.Where(t => t.Contains(searchTerm, StringComparison.OrdinalIgnoreCase));
-        if (docsOnly)
-            query = query.Where(t => documentedTables.Contains(t));
-        query = sortAsc ? query.OrderBy(t => t) : query.OrderByDescending(t => t);
-        // Pinned tables float to the top (OrderByDescending is stable, so the name sort holds within groups).
+        if (tableFilter != "all")
+            query = query.Where(t => MatchesFilter(t, tableFilter));
+
+        // Tables without stats yet sort as -1 so they sit together at one end instead of interleaving.
+        query = sortField switch
+        {
+            "rows" => sortAsc ? query.OrderBy(t => TableStatFor(t)?.RowCount ?? -1) : query.OrderByDescending(t => TableStatFor(t)?.RowCount ?? -1),
+            "size" => sortAsc ? query.OrderBy(t => TableStatFor(t)?.SizeBytes ?? -1) : query.OrderByDescending(t => TableStatFor(t)?.SizeBytes ?? -1),
+            "columns" => sortAsc ? query.OrderBy(t => TableStatFor(t)?.ColumnCount ?? -1) : query.OrderByDescending(t => TableStatFor(t)?.ColumnCount ?? -1),
+            _ => sortAsc ? query.OrderBy(t => t, StringComparer.OrdinalIgnoreCase) : query.OrderByDescending(t => t, StringComparer.OrdinalIgnoreCase),
+        };
+
+        // Pinned tables float to the top (OrderByDescending is stable, so the sort above holds within groups).
         filteredItems = query.OrderByDescending(t => pinnedTables.Contains(t)).ToList();
+        if (currentPage > 0 && currentPage >= totalPages) currentPage = Math.Max(0, totalPages - 1);
         pagedItems = filteredItems.Skip(currentPage * pageSize).Take(pageSize);
         StateHasChanged();
+    }
+
+    private RenderFragment SortIcon(string field) => __builder =>
+    {
+        if (sortField == field)
+        {
+            if (sortAsc)
+            {
+                <svg class="dl-sort-ico" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></svg>
+            }
+            else
+            {
+                <svg class="dl-sort-ico" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            }
+        }
+        else
+        {
+            <svg class="dl-sort-ico" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg>
+        }
+    };
+
+    // Page numbers for the pager: every page when there are few, otherwise the first, the last and a
+    // window around the current page, with -1 standing in for a gap.
+    private IEnumerable<int> PageItems()
+    {
+        var pages = totalPages;
+        if (pages <= 7)
+        {
+            for (int i = 0; i < pages; i++) yield return i;
+            yield break;
+        }
+        var keep = new SortedSet<int> { 0, pages - 1 };
+        for (int i = currentPage - 1; i <= currentPage + 1; i++)
+            if (i >= 0 && i < pages) keep.Add(i);
+        int prev = -1;
+        foreach (var p in keep)
+        {
+            if (prev >= 0 && p - prev == 2) yield return prev + 1;   // a one-page gap: just show the page
+            else if (prev >= 0 && p - prev > 2) yield return -1;
+            yield return p;
+            prev = p;
+        }
+    }
+
+    private void OnRowKey(KeyboardEventArgs e, string tableName)
+    {
+        if (e.Key == "Enter") ViewTable(tableName);
     }
 
     // Per-user table pins (float to the top of the list).
