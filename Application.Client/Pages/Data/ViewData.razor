@@ -22,122 +22,177 @@
 
 @if (!canView)
 {
-    <div class="flex flex-col items-center justify-center h-64 text-gray-500 gap-2">
-        <svg class="w-10 h-10 text-gray-300" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <p class="text-sm font-semibold text-gray-700">Access Denied</p>
-        <p class="text-xs text-gray-400">You don't have permission to view data.</p>
+    <div class="sc dvw-shell">
+        <div class="dvw-center">
+            <div class="empty">
+                <div class="dvw-empty-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                </div>
+                <div class="empty-title">Access denied</div>
+                <div class="empty-text">You don't have permission to view data.</div>
+            </div>
+        </div>
     </div>
 }
 else
 {
-<div class="dv-shell" style="height:88vh;display:flex;flex-direction:column;background:#fafafa">
-    <!-- Header -->
-    <div class="dv-header" style="background:#fff;border-bottom:1px solid #e4e4e7;padding:0.75rem 1.25rem;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:1rem">
-        <div style="display:flex;align-items:center;gap:0.75rem">
-            <button class="btn-icon" @onclick="GoBack" title="Back">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+<div class="sc dvw-shell">
+    @* ---------- top bar: identity on the left, actions on the right ---------- *@
+    <header class="dvw-top">
+        <div class="dvw-top-left">
+            <button type="button" class="dvw-back" @onclick="GoBack" title="Back to tables" aria-label="Back to tables">
+                <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
             </button>
-            <div>
-                <h1 class="dv-h1" style="margin:0;font-size:1.0625rem;font-weight:600;color:#18181b">
-                    @(TableInfo?.TableName ?? "Loading…")
-                </h1>
-                <p class="dv-sub" style="margin:0;font-size:0.8125rem;color:#71717a">
-                    @if (DatasetInfo != null && TableInfo != null)
+            <span class="dvw-tile @(sourceMode ? "dvw-tile-ext" : "")" aria-hidden="true">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
+            </span>
+            <div class="dvw-heading">
+                <div class="dvw-crumbs">
+                    @if (DatasetInfo != null)
                     {
-                        <span>@DatasetInfo.Name@(TotalRows > 0 ? $" · {TotalRows:N0} rows" : "")</span>
+                        <a class="dvw-crumb" href="@($"/data/tables?c={c}&d={DatasetId}")" title="Back to the dataset's tables">@DatasetInfo.Name</a>
+                        <span class="dvw-crumb-sep">/</span>
+                    }
+                    <h1 class="dvw-title" title="@(TableInfo?.TableName ?? TableName)">@(TableInfo?.TableName ?? TableName ?? "Loading…")</h1>
+                </div>
+                <div class="dvw-meta">
+                    @if (IsLoading || DatasetInfo == null)
+                    {
+                        <span class="skeleton dvw-skel"></span>
+                    }
+                    else
+                    {
                         @if (sourceMode)
                         {
-                            <span style="margin-left:0.5rem;font-size:0.6875rem;font-weight:600;letter-spacing:0.03em;padding:0.05rem 0.4rem;border-radius:9999px;background:#eef2ff;color:#4338ca;text-transform:uppercase">Live source · preview of first @SourcePreviewCap.ToString("N0")</span>
+                            <span class="badge badge-accent" title="Rows are read straight from the connected source database as you scroll">Live source</span>
                         }
+                        else if (DatasetInfo.SourceType == DatasetSourceType.External)
+                        {
+                            <span class="badge badge-neutral" title="A saved snapshot of the external source">Snapshot</span>
+                        }
+                        else
+                        {
+                            <span class="badge badge-neutral" title="Stored in this dataset's DuckDB file">Local</span>
+                        }
+                        @if (AllowEdit)
+                        {
+                            <span class="badge badge-success" title="You can edit cells and add or delete rows">Editable</span>
+                        }
+                        else
+                        {
+                            <span class="badge badge-neutral">Read-only</span>
+                        }
+                        <span class="dvw-meta-text">
+                            @if (TotalRows > 0) { <span>@TotalRows.ToString("N0") rows</span> } else { <span>Counting rows…</span> }
+                            <span class="dvw-dot">·</span>
+                            <span>@(TableColumns?.Count ?? 0) column@((TableColumns?.Count ?? 0) == 1 ? "" : "s")</span>
+                        </span>
                     }
-                    else { <span>Loading table information…</span> }
-                </p>
+                </div>
             </div>
         </div>
-        <div style="display:flex;align-items:center;gap:0.5rem">
+
+        <div class="dvw-actions">
             @if (AllowEdit)
             {
-                <button class="btn btn-outline" @onclick="AddRow" disabled="@IsLoading" title="Add a new row">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-                    Add Row
+                <button class="btn btn-primary btn-sm" @onclick="AddRow" disabled="@IsLoading" title="Add a blank row and fill it in">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                    Add row
                 </button>
-                <button class="btn btn-outline dv-btn-danger" style="color:#dc2626;border-color:#fecaca" @onclick="DeleteSelected" disabled="@IsLoading" title="Delete selected rows">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                <button class="btn btn-secondary btn-sm dvw-btn-danger" @onclick="DeleteSelected" disabled="@IsLoading" title="Delete the ticked rows">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                     Delete
                 </button>
-                <span class="dv-divider" style="width:1px;height:22px;background:#e4e4e7;margin:0 0.25rem"></span>
+                <span class="dvw-vsep" aria-hidden="true"></span>
             }
             @if (!sourceMode)
             {
-                <button class="btn btn-outline dv-btn-success" style="color:#16a34a;border-color:#16a34a" @onclick="DownloadCsv" disabled="@(IsLoading || isExporting)" title="Download the full table as CSV">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                <button class="btn btn-secondary btn-sm" @onclick="DownloadCsv" disabled="@(IsLoading || isExporting)" title="Download the full table as CSV">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
                     @(isExporting ? "Preparing…" : "Download")
                 </button>
             }
-            <button class="btn btn-outline" @onclick="RefreshData" disabled="@IsLoading">
-                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+            <button class="btn btn-secondary btn-sm" @onclick="RefreshData" disabled="@IsLoading" title="Reload the rows on screen">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
                 Refresh
             </button>
-            <button class="btn btn-outline" @onclick="GoToQuery" title="Open in the SQL query workbench" disabled="@IsLoading">
-                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
+            <button class="btn btn-secondary btn-sm" @onclick="GoToQuery" disabled="@IsLoading" title="Open this table in the SQL workbench">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"/></svg>
                 Query
             </button>
-            <button class="btn btn-outline" @onclick="@(() => ShowApiDocs = true)" title="How to fetch this data via the API">
-                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            <button class="btn btn-secondary btn-sm" @onclick="@(() => ShowApiDocs = true)" title="How to fetch this data through the API">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
                 API
             </button>
-            <button class="btn btn-outline" @onclick="@(() => ShowCommentsPanel = !ShowCommentsPanel)" disabled="@IsLoading">
-                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            <button class="btn btn-secondary btn-sm @(ShowCommentsPanel ? "is-active" : "")" @onclick="@(() => ShowCommentsPanel = !ShowCommentsPanel)" disabled="@IsLoading" title="@(ShowCommentsPanel ? "Hide comments" : "Show comments")" aria-pressed="@(ShowCommentsPanel ? "true" : "false")">
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                 Comments
-                @if (CommentsCount > 0) { <span class="dv-badge">@CommentsCount</span> }
+                @if (CommentsCount > 0) { <span class="dvw-count">@CommentsCount</span> }
             </button>
         </div>
-    </div>
+    </header>
 
-    <!-- Body -->
-    <div style="flex:1;display:flex;overflow:hidden">
-        <!-- Table area -->
-        <div style="flex:1;padding:1rem;overflow:hidden;display:flex;flex-direction:column">
-            @if (IsLoading)
+    @* ---------- body: the grid, plus the comments panel when open ---------- *@
+    <div class="dvw-body">
+        <section class="dvw-main">
+            @if (IsLoading || !hasLoadedOnce)
             {
-                <div class="dv-statecard" style="flex:1;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:0.5rem;border:1px solid #e4e4e7">
-                    <div style="text-align:center">
-                        <div class="ds-spinner" style="width:32px;height:32px;border-width:2.5px;margin:0 auto 0.75rem"></div>
-                        <p class="dv-muted" style="font-size:0.875rem;color:#71717a;margin:0">Loading table…</p>
-                    </div>
+                <div class="dvw-center">
+                    <div class="dvw-loading"><span class="spin"></span><span>Loading table…</span></div>
                 </div>
             }
             else if (TableColumns?.Any() == true)
             {
-                <div id="@GridId" class="ag-theme-quartz" style="flex:1;width:100%"></div>
-                <p class="dv-faint" style="font-size:0.75rem;color:#a1a1aa;margin:0.5rem 0 0 0">
-                    Scroll to load more · sort and filter from the header row.
-                    @if (AllowEdit) { <span>Click a cell to edit — <strong>changes save automatically</strong>; select rows with the checkboxes to delete.</span> }
-                </p>
+                <div id="@GridId" class="ag-theme-quartz dvw-grid"></div>
+                <footer class="dvw-status">
+                    <div class="dvw-status-left">
+                        <span class="dvw-status-rows">@(TotalRows > 0 ? $"{TotalRows:N0} rows" : "Loading rows…")</span>
+                        @if (gridSortCount > 0 || gridFilterCount > 0)
+                        {
+                            <span class="dvw-dot">·</span>
+                            <span>
+                                @if (gridSortCount > 0) { <text>sorted by @gridSortCount column@(gridSortCount == 1 ? "" : "s")</text> }
+                                @if (gridSortCount > 0 && gridFilterCount > 0) { <text>, </text> }
+                                @if (gridFilterCount > 0) { <text>@gridFilterCount filter@(gridFilterCount == 1 ? "" : "s")</text> }
+                            </span>
+                            <button type="button" class="dvw-link" @onclick="ClearGridState" title="Remove every sort and filter">Clear</button>
+                        }
+                    </div>
+                    <div class="dvw-status-right">
+                        @if (sourceMode) { <span>Rows come straight from the source database as you scroll. Sort and filter from the header row.</span> }
+                        else if (AllowEdit) { <span>Click a cell to edit; changes save on their own. Tick rows to delete them.</span> }
+                        else { <span>Scroll to load more. Sort and filter from the header row.</span> }
+                    </div>
+                </footer>
             }
             else
             {
-                <div class="dv-statecard" style="flex:1;display:flex;align-items:center;justify-content:center;background:#fff;border-radius:0.5rem;border:1px solid #e4e4e7">
-                    <div style="text-align:center">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="dv-empty-icon" style="color:#d4d4d8;margin-bottom:0.75rem"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
-                        <h3 class="dv-h3" style="font-size:0.9375rem;font-weight:600;color:#18181b;margin:0 0 0.25rem 0">No Data Available</h3>
-                        <p class="dv-muted" style="font-size:0.875rem;color:#71717a;margin:0">This table appears to be empty or could not be loaded.</p>
+                <div class="dvw-center">
+                    <div class="empty">
+                        <div class="dvw-empty-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/><path d="M9 3v18"/></svg>
+                        </div>
+                        <div class="empty-title">No data available</div>
+                        <div class="empty-text">This table appears to be empty or could not be loaded.</div>
+                        @if (!string.IsNullOrEmpty(DatasetId) && !string.IsNullOrEmpty(TableName))
+                        {
+                            <button class="btn btn-secondary btn-sm" style="margin-top:6px;" @onclick="ReloadTable">Try again</button>
+                        }
                     </div>
                 </div>
             }
-        </div>
+        </section>
 
-        <!-- Comments panel -->
         @if (ShowCommentsPanel)
         {
-            <div class="dv-comments-panel">
+            <aside class="dvw-side" aria-label="Comments">
                 <CommentsSidebar CompanyId="@c"
                                 DatasetId="@DatasetId"
                                 CurrentUserId="@CurrentUserId"
                                 TableName="@TableName"
                                 OnCommentAdded="@OnCommentAdded"
                                 OnCommentDeleted="@OnCommentDeleted" />
-            </div>
+            </aside>
         }
     </div>
 </div>
@@ -152,6 +207,173 @@ else
                LiveSource="@sourceMode" />
 }
 
+<style>
+    /* ------------------------------------------------------------------------------------------------
+       Data viewer — `.dvw-*`. Built on the shadcn tokens in shadcn.css, so light and dark both come from
+       the tokens. The grid itself is AG Grid's Quartz theme, re-skinned through its own custom properties
+       (further down) off those same tokens; the row virtualisation and infinite scrolling are untouched.
+       ------------------------------------------------------------------------------------------------ */
+    .dvw-shell {
+        /* Fill the layout's main area edge to edge: its height is the viewport minus the app chrome, and
+           the negative margins cancel .al-main's 20px/24px padding. */
+        height: calc(100dvh - var(--header-height) - var(--footer-height));
+        margin: -20px -24px;
+        display: flex; flex-direction: column; overflow: hidden;
+        background: var(--bg); color: var(--text-primary);
+    }
+    @@media (max-width: 767px) { .dvw-shell { margin: -14px -16px; } }
+
+    /* ---- top bar ---- */
+    .dvw-top {
+        flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        min-height: 58px; padding: 10px 20px; border-bottom: 1px solid var(--border); background: var(--surface);
+    }
+    .dvw-top-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .dvw-back {
+        appearance: none; flex: 0 0 auto; width: 30px; height: 30px; border-radius: 6px; border: 0;
+        background: transparent; color: var(--text-muted); display: inline-flex; align-items: center;
+        justify-content: center; cursor: pointer; transition: background .12s ease, color .12s ease;
+    }
+    .dvw-back:hover { background: var(--surface-subtle); color: var(--text-primary); }
+    .dvw-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .dvw-tile {
+        flex: 0 0 auto; width: 34px; height: 34px; border-radius: 8px;
+        display: inline-flex; align-items: center; justify-content: center;
+        border: 1px solid var(--border); background: var(--surface-subtle); color: var(--text-secondary);
+    }
+    .dvw-tile-ext { background: var(--accent-subtle); border-color: color-mix(in srgb, var(--accent) 28%, transparent); color: var(--accent); }
+    .dvw-heading { min-width: 0; }
+    .dvw-crumbs { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+    .sc .dvw-crumb { font-size: 13px; color: var(--text-muted); text-decoration: none; white-space: nowrap; }
+    .sc .dvw-crumb:hover { color: var(--text-primary); text-decoration: underline; text-underline-offset: 3px; }
+    .dvw-crumb-sep { color: var(--border-strong); font-size: 13px; }
+    .dvw-title {
+        margin: 0; font-family: var(--font-mono); font-size: 14px; font-weight: 600; line-height: 1.3;
+        color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .dvw-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 3px; font-size: 12px; color: var(--text-muted); }
+    .dvw-meta-text { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
+    .dvw-dot { color: var(--border-strong); }
+    .dvw-skel { display: inline-block; width: 180px; height: 11px; }
+
+    .dvw-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex: 0 0 auto; flex-wrap: wrap; }
+    .dvw-vsep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+    .sc .dvw-btn-danger { color: var(--danger); }
+    .sc .dvw-btn-danger:hover:not(:disabled) { background: var(--danger-subtle); border-color: var(--danger-border) !important; }
+    .sc .dvw-actions .btn.is-active { background: var(--accent-subtle); color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent) !important; }
+    .dvw-count {
+        display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px;
+        padding: 0 5px; border-radius: 999px; background: var(--accent); color: var(--text-on-accent);
+        font-size: 11px; font-weight: 600; line-height: 1; margin-left: 2px;
+    }
+
+    /* ---- body ---- */
+    .dvw-body { flex: 1 1 auto; display: flex; min-height: 0; }
+    /* The grid sits in a framed panel with a gutter around it; the status bar is the panel's footer. */
+    .dvw-main { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 14px 20px 16px; background: var(--bg); }
+    .dvw-grid {
+        flex: 1 1 auto; min-height: 0; width: 100%;
+        border: 1px solid var(--border); border-radius: 8px 8px 0 0; overflow: hidden; background: var(--surface);
+    }
+    .dvw-side { flex: 0 0 340px; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); background: var(--surface); }
+    .dvw-center { flex: 1 1 auto; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .dvw-loading { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-muted); }
+    .dvw-empty-icon {
+        width: 44px; height: 44px; border-radius: 12px; display: inline-flex; align-items: center; justify-content: center;
+        background: var(--surface-subtle); border: 1px solid var(--border); color: var(--text-muted); margin-bottom: 6px;
+    }
+
+    /* ---- status bar under the grid ---- */
+    .dvw-status {
+        flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        min-height: 34px; padding: 6px 14px; border: 1px solid var(--border); border-top: 0; border-radius: 0 0 8px 8px;
+        background: var(--surface-subtle); font-size: 12px; color: var(--text-muted);
+    }
+    .dvw-status-left { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .dvw-status-rows { font-weight: 600; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+    .dvw-link { appearance: none; background: none; border: 0; padding: 0 4px; font: inherit; font-size: 12px; font-weight: 600; color: var(--accent); cursor: pointer; }
+    .dvw-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+    .dvw-status-right { text-align: right; }
+    @@media (max-width: 960px) { .dvw-status-right { display: none; } }
+
+    /* ---- AG Grid (Quartz) re-skinned through its custom properties ----
+       Same tokens as the rest of the page, so dark mode needs no separate block. This out-ranks the
+       app-wide dark override in app.css because it comes later at equal specificity. */
+    .dvw-grid.ag-theme-quartz {
+        --ag-font-family: var(--font-body);
+        --ag-font-size: 13px;
+        --ag-active-color: var(--accent);
+        --ag-background-color: var(--surface);
+        --ag-foreground-color: var(--text-primary);
+        --ag-secondary-foreground-color: var(--text-secondary);
+        --ag-subtle-text-color: var(--text-muted);
+        --ag-header-background-color: var(--surface-subtle);
+        --ag-header-foreground-color: var(--text-muted);
+        --ag-border-color: var(--border);
+        --ag-row-border-color: var(--border);
+        --ag-row-hover-color: var(--surface-muted);
+        --ag-odd-row-background-color: var(--surface);
+        --ag-selected-row-background-color: var(--accent-subtle);
+        --ag-range-selection-border-color: var(--accent);
+        --ag-control-panel-background-color: var(--surface);
+        --ag-input-background-color: var(--surface);
+        --ag-input-border-color: var(--border);
+        --ag-input-focus-border-color: var(--accent);
+        --ag-input-focus-box-shadow: 0 0 0 3px var(--ring);
+        --ag-checkbox-checked-color: var(--accent);
+        --ag-checkbox-unchecked-color: var(--border-strong);
+        --ag-header-column-separator-display: none;
+        --ag-header-column-resize-handle-display: block;
+        --ag-header-column-resize-handle-color: var(--border);
+        --ag-header-column-resize-handle-height: 40%;
+        --ag-cell-horizontal-padding: 12px;
+        --ag-border-radius: 6px;
+        --ag-wrapper-border-radius: 0;
+        --ag-card-shadow: var(--shadow-md);
+        --ag-popup-shadow: var(--shadow-md);
+        --ag-modal-overlay-background-color: color-mix(in srgb, var(--bg) 70%, transparent);
+        --ag-icon-size: 14px;
+        --ag-header-height: 36px;
+        --ag-row-height: 34px;
+    }
+    .dvw-grid .ag-root-wrapper { border: 0; }
+    .dvw-grid .ag-header { border-bottom: 1px solid var(--border); }
+    .dvw-grid .ag-header-cell-text { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+    .dvw-grid .dvw-col-type {
+        margin-left: 6px; font-family: var(--font-mono); font-size: 10px; font-weight: 500; letter-spacing: 0;
+        text-transform: none; color: var(--text-muted); opacity: .7; white-space: nowrap;
+    }
+    .dvw-grid .ag-header-cell:hover .dvw-col-type { opacity: 1; }
+    /* Right-aligned (numeric) headers lay their label out in reverse, which would put the tag before the
+       name; pulling it to the front of the flex order puts it back after the name. */
+    .dvw-grid .ag-right-aligned-header .dvw-col-type { order: -1; }
+    /* The filter row's inputs: Quartz sizes them with `input[class^=ag-]` selectors, so this has to be more
+       specific than that to take. 22px tall in a 34px row leaves clear space above and below. */
+    .dvw-grid.ag-theme-quartz .ag-floating-filter input[class^=ag-] {
+        height: 22px; min-height: 22px; max-height: 22px; line-height: 20px;
+        padding: 0 8px; font-size: 11.5px; border-radius: 5px;
+    }
+    .dvw-grid.ag-theme-quartz .ag-floating-filter { padding-top: 0; padding-bottom: 0; }
+    .dvw-grid .ag-floating-filter-button { margin-left: 6px; }
+    .dvw-grid .ag-row { border-bottom-style: solid; }
+    .dvw-grid .dvw-cell-int, .dvw-grid .dvw-cell-num { font-variant-numeric: tabular-nums; }
+    .dvw-grid .dvw-cell-date, .dvw-grid .dvw-cell-time { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+    .dvw-grid .dvw-cell-json, .dvw-grid .dvw-cell-blob { font-family: var(--font-mono); font-size: 12px; color: var(--text-secondary); }
+    .dvw-grid .dvw-cell-bool { text-transform: lowercase; }
+    .dvw-grid .dvw-null:not(.ag-cell-inline-editing)::before { content: "null"; color: var(--text-muted); font-style: italic; opacity: .7; }
+    .dvw-grid .ag-loading { color: var(--text-muted); font-size: 12px; }
+    .dvw-overlay {
+        display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px;
+        border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-sm);
+        font-size: 12.5px; color: var(--text-muted);
+    }
+    .dvw-overlay-spin {
+        width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--accent-border); border-top-color: var(--accent);
+        animation: dvw-rotate .7s linear infinite;
+    }
+    @@keyframes dvw-rotate { to { transform: rotate(360deg); } }
+</style>
+
 @code {
     [SupplyParameterFromQuery] public string? c { get; set; }
     [SupplyParameterFromQuery] public string? DatasetId { get; set; }
@@ -162,13 +384,14 @@ else
 
     private const string GridId = "data-view-grid";
 
-    // ---- Live-source preview mode (external datasets) ----
-    // Confirmed after the dataset loads (source flag AND the dataset really is External). The source is
-    // read-only and shown as a capped preview of the first rows, fetched once and served from this cache.
+    // ---- Live-source mode (external datasets) ----
+    // Confirmed after the dataset loads (source flag AND the dataset really is External). Rows are read
+    // from the source database one block at a time as the grid scrolls, with sort and filter pushed into
+    // the source query (POST source-tables/{table}/data). The source is read-only here.
     private bool sourceMode;
-    private const int SourcePreviewCap = 1000;
-    private List<Dictionary<string, object>>? sourceRows;
-    private bool sourceRowsLoaded;
+    // The filter model the last live-source COUNT was taken for. The count is only re-run on the first
+    // block after the filters change, so scrolling does not repeat it on every block.
+    private string? countedFilterJson;
 
     private bool ShowApiDocs = false;
 
@@ -181,10 +404,17 @@ else
     // Editing is offered only to EDIT_DATA users on local DuckDB datasets; external sources are read-only.
     private bool AllowEdit => canEdit && DatasetInfo?.SourceType == DatasetSourceType.Local;
     private bool IsLoading = false;
+    // False until the first load attempt has finished, so the page shows "loading" rather than "no data"
+    // for the frame before the table is fetched.
+    private bool hasLoadedOnce;
     private bool ShowCommentsPanel = false;
     private int TotalRows = 0;
     private int CommentsCount = 0;
     private string CurrentUserId = string.Empty;
+
+    // Sort/filter state reported by the grid (see dataGridEditor.notifyState) for the status bar.
+    private int gridSortCount;
+    private int gridFilterCount;
 
     private string? loadedKey;
     private bool gridInitialized;
@@ -213,16 +443,21 @@ else
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!canView || string.IsNullOrEmpty(DatasetId) || string.IsNullOrEmpty(TableName))
+        if (!canView) return;
+        if (string.IsNullOrEmpty(DatasetId) || string.IsNullOrEmpty(TableName))
+        {
+            hasLoadedOnce = true; // nothing to load — show the empty state rather than a spinner
             return;
+        }
 
         var key = $"{DatasetId}|{TableName}|{source}";
         if (key == loadedKey) return;
         loadedKey = key;
 
-        // New table/mode — drop any cached source preview.
-        sourceRows = null;
-        sourceRowsLoaded = false;
+        // New table/mode — forget the previous grid's sort/filter state and the live-source row count.
+        countedFilterJson = null;
+        gridSortCount = 0;
+        gridFilterCount = 0;
 
         // Navigated to a different table on the same component instance — tear the grid down first.
         if (gridInitialized)
@@ -243,7 +478,8 @@ else
         gridInitialized = true;
         dotNetRef ??= DotNetObjectReference.Create(this);
         var colPayload = TableColumns.Select(col => new { name = col.Name, dataType = col.DataType }).ToList();
-        await JSRuntime.InvokeVoidAsync("dataGridEditor.init", GridId, dotNetRef, colPayload, null, new { editable = AllowEdit, infinite = true });
+        await JSRuntime.InvokeVoidAsync("dataGridEditor.init", GridId, dotNetRef, colPayload, null,
+            new { editable = AllowEdit, infinite = true });
     }
 
     private async Task LoadInitialData()
@@ -285,9 +521,12 @@ else
         finally
         {
             IsLoading = false;
+            hasLoadedOnce = true;
             StateHasChanged();
         }
     }
+
+    private async Task ReloadTable() => await LoadInitialData();
 
     private async Task LoadCommentsCount()
     {
@@ -307,11 +546,6 @@ else
         EnsureCompanyHeader();
         EnsureUserIdHeader();
 
-        // Live source: fetch a capped preview once, then serve pages from the cache. Sort/filter from the
-        // grid header aren't pushed to the live source (this is a read-only preview), so they're ignored.
-        if (sourceMode)
-            return await FetchSourceRows(startRow, endRow);
-
         var pageSize = Math.Max(1, endRow - startRow);
         var query = new TableDataQuery
         {
@@ -319,60 +553,64 @@ else
             TableName = TableName!,
             Page = startRow / pageSize + 1,
             PageSize = pageSize,
-            IncludeRowId = AllowEdit,
+            IncludeRowId = AllowEdit && !sourceMode,
             SortColumns = ParseSort(sortJson),
             Filters = ParseFilters(filterJson)
         };
 
-        var response = await HttpClient.PostAsJsonAsync($"api/Datasets/{DatasetId}/tables/{TableName}/data", query);
+        // Live source: the same query goes to the source database itself, one block at a time. The COUNT is
+        // a second round trip there, so it is only asked for on the first block after the filters change
+        // (the grid restarts from row 0 whenever its sort or filter model changes). The DuckDB path counts
+        // every time, as it always has.
+        var countNeeded = !sourceMode || (startRow == 0 && (countedFilterJson != filterJson || TotalRows == 0));
+        var url = sourceMode
+            ? $"api/Datasets/{DatasetId}/source-tables/{Uri.EscapeDataString(TableName!)}/data?includeTotal={(countNeeded ? "true" : "false")}"
+            : $"api/Datasets/{DatasetId}/tables/{TableName}/data";
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await HttpClient.PostAsJsonAsync(url, query);
+        }
+        catch (Exception ex)
+        {
+            ToastService.ShowError($"Failed to load data: {ex.Message}");
+            return new FetchRowsResult { Rows = new(), LastRow = startRow };
+        }
         if (!response.IsSuccessStatusCode)
         {
-            ToastService.ShowError($"Failed to load data: {response.StatusCode}");
+            // The live-source path returns the engine's own message (e.g. a filter the source rejected);
+            // that is worth showing. The snapshot path keeps the status code as before.
+            var detail = sourceMode ? await response.Content.ReadAsStringAsync() : response.StatusCode.ToString();
+            ToastService.ShowError($"Failed to load data: {detail}");
             return new FetchRowsResult { Rows = new(), LastRow = startRow };
         }
 
         var result = await response.Content.ReadFromJsonAsync<TableDataResult>();
         var rows = result?.Data ?? new();
-        TotalRows = result?.TotalRows ?? (startRow + rows.Count);
+        if (countNeeded)
+        {
+            TotalRows = result?.TotalRows ?? (startRow + rows.Count);
+            countedFilterJson = filterJson;
+        }
+        else if (TotalRows < startRow + rows.Count)
+        {
+            TotalRows = startRow + rows.Count; // the source grew since it was counted
+        }
         await InvokeAsync(StateHasChanged); // refresh the row count in the header
         return new FetchRowsResult { Rows = rows, LastRow = TotalRows };
     }
 
-    // Live-source preview: load up to SourcePreviewCap rows once from the source-data endpoint, cache them,
-    // and hand the grid the requested slice. LastRow = the cached count so the grid stops at the preview.
-    private async Task<FetchRowsResult> FetchSourceRows(int startRow, int endRow)
+    // Called by the grid whenever its sort or filter model changes (dataGridEditor.notifyState).
+    [JSInvokable]
+    public async Task GridStateChanged(int sorts, int filters)
     {
-        if (!sourceRowsLoaded)
-        {
-            try
-            {
-                var response = await HttpClient.GetAsync(
-                    $"api/Datasets/{DatasetId}/source-tables/{Uri.EscapeDataString(TableName!)}/data?maxRows={SourcePreviewCap}");
-                if (response.IsSuccessStatusCode)
-                {
-                    var result = await response.Content.ReadFromJsonAsync<TableDataResult>();
-                    sourceRows = result?.Data ?? new();
-                }
-                else
-                {
-                    ToastService.ShowError($"Failed to load source data: {await response.Content.ReadAsStringAsync()}");
-                    sourceRows = new();
-                }
-            }
-            catch (Exception ex)
-            {
-                ToastService.ShowError($"Error loading source data: {ex.Message}");
-                sourceRows = new();
-            }
-            sourceRowsLoaded = true;
-            TotalRows = sourceRows.Count;
-            await InvokeAsync(StateHasChanged); // refresh the row count in the header
-        }
-
-        var all = sourceRows ?? new();
-        var slice = all.Skip(startRow).Take(Math.Max(1, endRow - startRow)).ToList();
-        return new FetchRowsResult { Rows = slice, LastRow = all.Count };
+        gridSortCount = sorts;
+        gridFilterCount = filters;
+        await InvokeAsync(StateHasChanged);
     }
+
+    private async Task ClearGridState() => await JSRuntime.InvokeVoidAsync("dataGridEditor.clearSortAndFilters");
 
     [JSInvokable]
     public async Task UpdateCell(long rowId, string column, string? value)
@@ -544,21 +782,3 @@ else
         dotNetRef?.Dispose();
     }
 }
-
-<style>
-    /* Dark mode — this page is styled entirely with inline styles, so overrides use !important
-       to beat the element's own style attribute. (The AG Grid quartz theme is themed by AG Grid's
-       own CSS, not here.) */
-    [data-theme="dark"] .dv-shell { background:#0e1117 !important; }
-    [data-theme="dark"] .dv-header { background:#181a20 !important; border-bottom-color:#2b303b !important; }
-    [data-theme="dark"] .dv-h1 { color:#f3f4f6 !important; }
-    [data-theme="dark"] .dv-h3 { color:#f3f4f6 !important; }
-    [data-theme="dark"] .dv-sub { color:#9aa1ac !important; }
-    [data-theme="dark"] .dv-muted { color:#9aa1ac !important; }
-    [data-theme="dark"] .dv-faint { color:#9aa1ac !important; }
-    [data-theme="dark"] .dv-divider { background:#2b303b !important; }
-    [data-theme="dark"] .dv-statecard { background:#181a20 !important; border-color:#2b303b !important; }
-    [data-theme="dark"] .dv-empty-icon { color:#4b515e !important; }
-    [data-theme="dark"] .dv-btn-danger { color:#f87171 !important; border-color:rgba(248,113,113,.35) !important; }
-    [data-theme="dark"] .dv-btn-success { color:#4ade80 !important; border-color:rgba(74,222,128,.4) !important; }
-</style>

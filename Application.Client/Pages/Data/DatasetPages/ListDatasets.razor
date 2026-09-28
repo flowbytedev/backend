@@ -465,7 +465,15 @@
        codes to white). Class names are unique to this page, the same way pipeline.css uses `.pl-*`.
        ------------------------------------------------------------------------------------------------ */
     /* Full width: the table is the page, so it takes the whole content area instead of the page-wrap 1280px centre column. The .sc prefix is needed to out-rank `.sc .page-wrap`. */
-    .sc .dl-wrap { max-width: none; }
+    .sc .dl-wrap { max-width: none; padding: 0; margin: -20px -24px 0; }
+    /* Edge to edge: the wrap cancels .al-main's 20px/24px padding, the header keeps that gutter for itself,
+       and the card drops its side borders and corners so the table runs to the viewport edges. */
+    .dl-head { padding: 20px 24px 0; }
+    .sc .dl-card { border-radius: 0; border-left: 0; border-right: 0; }
+    @@media (max-width: 767px) {
+        .sc .dl-wrap { margin: -14px -16px 0; }
+        .dl-head { padding: 14px 16px 0; }
+    }
     .dl-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
     .dl-head .page-header { margin-bottom: 0; }
     .dl-sep { color: var(--border-strong); margin: 0 7px; }

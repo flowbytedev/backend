@@ -697,6 +697,55 @@ public class DatasetsController : ControllerBase
         });
     }
 
+    // POST: api/Datasets/{datasetId}/source-tables/{tableName}/data — one page of a live source table with the
+    // sort, filter and paging pushed into the source query (External datasets only). This is what the data
+    // viewer's infinite scroll calls in live-source mode; the GET above stays the fixed-size sample that
+    // column docs use. Same access rules as the GET: data administrators, per-user table scoping. Like every
+    // data path except the public SQL query API it enforces table grants only, not row-level security
+    // (see CLAUDE.md). includeTotal=false skips the COUNT round trip; TotalRows is then 0, and a header says
+    // so, as on api/external.
+    [HttpPost("{datasetId}/source-tables/{tableName}/data")]
+    public async Task<ActionResult<TableDataResult>> QuerySourceTableData(
+        string datasetId, string tableName, [FromBody] TableDataQuery? query,
+        [FromQuery] bool includeTotal = true, CancellationToken ct = default)
+    {
+        var userId = Request.Headers["UserId"].ToString();
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest("User ID is required in headers");
+
+        var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
+        if (!User.HasCompanyRole(companyId, "DATA_ADMIN"))
+            return Forbid();
+
+        if (string.IsNullOrWhiteSpace(tableName))
+            return BadRequest("Table name is required");
+
+        var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);
+        if (dataset == null)
+            return NotFound($"Dataset with ID '{datasetId}' not found.");
+        if (dataset.SourceType != Application.Shared.Enums.DatasetSourceType.External || string.IsNullOrWhiteSpace(dataset.SourceEntityId))
+            return BadRequest("This dataset is not backed by an external database.");
+
+        // Honor per-user table scoping (null = all tables).
+        var allowed = await _datasetService.GetAccessibleTablesAsync(datasetId, userId);
+        if (allowed != null && !allowed.Contains(tableName))
+            return Forbid();
+
+        query ??= new TableDataQuery();
+        query.DatasetId = datasetId;
+        query.TableName = tableName;
+        query.IncludeRowId = false; // rowid is a DuckDB notion; the live source is read-only here
+        if (query.Page <= 0) query.Page = 1;
+        if (query.PageSize <= 0) query.PageSize = 100;
+
+        var external = await _databaseTableService.QueryTableDataAsync(dataset.SourceEntityId!, companyId, query, includeTotal, ct);
+        if (!string.IsNullOrEmpty(external.Error))
+            return BadRequest(external.Error);
+
+        if (!includeTotal) Response.Headers["X-Total-Rows-Omitted"] = "true";
+        return Ok(external.Data);
+    }
+
     // GET: api/datasets/{datasetId}/documented-tables?snapshot=true — names of tables that already have
     // saved column docs for the given layer (snapshot = DuckDB, false = live source), so table lists can
     // badge which tables are documented. snapshot is ignored (treated as true) for Local datasets.
