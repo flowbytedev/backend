@@ -412,7 +412,9 @@ public class PublicSqlQueryService : IPublicSqlQueryService
                 $"Column '{mentioned}' is not readable by this user.");
 
         string effectiveSql;
-        if (isExternalLive && liveMode == RlsEnforcementMode.Rewrite)
+        // Must match buildRelations above: an unrestricted user on a Rewrite source has no relations
+        // built, so routing them into the rewriter refuses every table as "no secured definition".
+        if (isExternalLive && liveMode == RlsEnforcementMode.Rewrite && hasRestrictions)
         {
             // Substitute a secured subquery at every reference, then refuse unless no route to a base
             // table survived. The verification pass inside is what makes this safe to run at all.
