@@ -1510,6 +1510,42 @@ public class DatasetsController : ControllerBase
         }
     }
 
+    // POST: api/Datasets/{datasetId}/tables/{tableName}/pivot — an Excel-style pivot (rows × columns ×
+    // aggregated values) computed in the engine and reshaped server-side; see PivotService. The access rules
+    // mirror the two grids it sits beside: the snapshot needs a data-reading role, the live source needs
+    // DATA_ADMIN (as source-tables/{table}/data does), and both honour per-user table scoping. Like those
+    // grids it enforces table grants only, not column masking or row-level security (see CLAUDE.md).
+    // A layout or query problem comes back as 200 with PivotResult.Error, so the builder can show it inline.
+    [HttpPost("{datasetId}/tables/{tableName}/pivot")]
+    public async Task<ActionResult<PivotResult>> PivotTable(string datasetId, string tableName,
+        [FromBody] PivotRequest request, [FromServices] IPivotService pivotService, CancellationToken ct)
+    {
+        var userId = Request.Headers["UserId"].ToString();
+        if (string.IsNullOrWhiteSpace(userId))
+            return BadRequest("User ID is required in headers");
+
+        var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
+        if (string.IsNullOrWhiteSpace(tableName))
+            return BadRequest("Table name is required");
+
+        request ??= new PivotRequest();
+        var allowedRole = request.LiveSource
+            ? User.HasCompanyRole(companyId, "DATA_ADMIN")
+            : User.HasCompanyRole(companyId, "VIEW_DATA", "QUERY", "DATA_ADMIN");
+        if (!allowedRole)
+            return Forbid();
+
+        // GetDatasetAsync filters on the user's shares but not on company, so check the tenant here.
+        var dataset = await _datasetService.GetDatasetAsync(datasetId, userId);
+        if (dataset == null || !string.Equals(dataset.CompanyId, companyId, StringComparison.Ordinal))
+            return NotFound($"Dataset with ID '{datasetId}' not found.");
+
+        if (!await IsTableAllowedAsync(datasetId, userId, tableName))
+            return Forbid();
+
+        return Ok(await pivotService.RunAsync(dataset, companyId, tableName, request, ct));
+    }
+
     // GET: api/Datasets/{datasetId}/tables/{tableName}/count
     [HttpPost("{datasetId}/tables/{tableName}/count")]
     public async Task<ActionResult<int>> GetTableRowCount(string datasetId, string tableName, [FromBody] List<FilterCondition>? filters = null)
