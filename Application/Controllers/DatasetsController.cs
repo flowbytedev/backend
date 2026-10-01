@@ -6,6 +6,7 @@ using Application.Shared.Models.Data;
 using Application.Shared.Services.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -35,6 +36,7 @@ public class DatasetsController : ControllerBase
     private readonly IDatasetDocService _docService;
     private readonly Application.Shared.Services.ICompanySettingsService _companySettings;
     private readonly ITableExportTicketStore _exportTickets;
+    private readonly ILogger<DatasetsController> _exportLog;
 
     public DatasetsController(
         IDatasetService datasetService,
@@ -48,7 +50,8 @@ public class DatasetsController : ControllerBase
         Application.Shared.Services.Data.IUserDatasetPreferenceService preferences,
         IDatasetDocService docService,
         Application.Shared.Services.ICompanySettingsService companySettings,
-        ITableExportTicketStore exportTickets)
+        ITableExportTicketStore exportTickets,
+        ILogger<DatasetsController> exportLog)
     {
         _datasetService = datasetService;
         _duckdbService = duckdbService;
@@ -62,6 +65,7 @@ public class DatasetsController : ControllerBase
         _docService = docService;
         _companySettings = companySettings;
         _exportTickets = exportTickets;
+        _exportLog = exportLog;
     }
 
     // GET: api/Datasets/{companyId}
@@ -958,11 +962,31 @@ public class DatasetsController : ControllerBase
             if (export == null)
                 return NotFound($"No data found for table '{tableName}' in dataset '{datasetId}'.");
 
-            var ticket = _exportTickets.Issue(export.Value.Path, export.Value.FileName, userId, companyId, export.Value.Rows);
+            // Bind the ticket to the SERVER's own claim, not the UserId header the grant checks above use.
+            // The collection step can only read the cookie principal, so binding to anything else leaves the
+            // two halves comparing values from different sources — and a header is caller-supplied anyway,
+            // which is the wrong thing to hang an authorization check on.
+            var claimUserId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrWhiteSpace(claimUserId))
+                return Forbid();
 
+            if (!string.Equals(claimUserId, userId, StringComparison.Ordinal))
+                _exportLog.LogWarning(
+                    "Table export: the UserId header ('{Header}') and the signed-in claim ('{Claim}') disagree. "
+                    + "The ticket follows the claim; the dataset grant checks above used the header.",
+                    userId, claimUserId);
+
+            var ticket = _exportTickets.Issue(
+                export.Value.Path, export.Value.FileName, claimUserId, companyId, export.Value.Rows);
+
+            // The 'c' matters: this controller's class-level DataReadAccess policy resolves the active
+            // company through HttpContextCompanyAccessor, which reads the X-Company-Id header and falls
+            // back to this query-string value. A browser navigation sends no headers, so without it the
+            // policy sees no company, denies, and the cookie handler redirects to /Account/AccessDenied —
+            // a path nothing in this app serves, which surfaces as a 404.
             return Ok(new TableExportTicketResponse(
-                Url: Url.Action(nameof(CollectTableExport), "Datasets", new { token = ticket.Token })
-                     ?? $"/api/Datasets/exports/{ticket.Token}",
+                Url: Url.Action(nameof(CollectTableExport), "Datasets", new { token = ticket.Token, c = companyId })
+                     ?? $"/api/Datasets/exports/{ticket.Token}?c={Uri.EscapeDataString(companyId)}",
                 FileName: ticket.FileName,
                 Rows: ticket.Rows,
                 Bytes: ticket.Bytes));
@@ -976,9 +1000,10 @@ public class DatasetsController : ControllerBase
     /// <summary>
     /// Streams a prepared export to the browser and deletes it afterwards.
     /// <para>
-    /// Deliberately header-free: it is reached by navigation, so it authenticates from the session cookie
-    /// and authorizes by matching the signed-in user against the one the ticket was issued to. The tenant
-    /// check already happened when the ticket was issued — this endpoint never selects data.
+    /// Reached by navigation, so it carries no headers: it authenticates from the session cookie, takes its
+    /// company from the <c>c</c> query string (which is what satisfies this controller's module policy),
+    /// and authorizes by matching both the signed-in user and the company against the ticket. It never
+    /// selects data — the row-level decision was made when the ticket was issued.
     /// </para>
     /// </summary>
     // GET: api/Datasets/exports/{token}
@@ -989,21 +1014,20 @@ public class DatasetsController : ControllerBase
         if (string.IsNullOrWhiteSpace(userId))
             return Forbid();
 
-        var ticket = _exportTickets.Redeem(token, userId);
+        // The module policy above has already passed for whatever company 'c' names; the ticket must agree,
+        // so the two authorizations cannot end up talking about different tenants.
+        var ticket = _exportTickets.Resolve(token, userId, Request.Query["c"].ToString());
         if (ticket == null)
             return NotFound("This download link has expired or has already been used. Start the download again.");
 
-        // Delete once the response has actually finished writing — not before, and not on a timer that
-        // could fire mid-transfer.
+        // Retire the ticket and delete the file only once the response has actually finished writing —
+        // not on lookup, so a request the browser abandons and retries still works the second time.
         Response.OnCompleted(() =>
         {
-            _exportTickets.Discard(ticket);
+            _exportTickets.Complete(ticket);
             return Task.CompletedTask;
         });
 
-        // Range processing stays off deliberately: the ticket is single use and the file is deleted the
-        // moment a response completes, so a client that probes with one request and fetches with a second
-        // would find it gone. One request, one whole file.
         return PhysicalFile(ticket.FilePath, "text/csv", ticket.FileName);
     }
 

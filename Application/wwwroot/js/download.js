@@ -1,8 +1,18 @@
 // Triggers a browser file download for a same-origin URL via a transient anchor.
 // Cookies are sent automatically, so cookie-based auth still applies.
+//
+// The two attributes are load-bearing, not decoration. Without them Blazor's enhanced navigation treats
+// this like any same-origin link click: it fetches the URL itself, discovers the response is not HTML,
+// abandons it and lets the browser navigate to the same URL again. The server therefore sees the request
+// TWICE, which breaks any endpoint that is not safe to call twice — the table export hands out one-time
+// links and the second request was reporting them as already used. 'download' tells the browser this is a
+// download (the file name still comes from Content-Disposition when the server sends one), and
+// data-enhance-nav="false" opts the click out of enhanced navigation explicitly.
 window.downloadFile = function (url) {
     const a = document.createElement('a');
     a.href = url;
+    a.setAttribute('download', '');
+    a.setAttribute('data-enhance-nav', 'false');
     a.style.display = 'none';
     document.body.appendChild(a);
     a.click();

@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Logging;
 
 namespace Application.Services.Data;
 
@@ -38,14 +39,25 @@ public interface ITableExportTicketStore
     TableExportTicket Issue(string filePath, string fileName, string userId, string companyId, long rows);
 
     /// <summary>
-    /// Consumes a token. Returns null when it is unknown, already used, expired, or was issued to a
-    /// different user — all reported to the caller the same way, so a probe learns nothing from the
-    /// difference.
+    /// Looks a token up and checks it belongs to this collector. Returns null when it is unknown, expired,
+    /// already collected, or was issued to a different user or company — all reported the same way, so a
+    /// probe learns nothing from the difference.
+    /// <para>
+    /// Deliberately does NOT consume the ticket; <see cref="Complete"/> does, once a response has actually
+    /// been delivered. Consuming on lookup sounds safer and is in fact brittle: a browser can issue the
+    /// same download request more than once (a probe then a fetch, or a client-side navigation that is
+    /// abandoned and retried), and the user then sees "already used" for a file they never received. The
+    /// window this opens is small and uninteresting — the token is 256-bit, bound to one user and company,
+    /// expires, and a replay only re-fetches that same person's own file.
+    /// </para>
     /// </summary>
-    TableExportTicket? Redeem(string token, string userId);
+    TableExportTicket? Resolve(string token, string userId, string companyId);
 
-    /// <summary>Best-effort delete of one collected file, once the response has finished writing it.</summary>
-    void Discard(TableExportTicket ticket);
+    /// <summary>
+    /// Retires a ticket once its response has finished writing: the token stops working and the file is
+    /// deleted.
+    /// </summary>
+    void Complete(TableExportTicket ticket);
 
     /// <summary>
     /// Deletes export files in <paramref name="directory"/> older than the ticket lifetime. Cache eviction
@@ -70,8 +82,13 @@ public sealed class TableExportTicketStore : ITableExportTicketStore
     public const string FilePrefix = "export";
 
     private readonly IMemoryCache _cache;
+    private readonly ILogger<TableExportTicketStore> _log;
 
-    public TableExportTicketStore(IMemoryCache cache) => _cache = cache;
+    public TableExportTicketStore(IMemoryCache cache, ILogger<TableExportTicketStore> log)
+    {
+        _cache = cache;
+        _log = log;
+    }
 
     public TableExportTicket Issue(string filePath, string fileName, string userId, string companyId, long rows)
     {
@@ -99,28 +116,63 @@ public sealed class TableExportTicketStore : ITableExportTicketStore
         });
 
         _cache.Set(CacheKey(ticket.Token), ticket, options);
+
+        _log.LogInformation(
+            "Table export ticket issued: token {Token}…, user '{UserId}', company '{CompanyId}', {Rows} rows -> {Path}",
+            Head(ticket.Token), userId, companyId, rows, filePath);
+
         return ticket;
     }
 
-    public TableExportTicket? Redeem(string token, string userId)
+    public TableExportTicket? Resolve(string token, string userId, string companyId)
     {
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(userId))
             return null;
 
         if (!_cache.TryGetValue(CacheKey(token), out TableExportTicket? ticket) || ticket is null)
+        {
+            _log.LogWarning(
+                "Table export refused: no ticket for token {Token}… (already collected, expired, or " +
+                "issued by a different process). Collector was user '{UserId}', company '{CompanyId}'.",
+                Head(token), userId, companyId);
             return null;
+        }
 
+        // Both identities must match the ticket; see Resolve's contract for why nothing is consumed here.
         if (!string.Equals(ticket.UserId, userId, StringComparison.Ordinal))
+        {
+            _log.LogWarning(
+                "Table export refused: token {Token}… was issued to user '{Issued}' but collected by " +
+                "'{Collector}'.", Head(token), ticket.UserId, userId);
             return null;
+        }
 
-        // Single use: remove before streaming, so a token that leaks out of the URL bar cannot be replayed.
-        _cache.Remove(CacheKey(token));
+        if (!string.Equals(ticket.CompanyId, companyId, StringComparison.Ordinal))
+        {
+            _log.LogWarning(
+                "Table export refused: token {Token}… was issued for company '{Issued}' but collected " +
+                "with '{Collector}'.", Head(token), ticket.CompanyId, companyId);
+            return null;
+        }
 
         // The cache can outlive the file if the folder was cleared underneath us.
-        return File.Exists(ticket.FilePath) ? ticket : null;
+        if (!File.Exists(ticket.FilePath))
+        {
+            _log.LogWarning("Table export refused: token {Token}… names a file that is gone ({Path}).",
+                Head(token), ticket.FilePath);
+            return null;
+        }
+
+        return ticket;
     }
 
-    public void Discard(TableExportTicket ticket) => Delete(ticket.FilePath);
+    public void Complete(TableExportTicket ticket)
+    {
+        // Remove first: the eviction callback skips EvictionReason.Removed precisely so it does not race
+        // the delete below.
+        _cache.Remove(CacheKey(ticket.Token));
+        Delete(ticket.FilePath);
+    }
 
     public void SweepStale(string directory)
     {
@@ -144,6 +196,10 @@ public sealed class TableExportTicketStore : ITableExportTicketStore
     }
 
     private static string CacheKey(string token) => "table-export:" + token;
+
+    /// <summary>A token prefix for logs — enough to correlate an issue with a redeem, not enough to replay.</summary>
+    private static string Head(string token) =>
+        string.IsNullOrEmpty(token) ? "(none)" : token[..Math.Min(8, token.Length)];
 
     private static void Delete(string path)
     {
