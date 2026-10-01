@@ -57,6 +57,7 @@ public class DataActivityLogFilter : IAsyncActionFilter
             ["ImportFile"] = ("table", "table.import"),
             ["GetTableData"] = ("table", "table.query"),
             ["GetTableRowCount"] = ("table", "table.count"),
+            ["PivotTable"] = ("table", "table.pivot"),
             ["UpdateRow"] = ("table", "row.update"),
             ["InsertRow"] = ("table", "row.add"),
             ["DeleteRow"] = ("table", "row.delete"),

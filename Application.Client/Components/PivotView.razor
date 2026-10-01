@@ -1,0 +1,769 @@
+@using System.Text.Json
+@using System.Text.RegularExpressions
+@using Application.Shared.Models.Data
+@inject HttpClient HttpClient
+@inject IJSRuntime JSRuntime
+@implements IAsyncDisposable
+
+@* Excel-style pivot for one table. The field pane on the right builds the layout by drag and drop (or the
+   "+" menu, for keyboard and touch); every change re-runs the pivot on the server (PivotService) after a
+   short debounce, and wwwroot/js/pivotGrid.js draws the result. Styles: wwwroot/pivot.css (`.pv-*`). *@
+
+<div class="pv">
+    <section class="pv-main">
+        <div class="pv-bar">
+            <div class="pv-bar-left" aria-live="polite">
+                @if (running)
+                {
+                    <span class="pv-spin" aria-hidden="true"></span><span>Calculating…</span>
+                }
+                else if (error != null)
+                {
+                    <span class="pv-bar-error">Couldn't build the pivot</span>
+                }
+                else if (hasResult)
+                {
+                    <span class="pv-bar-strong">@rowCount.ToString("N0") row@(rowCount == 1 ? "" : "s")</span>
+                    @if (columnKeyCount > 0)
+                    {
+                        <span class="dvw-dot">·</span>
+                        <span>@columnKeyCount.ToString("N0") column group@(columnKeyCount == 1 ? "" : "s")</span>
+                    }
+                    <span class="dvw-dot">·</span>
+                    <span>@elapsedMs.ToString("N0") ms</span>
+                }
+                else
+                {
+                    <span>Drag fields into Rows, Columns and Values</span>
+                }
+            </div>
+            <div class="pv-bar-right">
+                <label class="pv-check" title="Add a total column per row and a grand-total row">
+                    <input type="checkbox" checked="@showTotals" @onchange="ToggleTotals" />
+                    <span>Totals</span>
+                </label>
+                <button type="button" class="btn btn-secondary btn-sm" @onclick="ExportCsv" disabled="@(!hasResult || running || error != null)" title="Download the pivot as CSV">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+                    Export
+                </button>
+                <button type="button" class="btn btn-ghost btn-sm" @onclick="ClearLayout" disabled="@IsEmpty" title="Remove every field from the layout">Clear</button>
+            </div>
+        </div>
+
+        <div class="pv-stage">
+            @* Always in the DOM so the AG Grid instance survives re-runs; hidden while there is nothing to show. *@
+            <div id="@GridId" class="ag-theme-quartz dvw-grid pv-grid @(showGrid ? "" : "pv-hidden")"></div>
+
+            @if (!showGrid)
+            {
+                <div class="pv-center">
+                    @if (error != null)
+                    {
+                        <div class="empty">
+                            <div class="dvw-empty-icon pv-empty-icon-error">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                            </div>
+                            <div class="empty-title">Couldn't build the pivot</div>
+                            <div class="empty-text pv-error-text">@error</div>
+                        </div>
+                    }
+                    else if (running)
+                    {
+                        <div class="dvw-loading"><span class="spin"></span><span>Calculating…</span></div>
+                    }
+                    else
+                    {
+                        <div class="pv-intro">
+                            <div class="pv-intro-art" aria-hidden="true">
+                                <span class="pv-intro-cell pv-intro-corner"></span>
+                                <span class="pv-intro-cell pv-intro-col">Columns</span>
+                                <span class="pv-intro-cell pv-intro-row">Rows</span>
+                                <span class="pv-intro-cell pv-intro-val">Σ Values</span>
+                            </div>
+                            <div class="empty-title">Build a pivot</div>
+                            <div class="empty-text">
+                                Drag fields from the list on the right into <strong>Rows</strong>, <strong>Columns</strong> and
+                                <strong>Values</strong>, or tick a field to add it. Numbers go to Values, everything else to Rows.
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+            else if (error != null)
+            {
+                <div class="pv-banner" role="alert">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                    <span>@error</span>
+                </div>
+            }
+        </div>
+    </section>
+
+    <aside class="pv-pane" @ref="paneRef" aria-label="Pivot fields">
+        <div class="pv-pane-head">
+            <div class="pv-pane-title">Pivot fields</div>
+            <div class="pv-pane-sub">Drag between areas · drop back here to remove</div>
+        </div>
+
+        <div class="pv-search">
+            <svg class="pv-search-icon" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+            <input class="input" placeholder="Search fields" @bind="search" @bind:event="oninput" aria-label="Search fields" />
+        </div>
+
+        <div class="pv-fields pv-drop" @ondrop="() => DropOn(null, null)">
+            @if (string.IsNullOrWhiteSpace(search) || "row count".Contains(search.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                <div class="pv-field pv-field-special" draggable="true" data-field="@RowCountField" @ondragstart="() => BeginDrag(RowCountField, null, -1)">
+                    <span class="pv-field-check-spacer"></span>
+                    <span class="pv-kind pv-kind-count" aria-hidden="true">#</span>
+                    <span class="pv-field-name">Row count</span>
+                    <button type="button" class="pv-field-add" @onclick="() => AddTo(RowCountField, PivotZone.Values)" title="Add a row count to Values" aria-label="Add a row count to Values">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                    </button>
+                </div>
+            }
+            @foreach (var col in FilteredColumns)
+            {
+                var name = col.Name;
+                var kind = KindOf(name);
+                var used = IsUsed(name);
+                <div class="pv-field @(used ? "is-used" : "")" draggable="true" data-field="@name" @ondragstart="() => BeginDrag(name, null, -1)">
+                    <input type="checkbox" class="pv-field-check" checked="@used" @onchange="e => ToggleField(name, e.Value is true)" aria-label="@($"Use {name}")" />
+                    <span class="pv-kind pv-kind-@kind" title="@col.DataType" aria-hidden="true">@KindTag(kind)</span>
+                    <span class="pv-field-name" title="@($"{name} · {col.DataType}")">@name</span>
+                    <button type="button" class="pv-field-add @(menuFor == name ? "is-open" : "")" @onclick="() => ToggleMenu(name)" title="Add to an area" aria-label="@($"Add {name} to an area")" aria-expanded="@(menuFor == name ? "true" : "false")">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                    </button>
+                </div>
+                @if (menuFor == name)
+                {
+                    <div class="pv-menu" role="menu">
+                        @foreach (var z in ZoneOrder)
+                        {
+                            var zone = z;
+                            <button type="button" class="pv-menu-item" role="menuitem" @onclick="() => AddTo(name, zone)">
+                                @ZoneIcon(zone)<span>@ZoneTitle(zone)</span>
+                            </button>
+                        }
+                    </div>
+                }
+            }
+            @if (!FilteredColumns.Any() && !string.IsNullOrWhiteSpace(search))
+            {
+                <div class="pv-fields-empty">No fields match “@search”.</div>
+            }
+        </div>
+
+        <div class="pv-zones">
+            @foreach (var z in ZoneOrder)
+            {
+                var zone = z;
+                var items = zones[zone];
+                <div class="pv-zone pv-zone-@zone.ToString().ToLowerInvariant()">
+                    <div class="pv-zone-head">
+                        @ZoneIcon(zone)
+                        <span>@ZoneTitle(zone)</span>
+                        @if (items.Count > 0) { <span class="pv-zone-count">@items.Count</span> }
+                    </div>
+                    <div class="pv-zone-body pv-drop" @ondrop="() => DropOn(zone, null)">
+                        @if (items.Count == 0)
+                        {
+                            <div class="pv-zone-hint">@ZoneHint(zone)</div>
+                        }
+                        @for (var i = 0; i < items.Count; i++)
+                        {
+                            var index = i;
+                            var item = items[i];
+                            var itemKind = KindOf(item.Column);
+                            <div class="pv-chip" data-droppable @ondrop="() => DropOn(zone, index)" @ondrop:stopPropagation="true">
+                                <div class="pv-chip-head" draggable="true" data-field="@item.Column" @ondragstart="() => BeginDrag(item.Column, zone, index)">
+                                    <span class="pv-grip" aria-hidden="true">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2.5" cy="2.5" r="1.3"/><circle cx="7.5" cy="2.5" r="1.3"/><circle cx="2.5" cy="7" r="1.3"/><circle cx="7.5" cy="7" r="1.3"/><circle cx="2.5" cy="11.5" r="1.3"/><circle cx="7.5" cy="11.5" r="1.3"/></svg>
+                                    </span>
+                                    @* The label doubles as the chip's setting, so the field name keeps the width. *@
+                                    @if (zone is PivotZone.Rows or PivotZone.Columns && itemKind is "date" or "time")
+                                    {
+                                        <select class="pv-chip-select" value="@(item.DatePart ?? "")" @onchange="e => SetDatePart(item, e.Value as string)" aria-label="@($"Group {item.Column} by")" title="@ChipTitle(zone, item)">
+                                            <option value="">@item.Column</option>
+                                            @foreach (var part in PivotDateParts.All)
+                                            {
+                                                <option value="@part">@($"{item.Column} · {PivotDateParts.Label(part)}")</option>
+                                            }
+                                        </select>
+                                    }
+                                    else if (zone == PivotZone.Values && item.Column != RowCountField)
+                                    {
+                                        <select class="pv-chip-select" value="@item.Aggregation" @onchange="e => SetAggregation(item, e.Value as string)" aria-label="@($"Summarise {item.Column} by")" title="@ChipTitle(zone, item)">
+                                            @foreach (var agg in AggregationsFor(itemKind))
+                                            {
+                                                <option value="@agg">@($"{PivotAggregations.Label(agg)} of {item.Column}")</option>
+                                            }
+                                        </select>
+                                    }
+                                    else
+                                    {
+                                        <span class="pv-chip-name" title="@ChipTitle(zone, item)">@ChipLabel(zone, item)</span>
+                                    }
+                                    <button type="button" class="pv-x" @onclick="() => RemoveAt(zone, index)" title="Remove" aria-label="@($"Remove {item.Column} from {ZoneTitle(zone)}")">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                                    </button>
+                                </div>
+                                @if (zone == PivotZone.Filters)
+                                {
+                                    <div class="pv-chip-ctl">
+                                        <select class="pv-mini pv-mini-op" value="@item.Operator" @onchange="e => SetOperator(item, e.Value as string)" aria-label="@($"Condition for {item.Column}")">
+                                            @foreach (var (op, label) in OperatorsFor(itemKind))
+                                            {
+                                                <option value="@op">@label</option>
+                                            }
+                                        </select>
+                                        @if (item.Operator is not ("isblank" or "notblank"))
+                                        {
+                                            <input class="pv-mini pv-mini-input" value="@item.Value" @onchange="e => SetFilterValue(item, e.Value as string)"
+                                                   placeholder="@(item.Operator is "equals" or "notequals" ? "a; b; c" : "value")"
+                                                   title="@(item.Operator is "equals" or "notequals" ? "Separate several values with ;" : "Press Enter to apply")"
+                                                   aria-label="@($"Value for {item.Column}")" />
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </aside>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string DatasetId { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public string TableName { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public List<Column> Columns { get; set; } = new();
+    /// <summary>Pivot the External dataset's live source instead of its DuckDB snapshot.</summary>
+    [Parameter] public bool LiveSource { get; set; }
+
+    public enum PivotZone { Filters, Columns, Rows, Values }
+
+    // Excel's order: Filters and Columns on top, Rows and Values below.
+    private static readonly PivotZone[] ZoneOrder = { PivotZone.Filters, PivotZone.Columns, PivotZone.Rows, PivotZone.Values };
+
+    private const string RowCountField = PivotValueField.AllRows;
+    private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
+
+    private sealed class ZoneItem
+    {
+        public string Column { get; set; } = string.Empty;
+        public string? DatePart { get; set; }
+        public string Aggregation { get; set; } = PivotAggregations.Sum;
+        public string Operator { get; set; } = "equals";
+        public string Value { get; set; } = string.Empty;
+    }
+
+    /// <summary>What is being dragged: a field from the list (From null) or a chip from a zone.</summary>
+    private sealed record DragPayload(string Column, PivotZone? From, int Index);
+
+    /// <summary>What is remembered per table in localStorage.</summary>
+    private sealed class SavedLayout
+    {
+        public Dictionary<string, List<ZoneItem>> Zones { get; set; } = new();
+        public bool Totals { get; set; } = true;
+    }
+
+    private readonly Dictionary<PivotZone, List<ZoneItem>> zones = ZoneOrder.ToDictionary(z => z, _ => new List<ZoneItem>());
+    private readonly string GridId = "pivot-grid-" + Guid.NewGuid().ToString("N")[..8];
+
+    private ElementReference paneRef;
+    private DragPayload? drag;
+    private string? menuFor;
+    private string search = string.Empty;
+    private bool showTotals = true;
+
+    private bool running;
+    private bool hasResult;
+    private bool showGrid;
+    private string? error;
+    private int rowCount;
+    private int columnKeyCount;
+    private long elapsedMs;
+    private string? pendingJson;
+    private int runVersion;
+    private CancellationTokenSource? debounce;
+    private CancellationTokenSource? inflight;
+    private string? loadedFor;
+
+    private bool IsEmpty => zones.Values.All(z => z.Count == 0);
+
+    private string StorageKey => $"flowbyte.pivot:{DatasetId}:{TableName}:{(LiveSource ? "live" : "snapshot")}";
+
+    private IEnumerable<Column> FilteredColumns => (Columns ?? new List<Column>())
+        .Where(c => string.IsNullOrWhiteSpace(search) || c.Name.Contains(search.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    protected override void OnParametersSet()
+    {
+        // A different table on the same instance: start over, and let OnAfterRender load its saved layout.
+        var key = StorageKey;
+        if (loadedFor != null && loadedFor != key)
+        {
+            foreach (var list in zones.Values) list.Clear();
+            hasResult = showGrid = false;
+            error = null;
+            loadedFor = null;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try { await JSRuntime.InvokeVoidAsync("pivotGrid.initDnd", paneRef); } catch { /* drag is optional; the + menu still works */ }
+        }
+
+        if (loadedFor == null)
+        {
+            loadedFor = StorageKey;
+            await LoadLayout();
+            if (!IsEmpty)
+            {
+                await RunNow();
+                return;
+            }
+            StateHasChanged();
+        }
+
+        if (pendingJson != null)
+        {
+            var json = pendingJson;
+            pendingJson = null;
+            try
+            {
+                rowCount = await JSRuntime.InvokeAsync<int>("pivotGrid.render", GridId, json);
+                hasResult = true;
+            }
+            catch (Exception ex)
+            {
+                error = $"The pivot could not be drawn: {ex.Message}";
+                showGrid = false;
+            }
+            StateHasChanged();
+        }
+    }
+
+    // ---- field typing (mirrors dataGridEditor.js typeKind) ----
+
+    private static readonly Regex IntType = new(@"^(TINYINT|SMALLINT|INTEGER|INT|BIGINT|HUGEINT|UTINYINT|USMALLINT|UINTEGER|UBIGINT|UHUGEINT|U?INT\d+|LONG|SHORT|SERIAL|BIGSERIAL|BYTE|SBYTE)\b", RegexOptions.IgnoreCase);
+    private static readonly Regex NumType = new(@"^(DOUBLE|FLOAT|REAL|DECIMAL|NUMERIC|MONEY|SMALLMONEY|NUMBER|SINGLE)", RegexOptions.IgnoreCase);
+    private static readonly Regex TimeType = new(@"^(TIMESTAMP|DATETIME|TIME|SMALLDATETIME)", RegexOptions.IgnoreCase);
+    private static readonly Regex DateType = new(@"^(DATE|DATEONLY)\b", RegexOptions.IgnoreCase);
+    private static readonly Regex BoolType = new(@"^(BOOL|BOOLEAN|BIT)\b", RegexOptions.IgnoreCase);
+
+    private string KindOf(string column)
+    {
+        if (column == RowCountField) return "count";
+        var type = (Columns?.FirstOrDefault(c => c.Name == column)?.DataType ?? string.Empty).Trim();
+        if (type.Length == 0) return "text";
+        if (IntType.IsMatch(type)) return "int";
+        if (NumType.IsMatch(type)) return "num";
+        if (TimeType.IsMatch(type)) return "time";
+        if (DateType.IsMatch(type)) return "date";
+        if (BoolType.IsMatch(type)) return "bool";
+        return "text";
+    }
+
+    private static bool IsNumericKind(string kind) => kind is "int" or "num";
+
+    private static string KindTag(string kind) => kind switch
+    {
+        "int" or "num" => "123",
+        "date" or "time" => "date",
+        "bool" => "t/f",
+        _ => "abc"
+    };
+
+    private static IEnumerable<string> AggregationsFor(string kind) => IsNumericKind(kind)
+        ? PivotAggregations.All
+        : new[] { PivotAggregations.Count, PivotAggregations.CountDistinct, PivotAggregations.Min, PivotAggregations.Max };
+
+    private static IEnumerable<(string Op, string Label)> OperatorsFor(string kind)
+    {
+        yield return ("equals", "is");
+        yield return ("notequals", "is not");
+        if (IsNumericKind(kind) || kind is "date" or "time")
+        {
+            yield return ("greaterthan", ">");
+            yield return ("greaterorequal", "≥");
+            yield return ("lessthan", "<");
+            yield return ("lessorequal", "≤");
+        }
+        else
+        {
+            yield return ("contains", "contains");
+            yield return ("notcontains", "doesn't contain");
+            yield return ("startswith", "starts with");
+            yield return ("endswith", "ends with");
+        }
+        yield return ("isblank", "is blank");
+        yield return ("notblank", "is not blank");
+    }
+
+    // ---- labels ----
+
+    private static string ZoneTitle(PivotZone zone) => zone switch
+    {
+        PivotZone.Filters => "Filters",
+        PivotZone.Columns => "Columns",
+        PivotZone.Rows => "Rows",
+        _ => "Values"
+    };
+
+    private static string ZoneHint(PivotZone zone) => zone switch
+    {
+        PivotZone.Filters => "Limit the rows first",
+        PivotZone.Columns => "Spread across the top",
+        PivotZone.Rows => "List down the side",
+        _ => "Sum, count, average…"
+    };
+
+    private static string ChipLabel(PivotZone zone, ZoneItem item) =>
+        item.Column == RowCountField ? "Row count" : item.Column;
+
+    private static string ChipTitle(PivotZone zone, ZoneItem item) => zone switch
+    {
+        _ when item.Column == RowCountField => "Number of rows",
+        PivotZone.Values => $"{PivotAggregations.Label(item.Aggregation)} of {item.Column}",
+        PivotZone.Rows or PivotZone.Columns when item.DatePart != null => $"{item.Column} by {PivotDateParts.Label(item.DatePart).ToLowerInvariant()}",
+        _ => item.Column
+    };
+
+    private static RenderFragment ZoneIcon(PivotZone zone) => zone switch
+    {
+        PivotZone.Filters => @<svg class="pv-zone-icon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>,
+        PivotZone.Columns => @<svg class="pv-zone-icon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M15 3v18"/></svg>,
+        PivotZone.Rows => @<svg class="pv-zone-icon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/></svg>,
+        _ => @<svg class="pv-zone-icon" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 7V4H6l6 8-6 8h12v-3"/></svg>
+    };
+
+    // ---- layout editing ----
+
+    private bool IsUsed(string column) => zones.Values.Any(list => list.Any(i => i.Column == column));
+
+    private ZoneItem NewItem(string column, PivotZone zone)
+    {
+        var kind = KindOf(column);
+        return new ZoneItem
+        {
+            Column = column,
+            Aggregation = column == RowCountField || !IsNumericKind(kind) ? PivotAggregations.Count : PivotAggregations.Sum,
+            // A timestamp on an axis starts grouped by day: ungrouped, it gives one row or column per instant.
+            DatePart = zone is PivotZone.Rows or PivotZone.Columns && kind == "time" ? PivotDateParts.Date : null
+        };
+    }
+
+    private void BeginDrag(string column, PivotZone? from, int index)
+    {
+        drag = new DragPayload(column, from, index);
+        menuFor = null;
+    }
+
+    private void DropOn(PivotZone? target, int? before)
+    {
+        var payload = drag;
+        drag = null;
+        if (payload == null) return;
+
+        // Dropped back on the field list: remove a chip; a field from the list is a no-op.
+        if (target == null)
+        {
+            if (payload.From is { } source && payload.Index >= 0 && payload.Index < zones[source].Count)
+            {
+                zones[source].RemoveAt(payload.Index);
+                Changed();
+            }
+            return;
+        }
+
+        Place(payload, target.Value, before);
+    }
+
+    private void Place(DragPayload payload, PivotZone target, int? before)
+    {
+        // The row count is only meaningful as a value.
+        if (payload.Column == RowCountField && target != PivotZone.Values) return;
+
+        var list = zones[target];
+        var anchor = before is int b && b >= 0 && b < list.Count ? list[b] : null;
+
+        ZoneItem item;
+        if (payload.From is { } source && payload.Index >= 0 && payload.Index < zones[source].Count)
+        {
+            item = zones[source][payload.Index];
+            if (ReferenceEquals(item, anchor)) return; // dropped onto itself
+            zones[source].RemoveAt(payload.Index);
+            if (source != target)
+            {
+                // Settings that belong to the old area do not carry over.
+                var fresh = NewItem(item.Column, target);
+                if (target is PivotZone.Rows or PivotZone.Columns && source is PivotZone.Rows or PivotZone.Columns)
+                    fresh.DatePart = item.DatePart;
+                item = fresh;
+            }
+        }
+        else
+        {
+            item = NewItem(payload.Column, target);
+        }
+
+        // A field sits on one axis once: putting it in Rows takes it out of Columns, and vice versa.
+        if (target is PivotZone.Rows or PivotZone.Columns)
+        {
+            zones[PivotZone.Rows].RemoveAll(i => i.Column == item.Column && !ReferenceEquals(i, item));
+            zones[PivotZone.Columns].RemoveAll(i => i.Column == item.Column && !ReferenceEquals(i, item));
+        }
+
+        var at = anchor != null ? list.IndexOf(anchor) : -1;
+        if (at < 0) list.Add(item); else list.Insert(at, item);
+        Changed();
+    }
+
+    private void AddTo(string column, PivotZone zone)
+    {
+        menuFor = null;
+        Place(new DragPayload(column, null, -1), zone, null);
+    }
+
+    private void ToggleMenu(string column) => menuFor = menuFor == column ? null : column;
+
+    private void ToggleField(string column, bool on)
+    {
+        menuFor = null;
+        if (on)
+        {
+            if (!IsUsed(column))
+                Place(new DragPayload(column, null, -1), IsNumericKind(KindOf(column)) ? PivotZone.Values : PivotZone.Rows, null);
+            return;
+        }
+        foreach (var list in zones.Values) list.RemoveAll(i => i.Column == column);
+        Changed();
+    }
+
+    private void RemoveAt(PivotZone zone, int index)
+    {
+        if (index < 0 || index >= zones[zone].Count) return;
+        zones[zone].RemoveAt(index);
+        Changed();
+    }
+
+    private void SetDatePart(ZoneItem item, string? part)
+    {
+        item.DatePart = string.IsNullOrEmpty(part) ? null : part;
+        Changed();
+    }
+
+    private void SetAggregation(ZoneItem item, string? aggregation)
+    {
+        if (string.IsNullOrEmpty(aggregation)) return;
+        item.Aggregation = aggregation;
+        Changed();
+    }
+
+    private void SetOperator(ZoneItem item, string? op)
+    {
+        if (string.IsNullOrEmpty(op)) return;
+        item.Operator = op;
+        // An operator change only matters once there is a value, except for the value-less blank tests.
+        if (op is "isblank" or "notblank" || !string.IsNullOrWhiteSpace(item.Value)) Changed();
+        else SaveLayout();
+    }
+
+    private void SetFilterValue(ZoneItem item, string? value)
+    {
+        item.Value = value ?? string.Empty;
+        Changed();
+    }
+
+    private void ToggleTotals(ChangeEventArgs e)
+    {
+        showTotals = e.Value is true;
+        Changed();
+    }
+
+    private void ClearLayout()
+    {
+        foreach (var list in zones.Values) list.Clear();
+        Changed();
+    }
+
+    private void Changed()
+    {
+        SaveLayout();
+        ScheduleRun();
+    }
+
+    // ---- running ----
+
+    private void ScheduleRun()
+    {
+        debounce?.Cancel();
+        debounce = new CancellationTokenSource();
+        _ = RunAfterDelay(debounce.Token);
+    }
+
+    private async Task RunAfterDelay(CancellationToken token)
+    {
+        try { await Task.Delay(300, token); }
+        catch (TaskCanceledException) { return; }
+        await InvokeAsync(RunNow);
+    }
+
+    private PivotRequest BuildRequest() => new()
+    {
+        Rows = zones[PivotZone.Rows].Select(i => new PivotField { Column = i.Column, DatePart = i.DatePart }).ToList(),
+        Columns = zones[PivotZone.Columns].Select(i => new PivotField { Column = i.Column, DatePart = i.DatePart }).ToList(),
+        Values = zones[PivotZone.Values].Select(i => new PivotValueField { Column = i.Column, Aggregation = i.Aggregation }).ToList(),
+        Filters = zones[PivotZone.Filters]
+            .Where(i => i.Operator is "isblank" or "notblank" || !string.IsNullOrWhiteSpace(i.Value))
+            .Select(i => new FilterCondition { ColumnName = i.Column, Operator = i.Operator, Value = i.Value ?? string.Empty })
+            .ToList(),
+        LiveSource = LiveSource,
+        ShowTotals = showTotals
+    };
+
+    private async Task RunNow()
+    {
+        var version = ++runVersion;
+        inflight?.Cancel();
+
+        // Filters alone do not make a pivot.
+        if (zones[PivotZone.Rows].Count == 0 && zones[PivotZone.Columns].Count == 0 && zones[PivotZone.Values].Count == 0)
+        {
+            running = false;
+            hasResult = showGrid = false;
+            error = null;
+            StateHasChanged();
+            return;
+        }
+
+        inflight = new CancellationTokenSource();
+        var token = inflight.Token;
+        running = true;
+        StateHasChanged();
+
+        try
+        {
+            var url = $"api/Datasets/{Uri.EscapeDataString(DatasetId)}/tables/{Uri.EscapeDataString(TableName)}/pivot";
+            using var response = await HttpClient.PostAsJsonAsync(url, BuildRequest(), token);
+            if (version != runVersion) return;
+
+            if (!response.IsSuccessStatusCode)
+            {
+                error = response.StatusCode switch
+                {
+                    System.Net.HttpStatusCode.Forbidden => LiveSource
+                        ? "Pivoting the live source needs the data administrator role."
+                        : "You don't have access to pivot this table.",
+                    System.Net.HttpStatusCode.NotFound => "This table or dataset could not be found.",
+                    _ => await ReadProblem(response)
+                };
+                showGrid = hasResult && showGrid; // keep the last good pivot on screen under a banner
+                return;
+            }
+
+            var json = await response.Content.ReadAsStringAsync(token);
+            if (version != runVersion) return;
+
+            // Only the summary fields are read here; the rows are parsed once, in the browser.
+            using (var doc = JsonDocument.Parse(json))
+            {
+                var root = doc.RootElement;
+                var problem = root.TryGetProperty("error", out var e) && e.ValueKind == JsonValueKind.String ? e.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(problem))
+                {
+                    error = problem;
+                    showGrid = false;
+                    return;
+                }
+                elapsedMs = root.TryGetProperty("elapsedMs", out var ms) && ms.TryGetInt64(out var msValue) ? msValue : 0;
+                columnKeyCount = root.TryGetProperty("columnKeyCount", out var ck) && ck.TryGetInt32(out var ckValue) ? ckValue : 0;
+            }
+
+            error = null;
+            pendingJson = json; // drawn in OnAfterRenderAsync, once the grid element is visible
+            showGrid = true;
+        }
+        catch (OperationCanceledException) when (version != runVersion)
+        {
+            // superseded by a newer layout
+        }
+        catch (Exception ex)
+        {
+            if (version != runVersion) return;
+            error = ex.Message;
+            showGrid = false;
+        }
+        finally
+        {
+            if (version == runVersion)
+            {
+                running = false;
+                StateHasChanged();
+            }
+        }
+    }
+
+    private static async Task<string> ReadProblem(HttpResponseMessage response)
+    {
+        try
+        {
+            var text = await response.Content.ReadAsStringAsync();
+            return string.IsNullOrWhiteSpace(text) || text.Length > 400 ? $"The server returned {(int)response.StatusCode}." : text;
+        }
+        catch { return $"The server returned {(int)response.StatusCode}."; }
+    }
+
+    private async Task ExportCsv()
+    {
+        var safe = Regex.Replace(TableName ?? "table", @"[^A-Za-z0-9_\-.]+", "_");
+        await JSRuntime.InvokeVoidAsync("pivotGrid.exportCsv", GridId, $"{safe}_pivot.csv");
+    }
+
+    // ---- persistence ----
+
+    private void SaveLayout()
+    {
+        var layout = new SavedLayout
+        {
+            Zones = zones.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value),
+            Totals = showTotals
+        };
+        _ = JSRuntime.InvokeVoidAsync("pivotGrid.save", StorageKey, JsonSerializer.Serialize(layout, WebJson)).AsTask();
+    }
+
+    private async Task LoadLayout()
+    {
+        string? raw;
+        try { raw = await JSRuntime.InvokeAsync<string?>("pivotGrid.load", StorageKey); }
+        catch { return; }
+        if (string.IsNullOrWhiteSpace(raw)) return;
+
+        SavedLayout? layout;
+        try { layout = JsonSerializer.Deserialize<SavedLayout>(raw, WebJson); }
+        catch { return; }
+        if (layout == null) return;
+
+        // Columns can be renamed or dropped since the layout was saved; quietly skip what no longer exists.
+        var known = new HashSet<string>((Columns ?? new List<Column>()).Select(c => c.Name)) { RowCountField };
+        foreach (var zone in ZoneOrder)
+        {
+            zones[zone].Clear();
+            if (layout.Zones.TryGetValue(zone.ToString(), out var items) && items != null)
+                zones[zone].AddRange(items.Where(i => i != null && known.Contains(i.Column)));
+        }
+        showTotals = layout.Totals;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        debounce?.Cancel();
+        inflight?.Cancel();
+        try { await JSRuntime.InvokeVoidAsync("pivotGrid.dispose", GridId); } catch { /* circuit may be gone */ }
+    }
+}

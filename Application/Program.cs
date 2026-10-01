@@ -446,6 +446,9 @@ var publicApiOptions = new PublicApiOptions();
 builder.Configuration.Bind("PublicApi", publicApiOptions);
 builder.Services.AddSingleton(publicApiOptions);
 builder.Services.AddScoped<Application.Shared.Services.Data.IPublicSqlQueryService, Application.Shared.Services.Data.PublicSqlQueryService>();
+// Excel-style pivot for the data viewer (api/Datasets/{id}/tables/{table}/pivot): server-side GROUP BY over
+// the snapshot or the live source, reshaped into a cross-tab.
+builder.Services.AddScoped<Application.Shared.Services.Data.IPivotService, Application.Shared.Services.Data.PivotService>();
 // How each external source enforces per-user column/row grants on its live path, and the probe that
 // works out which options a source actually has.
 builder.Services.AddScoped<Application.Shared.Services.Data.IRlsModeService, Application.Shared.Services.Data.RlsModeService>();
