@@ -92,6 +92,12 @@ public interface IDuckdbService
     // read-write handle. SQL errors are returned via SqlQueryResult.Error, never thrown.
     Task<SqlQueryResult> ExecuteSqlAsync(string datasetId, string sql, bool allowWrite, int maxRows, System.Threading.CancellationToken ct = default);
 
+    // Runs a SELECT this backend generated itself (the pivot aggregate) on a read-only handle with external
+    // access off, capped at maxRows rather than the ad-hoc workbench ceiling — an aggregate is already the
+    // reduced result, and truncating it would silently drop cells. Never pass caller-written SQL here.
+    // Errors are returned via SqlQueryResult.Error, never thrown.
+    Task<SqlQueryResult> ExecuteGeneratedReadAsync(string datasetId, string sql, int maxRows, System.Threading.CancellationToken ct = default);
+
     // Write-back: materialize a SELECT query as a new table or view in the dataset.
     Task<SqlQueryResult> CreateObjectFromQueryAsync(string datasetId, string objectName, string sql, bool asView, System.Threading.CancellationToken ct = default);
 

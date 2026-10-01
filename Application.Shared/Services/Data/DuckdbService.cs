@@ -1115,6 +1115,57 @@ public partial class DuckdbService : IDuckdbService, Pipelines.IPipelineStore
         return result;
     }
 
+    public async Task<SqlQueryResult> ExecuteGeneratedReadAsync(string datasetId, string sql, int maxRows, CancellationToken ct = default)
+    {
+        var result = new SqlQueryResult { IsSelect = true };
+        var stopwatch = Stopwatch.StartNew();
+
+        var duckdbFilePath = ResolveDbPath(datasetId);
+        if (!File.Exists(duckdbFilePath))
+        {
+            result.Error = "Dataset database not found.";
+            return result;
+        }
+
+        var timeoutSeconds = _option.ResolveQueryTimeoutSeconds();
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+            // Always the read-only, no-external-access handle, whatever the statement looks like — the same
+            // boundary ExecuteSqlAsync uses for reads (see the note there).
+            using var connection = new DuckDBConnection(
+                $"DataSource={duckdbFilePath};ACCESS_MODE=READ_ONLY;enable_external_access=false");
+            await connection.OpenAsync(cts.Token);
+
+            using var command = connection.CreateCommand();
+            command.CommandText = sql;
+
+            using var reader = await command.ExecuteReaderAsync(cts.Token);
+            if (reader.FieldCount > 0)
+                ReadResultSet(reader, result, Math.Max(1, maxRows), cts.Token);
+
+            await connection.CloseAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            result.Error = $"The query was cancelled or exceeded the {timeoutSeconds}s time limit.";
+        }
+        catch (Exception ex)
+        {
+            result.Error = ex.Message;
+        }
+        finally
+        {
+            stopwatch.Stop();
+            result.ElapsedMs = stopwatch.ElapsedMilliseconds;
+        }
+
+        return result;
+    }
+
     public async Task<SqlQueryResult> CreateObjectFromQueryAsync(string datasetId, string objectName, string sql, bool asView, CancellationToken ct = default)
     {
         var result = new SqlQueryResult();
