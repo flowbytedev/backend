@@ -81,29 +81,34 @@ public static class PipelineNodeCatalog
                 IsSource: true),
 
             new(PipelineNodeTypes.SourceDatabase, PipelineNodeCategories.Sources, "Database query",
-                "Reads from a registered database connection — SQL Server, PostgreSQL, MySQL, ClickHouse or DuckDB.",
+                "Reads from a registered database connection — SQL Server, PostgreSQL, MySQL, ClickHouse, DuckDB or MongoDB.",
                 "server", [], [PipelinePorts.Out],
                 [
                     new("connection", "Connection", PipelineFieldKinds.ConnectionPicker, Required: true),
                     new("mode", "Read", PipelineFieldKinds.Select, Required: true,
-                        Options: [new("table", "A whole table"), new("query", "A SQL query")]),
-                    new("schema", "Schema", PipelineFieldKinds.Text, Placeholder: "dbo", VisibleWhen: "mode=table"),
-                    new("table", "Table", PipelineFieldKinds.Text, VisibleWhen: "mode=table"),
+                        Options: [new("table", "A whole table / collection"), new("query", "A query")]),
+                    new("schema", "Schema", PipelineFieldKinds.Text, Placeholder: "dbo", VisibleWhen: "mode=table",
+                        Help: "For MongoDB, the database. Empty uses the connection's."),
+                    // A suggestion list, not a closed one: discovery lists base tables only, and a view has to
+                    // stay typeable.
+                    new("table", "Table", PipelineFieldKinds.TablePicker, VisibleWhen: "mode=table", DependsOn: "connection",
+                        Help: "For MongoDB, the collection."),
                     new("query", "Query", PipelineFieldKinds.Sql, TokenContext: PipelineTokenContexts.Sql, VisibleWhen: "mode=query",
-                        Placeholder: "SELECT * FROM dbo.sales WHERE sale_date >= '{{ run.date }}'"),
+                        Placeholder: "SELECT * FROM dbo.sales WHERE sale_date >= '{{ run.date }}'",
+                        Help: "SQL in the connection's own dialect. For MongoDB, mongosh syntax: db.orders.aggregate([ { $match: { status: \"paid\" } } ]) or db.orders.find({ status: \"paid\" }, { _id: 0 }).sort({ at: -1 })."),
                     new("batchKeyColumn", "Batch by column", PipelineFieldKinds.Text,
-                        Help: "A unique, sortable column. Set this for large tables so rows are paged out instead of buffered whole."),
+                        Help: "A unique, sortable column. Set this for large tables so rows are paged out instead of buffered whole. Not used for MongoDB, which always streams."),
                     // Incremental reading. Only these two sources support it: both can be asked for
                     // MAX(column) before the load, which is what makes the window safe. A file or API
                     // source has nothing to ask.
                     new("incrementalColumn", "Only read rows newer than last time", PipelineFieldKinds.Text,
                         Placeholder: "modified_at",
-                        Help: "A column that only ever increases - a timestamp or an ascending id. Each run reads rows above the previous run's highest value, so a nightly load stops re-reading the whole table. Leave empty to read everything every time."),
+                        Help: "A column that only ever increases - a timestamp or an ascending id. Each run reads rows above the previous run's highest value, so a nightly load stops re-reading the whole table. Leave empty to read everything every time. For MongoDB, a field path such as updatedAt or meta.ts."),
                     new("incrementalStart", "Start from", PipelineFieldKinds.Text,
                         Placeholder: "2026-01-01",
                         Help: "Where the first run begins. Empty means the first run reads the whole table."),
                     new("batchSize", "Batch size", PipelineFieldKinds.Number, SupportsTokens: false,
-                        Help: "Rows per page. Only used when a batch column is set."),
+                        Help: "Rows per page. Only used when a batch column is set. For MongoDB, documents per cursor batch."),
                     new("commandTimeoutSeconds", "Query timeout (s)", PipelineFieldKinds.Number, SupportsTokens: false)
                 ],
                 IsSource: true),

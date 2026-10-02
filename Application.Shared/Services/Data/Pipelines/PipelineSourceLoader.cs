@@ -7,6 +7,7 @@ using Application.Shared.Models;
 using Application.Shared.Models.Data;
 using Application.Shared.Models.Data.Pipelines;
 using Microsoft.EntityFrameworkCore;
+using MongoDB.Bson;
 
 namespace Application.Shared.Services.Data.Pipelines;
 
@@ -22,7 +23,8 @@ namespace Application.Shared.Services.Data.Pipelines;
 /// database source wearing a dataset's name, so it is routed as one.</item>
 /// <item><b>Database</b> — streamed to a temp CSV using the reader the scheduled-ingestion path already
 /// uses, then loaded. The CSV hop is not free (see the type note on <see cref="LoadDatabaseAsync"/>) but it
-/// is the mechanism this codebase already trusts for millions of rows.</item>
+/// is the mechanism this codebase already trusts for millions of rows. MongoDB is the exception: it has no
+/// SQL and no fixed columns, so it streams newline-delimited JSON instead (see <see cref="LoadMongoAsync"/>).</item>
 /// </list>
 /// </summary>
 public interface IPipelineSourceLoader
@@ -470,11 +472,17 @@ public class PipelineSourceLoader(
             if (string.IsNullOrWhiteSpace(reference))
                 return PipelineRelationResult.Fail("This step has no connection.", PipelineErrorType.Invalid);
 
-            var entityId = await ResolveEntityIdAsync(reference!, request.CompanyId, ct);
-            if (entityId is null)
+            var database = await ResolveDatabaseAsync(reference!, request.CompanyId, ct);
+            if (database is null)
                 return PipelineRelationResult.Fail(
                     $"No database connection called '{reference}' is available to this company.",
                     PipelineErrorType.SourceUnavailable);
+
+            // Before any SQL is built: everything below this point assumes the source speaks SQL.
+            if (database.DatabaseType == DataSourceType.MongoDB)
+                return await LoadMongoAsync(request, database.Id, ct);
+
+            var entityId = database.Id;
 
             var mode = Str(config, "mode") ?? "table";
             string query;
@@ -604,6 +612,248 @@ public class PipelineSourceLoader(
         }
     }
 
+    // ---------------------------------------------------------------- mongodb
+
+    /// <summary>
+    /// Reads a MongoDB collection. Table mode reads a whole collection (the schema field, if set, names the
+    /// database); query mode takes mongosh syntax, parsed by <see cref="MongoQuery"/>.
+    /// <para>
+    /// <b>JSON rather than the CSV hop.</b> Documents are written one per line and loaded with
+    /// <c>read_json_auto</c>, so nested documents become STRUCT columns and arrays LIST columns, and a later
+    /// step can say <c>address.city</c> or <c>unnest(items)</c>. CSV would have flattened them to text. DuckDB
+    /// also works the columns out across every document, not just the first: a field that only appears late
+    /// still becomes a column, and a field whose type varies between documents becomes JSON rather than failing
+    /// the read. Both verified on DuckDB.NET 1.3.
+    /// </para>
+    /// <para>
+    /// <b>batchKeyColumn does not apply.</b> A cursor already streams in batches, so batchSize sets the cursor's
+    /// batch size and there is nothing to page on.
+    /// </para>
+    /// </summary>
+    private async Task<PipelineRelationResult> LoadMongoAsync(
+        SourceLoadRequest request, string entityId, CancellationToken ct)
+    {
+        var config = request.Node.Config;
+
+        var connection = await databaseTables.GetDecryptedConnectionAsync(entityId, request.CompanyId, ct);
+        if (connection is null)
+            return PipelineRelationResult.Fail(
+                "That database connection is no longer configured, or this company cannot use it.",
+                PipelineErrorType.SourceUnavailable);
+
+        MongoReadRequest read;
+        try
+        {
+            var batchSize = Int(config, "batchSize");
+            var timeout = Int(config, "commandTimeoutSeconds");
+
+            if ((Str(config, "mode") ?? "table") == "query")
+            {
+                var text = request.ResolveTokens(Str(config, "query"));
+                if (string.IsNullOrWhiteSpace(text))
+                    return PipelineRelationResult.Fail("This step has no query.", PipelineErrorType.Invalid);
+
+                var plan = MongoQuery.Parse(text);
+                read = new MongoReadRequest
+                {
+                    Database = plan.Database, Collection = plan.Collection, Pipeline = plan.Pipeline,
+                    BatchSize = batchSize, TimeoutSeconds = timeout
+                };
+            }
+            else
+            {
+                var collection = Str(config, "table");
+                if (string.IsNullOrWhiteSpace(collection))
+                    return PipelineRelationResult.Fail("This step has no collection.", PipelineErrorType.Invalid);
+
+                read = new MongoReadRequest
+                {
+                    Database = Str(config, "schema"), Collection = collection!.Trim(), Pipeline = [],
+                    BatchSize = batchSize, TimeoutSeconds = timeout
+                };
+            }
+        }
+        catch (FormatException ex)
+        {
+            return PipelineRelationResult.Fail($"MongoDB query: {ex.Message}", PipelineErrorType.Invalid);
+        }
+
+        // Kept without the window or the preview limit: it is where an empty result's columns come from.
+        var unwindowed = read;
+
+        var incremental = PipelineIncrementalConfig.FromConfig(config, v => request.ResolveTokens(v));
+        if (incremental.IsEnabled)
+        {
+            var field = incremental.Column!.Trim();
+            if (field.StartsWith('$'))
+                return PipelineRelationResult.Fail(
+                    $"Write the incremental field as a path without the $, e.g. updatedAt or meta.ts (got '{field}').",
+                    PipelineErrorType.Invalid);
+
+            BsonValue? ceiling;
+            try
+            {
+                // Over the step's own pipeline, for the same reason the SQL path wraps its query: a ceiling
+                // measured over the whole collection would jump past documents this step filters out.
+                ceiling = await MongoSource.MaxAsync(connection, read, field, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                return PipelineRelationResult.Fail(
+                    $"Could not read the high-water mark for '{field}': {ex.Message}",
+                    PipelineErrorType.SourceUnavailable);
+            }
+
+            var window = new PipelineWatermarkWindow
+            {
+                Column = field,
+                Low = request.IncrementalLow ?? incremental.Start,
+                High = MongoSource.Portable(ceiling),
+                Type = ceiling?.BsonType.ToString()
+            };
+
+            request.OnWindowCaptured?.Invoke(window);
+            request.Progress?.WriteLine($"  incremental: {window.Describe()}");
+
+            BsonDocument range;
+            if (ceiling is null)
+            {
+                // Nothing has a value yet, so read nothing. Reading everything instead would repeat on every run,
+                // because the ceiling would still be null next time (the "1 = 0" case in PipelineWatermarkWindow).
+                range = new BsonDocument("$expr", false);
+            }
+            else
+            {
+                // The ceiling is used as the BSON value it came back as, not re-parsed from text. The low bound is
+                // stored text, so it is converted to the ceiling's type: MongoDB orders mixed types by type first,
+                // and a date field compared with the string "2026-01-01" would match nothing.
+                var bounds = new BsonDocument();
+                if (window.Low is not null)
+                {
+                    var low = MongoSource.Typed(window.Low, ceiling.BsonType);
+                    if (low is null)
+                        return PipelineRelationResult.Fail(
+                            $"The incremental start '{window.Low}' cannot be compared with '{field}', which holds {ceiling.BsonType} values.",
+                            PipelineErrorType.Invalid);
+                    bounds.Add("$gt", low);
+                }
+                bounds.Add("$lte", ceiling);
+                range = new BsonDocument(field, bounds);
+            }
+
+            read = read.With([new BsonDocument("$match", range)]);
+        }
+
+        // Preview: the limit goes to the server, so previewing a huge collection does not read all of it.
+        if (request.RowLimit is > 0)
+            read = read.With([new BsonDocument("$limit", request.RowLimit.Value)]);
+
+        var temp = PipelineWorkspacePath.FileIn(request.WorkingDirectory, "pl_src", ".json");
+        string? shapeFile = null;
+
+        try
+        {
+            request.Progress?.WriteLine($"  reading MongoDB collection {read.Collection}");
+
+            var fetched = await MongoSource.ReadToJsonLinesAsync(
+                connection, read, temp, RowProgress(request.Progress, request.RowsFetched), ct);
+
+            request.Progress?.WriteLine($"  fetched {fetched:N0} documents");
+
+            // MongoDB reads a collection that does not exist as an empty one, without an error. So a typo, a
+            // wrong-case name or the wrong database would otherwise "succeed" with zero rows and a lone json
+            // column. Only checked when nothing came back, so a normal read pays nothing for it.
+            if (fetched == 0)
+            {
+                var missing = await DescribeMissingCollectionAsync(connection, read, ct);
+                if (missing is not null)
+                    return PipelineRelationResult.Fail(missing, PipelineErrorType.Invalid);
+            }
+
+            if (fetched == 0 && incremental.IsEnabled)
+            {
+                // A night with nothing new is the normal case for an incremental source, and it still needs a
+                // relation WITH COLUMNS, or every downstream step fails on a missing column. A SQL source gets
+                // them from the CSV header; documents carry no header, so the shape is taken from a sample of the
+                // same pipeline without the window, and the relation is created empty.
+                shapeFile = PipelineWorkspacePath.FileIn(request.WorkingDirectory, "pl_shape", ".json");
+                var sampled = await MongoSource.ReadToJsonLinesAsync(
+                    connection, unwindowed.With([new BsonDocument("$limit", 1000)]), shapeFile, null, ct);
+
+                if (sampled > 0)
+                    return await MaterializeEmptyShapeAsync(request, shapeFile, ct);
+            }
+
+            // An empty file with no sample to go on loads as a single JSON column: nothing says what the
+            // columns would have been.
+            return await store.MaterializeFromFileAsync(
+                request.ScratchDatasetId, request.Relation, temp, ImportFileFormat.Json,
+                hasHeader: true, sheet: null, rowLimit: null, ct: ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return PipelineRelationResult.Fail(ex.Message, PipelineErrorType.SourceUnavailable);
+        }
+        finally
+        {
+            TryDelete(temp);
+            TryDelete(shapeFile);
+        }
+    }
+
+    /// <summary>
+    /// A message naming what does exist when the step's collection does not, or null when it does. Points out a
+    /// case-only mismatch specifically, because collection names are case-sensitive and that is the easy miss.
+    /// </summary>
+    private static async Task<string?> DescribeMissingCollectionAsync(
+        DatabaseConnection connection, MongoReadRequest read, CancellationToken ct)
+    {
+        var existing = await MongoSource.ListCollectionsAsync(connection, ct, read.Database);
+        if (existing.Any(c => c.Name == read.Collection)) return null;
+
+        var database = existing.FirstOrDefault().Schema
+                       ?? read.Database ?? connection.DatabaseName ?? "the connection's database";
+
+        var caseOnly = existing.FirstOrDefault(c => string.Equals(c.Name, read.Collection, StringComparison.OrdinalIgnoreCase));
+        if (caseOnly.Name is not null)
+            return $"There is no collection '{read.Collection}' in database '{database}', but there is '{caseOnly.Name}'. Collection names are case-sensitive.";
+
+        if (existing.Count == 0)
+            return $"Database '{read.Database ?? connection.DatabaseName}' has no collections this connection can read. Check the database name (in a query: db.getSiblingDB(\"Name\").{read.Collection}.find()).";
+
+        var names = existing.Select(c => c.Name).OrderBy(n => n, StringComparer.OrdinalIgnoreCase).ToList();
+        var shown = string.Join(", ", names.Take(20)) + (names.Count > 20 ? $" … ({names.Count} in all)" : "");
+        return $"There is no collection '{read.Collection}' in database '{database}'. Collections there: {shown}.";
+    }
+
+    /// <summary>Creates the step's relation with the columns of <paramref name="sampleFile"/> and no rows.</summary>
+    private async Task<PipelineRelationResult> MaterializeEmptyShapeAsync(
+        SourceLoadRequest request, string sampleFile, CancellationToken ct)
+    {
+        var shape = request.Relation + "__mongo_shape";
+
+        var loaded = await store.MaterializeFromFileAsync(
+            request.ScratchDatasetId, shape, sampleFile, ImportFileFormat.Json,
+            hasHeader: true, sheet: null, rowLimit: null, ct: ct);
+        if (!loaded.Success) return loaded;
+
+        try
+        {
+            return await store.MaterializeAsync(
+                request.ScratchDatasetId, request.Relation,
+                $"SELECT * FROM {PipelineSql.Q(shape)} LIMIT 0", ct: ct);
+        }
+        finally
+        {
+            await store.DropRelationsAsync(request.ScratchDatasetId, shape, ct);
+        }
+    }
+
     private async Task<long> FetchClickHouseAsync(
         DatabaseConnection connection, DatabaseFetchSpec spec, string destination,
         IJobProgress? progress, CancellationToken ct)
@@ -715,15 +965,13 @@ public class PipelineSourceLoader(
             .FirstOrDefaultAsync(d => d.CompanyId == companyId && d.Name == reference, ct);
     }
 
-    private async Task<string?> ResolveEntityIdAsync(string reference, string companyId, CancellationToken ct)
+    private async Task<DatabaseEntityOptionDto?> ResolveDatabaseAsync(string reference, string companyId, CancellationToken ct)
     {
         var available = await databaseTables.GetConnectedDatabasesAsync(companyId, ct);
 
-        var match = available.FirstOrDefault(o => o.Id == reference)
-                    ?? available.FirstOrDefault(o =>
-                        string.Equals(o.Name, reference, StringComparison.OrdinalIgnoreCase));
-
-        return match?.Id;
+        return available.FirstOrDefault(o => o.Id == reference)
+               ?? available.FirstOrDefault(o =>
+                   string.Equals(o.Name, reference, StringComparison.OrdinalIgnoreCase));
     }
 
     // ---------------------------------------------------------------- helpers

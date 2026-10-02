@@ -657,7 +657,9 @@
     private MetricPolarity[] metricPolarities = Enum.GetValues<MetricPolarity>();
     private ReportingFrequency[] reportingFrequencies = Enum.GetValues<ReportingFrequency>();
     private DataIntegrityLevel[] dataIntegrityLevels = Enum.GetValues<DataIntegrityLevel>();
-    private DataSourceType[] dataSourceTypes = Enum.GetValues<DataSourceType>();
+    // Metrics query their source in SQL, so MongoDB (a pipeline-only, non-SQL source) is not offered.
+    private DataSourceType[] dataSourceTypes = Enum.GetValues<DataSourceType>()
+        .Where(t => t != DataSourceType.MongoDB).ToArray();
 
     private bool hasDataSource = false;
     private bool useExistingDataSource = false;
