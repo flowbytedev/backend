@@ -23,7 +23,8 @@ public class PipelinesController(
     IPipelineEngine engine,
     IPipelineFreshnessService freshness,
     IServiceProvider serviceProvider,
-    IConfiguration configuration) : ControllerBase
+    IConfiguration configuration,
+    Application.Shared.Services.IDatabaseTableService databaseTables) : ControllerBase
 {
     // ------------------------------------------------------------------- CRUD
 
@@ -119,6 +120,32 @@ public class PipelinesController(
     /// <summary>The node catalogue. Drives the palette and every inspector form, so the UI hard-codes none of it.</summary>
     [HttpGet("node-types")]
     public ActionResult<IEnumerable<PipelineNodeSpec>> NodeTypes() => Ok(PipelineNodeCatalog.All);
+
+    /// <summary>
+    /// Table (or MongoDB collection) names behind a connection, as suggestions for a database step's table
+    /// field. Takes the name or the id, because the graph stores the name. A discovery failure comes back as an
+    /// empty list: the field stays free text, which is what it was before suggestions existed.
+    /// </summary>
+    [HttpGet("connection-tables")]
+    public async Task<ActionResult<IEnumerable<string>>> ConnectionTables([FromQuery] string? connection)
+    {
+        if (!TryContext(out var companyId, out _, out var failure)) return failure!;
+        if (string.IsNullOrWhiteSpace(connection)) return Ok(Array.Empty<string>());
+
+        var ct = HttpContext.RequestAborted;
+        var available = await databaseTables.GetConnectedDatabasesAsync(companyId, ct);
+        var match = available.FirstOrDefault(o => o.Id == connection)
+                    ?? available.FirstOrDefault(o => string.Equals(o.Name, connection, StringComparison.OrdinalIgnoreCase));
+        if (match is null) return Ok(Array.Empty<string>());
+
+        var discovery = await databaseTables.DiscoverTablesAsync(match.Id, companyId, ct);
+
+        return Ok(discovery.Tables
+            .Select(t => t.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList());
+    }
 
     /// <summary>Validates a graph without saving it — the editor's live linter.</summary>
     [HttpPost("validate")]

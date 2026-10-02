@@ -50,6 +50,7 @@ public class DatabaseTableService : IDatabaseTableService
         var connection = await _context.DatabaseConnections
             .FirstOrDefaultAsync(c => c.EntityId == entityId && c.CompanyId == companyId, ct);
 
+        var clearStoredSecret = NormalizeMongoRequest(request, connection);
         var port = request.Port > 0 ? request.Port : DefaultPort(request.DatabaseType);
 
         if (connection == null)
@@ -88,10 +89,52 @@ public class DatabaseTableService : IDatabaseTableService
             // Only replace the secret when a new one is supplied; blank keeps the existing one.
             if (!string.IsNullOrEmpty(request.Secret))
                 connection.SecretEncrypted = _protector.Encrypt(request.Secret);
+            else if (clearStoredSecret)
+                connection.SecretEncrypted = null;
         }
 
         await _context.SaveChangesAsync(ct);
         return ToDto(connection);
+    }
+
+    /// <summary>
+    /// A MongoDB connection is a URI, saved encrypted in the secret slot (see <see cref="MongoSource"/>). This
+    /// validates it and fills the plain columns from it, minus the password, so the list can show the host.
+    /// Returns true when the stored secret must be dropped: switching a connection AWAY from MongoDB with the
+    /// password left blank would otherwise hand the old URI to SQL Server as a password.
+    /// </summary>
+    private static bool NormalizeMongoRequest(DatabaseConnectionRequest request, DatabaseConnection? existing)
+    {
+        var wasMongo = existing?.DatabaseType == DataSourceType.MongoDB;
+
+        if (request.DatabaseType != DataSourceType.MongoDB)
+            return wasMongo && string.IsNullOrEmpty(request.Secret);
+
+        request.FilePath = null;
+
+        if (!string.IsNullOrWhiteSpace(request.Secret))
+        {
+            var url = MongoSource.ParseUri(request.Secret);
+            var described = MongoSource.Describe(url);
+
+            request.Secret = request.Secret.Trim();
+            request.Host = described.Host;
+            request.Port = described.Port;
+            request.Username = described.Username;
+            request.UseSsl = described.UseTls;
+            if (string.IsNullOrWhiteSpace(request.DatabaseName)) request.DatabaseName = described.Database;
+            return false;
+        }
+
+        // Blank keeps the stored URI, as a blank password does — but only if there is a MongoDB URI to keep.
+        if (existing is null || !wasMongo || string.IsNullOrEmpty(existing.SecretEncrypted))
+            throw new ArgumentException("A MongoDB connection URI is required (mongodb://… or mongodb+srv://…).");
+
+        request.Host = existing.Host;
+        request.Port = existing.Port;
+        request.Username = existing.Username;
+        request.UseSsl = existing.UseSsl;
+        return false;
     }
 
     public async Task<bool> DeleteConnectionAsync(string entityId, string companyId, CancellationToken ct = default)
@@ -430,6 +473,10 @@ public class DatabaseTableService : IDatabaseTableService
         var sw = Stopwatch.StartNew();
         try
         {
+            if (connection.DatabaseType == DataSourceType.MongoDB)
+                throw new NotSupportedException(
+                    "MongoDB does not take SQL. Read it with a pipeline database step, using db.<collection>.find(…) or .aggregate([…]).");
+
             if (connection.DatabaseType == DataSourceType.ClickHouse)
                 await ExecuteClickHouseGridAsync(connection, sql, cap, result, ct);
             else
@@ -1142,6 +1189,8 @@ public class DatabaseTableService : IDatabaseTableService
         {
             if (c.DatabaseType == DataSourceType.ClickHouse)
                 await QueryClickHouseAsync(c, "SELECT 1", ct);
+            else if (c.DatabaseType == DataSourceType.MongoDB)
+                await MongoSource.PingAsync(c, ct);
             else
                 await ExecuteScalarAsync(CreateAdoConnection(c), "SELECT 1", ReadOnlySetupFor(c.DatabaseType), ct);
 
@@ -1243,6 +1292,10 @@ public class DatabaseTableService : IDatabaseTableService
         // is opened read-only where the engine supports it (readOnlySetup runs before the listing query).
         if (c.DatabaseType == DataSourceType.ClickHouse)
             return await QueryClickHouseTablesAsync(c, ct);
+
+        // Collections stand in for tables, the database for the schema.
+        if (c.DatabaseType == DataSourceType.MongoDB)
+            return await MongoSource.ListCollectionsAsync(c, ct);
 
         var sql = c.DatabaseType switch
         {

@@ -43,6 +43,8 @@ internal static class ExternalConnectionFactory
         DataSourceType.PostgreSQL => new NpgsqlConnection(BuildPostgresConnectionString(c, catalog)),
         DataSourceType.MySQL => new MySqlConnection(BuildMySqlConnectionString(c, catalog, forBulkLoad)),
         DataSourceType.DuckDB => new DuckDBConnection(BuildDuckDbConnectionString(c, readOnly)),
+        DataSourceType.MongoDB => throw new NotSupportedException(
+            "MongoDB is not a SQL database. It can only be read by a pipeline's database step."),
         _ => throw new NotSupportedException($"No ADO.NET driver for database type: {c.DatabaseType}.")
     };
 
@@ -90,6 +92,7 @@ internal static class ExternalConnectionFactory
         DataSourceType.PostgreSQL => 5432,
         DataSourceType.MySQL => 3306,
         DataSourceType.ClickHouse => 8123,
+        DataSourceType.MongoDB => MongoSource.DefaultPort,
         _ => 0
     };
 

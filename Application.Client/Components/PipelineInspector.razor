@@ -328,6 +328,21 @@
                             }
                             break;
 
+                        case PipelineFieldKinds.TablePicker when field.DependsOn == "connection":
+                            @* A database step: free text with suggestions. Discovery lists base tables only, so a
+                               closed list would make views (and anything it failed to list) unreachable. *@
+                            <input class="input input-mono" placeholder="table or collection name"
+                                   list="@($"tables-{Node!.Id}")"
+                                   value="@Str(field.Key)"
+                                   @oninput="e => SetString(field.Key, e.Value?.ToString())" />
+                            <datalist id="@($"tables-{Node!.Id}")">
+                                @foreach (var table in Tables)
+                                {
+                                    <option value="@table"></option>
+                                }
+                            </datalist>
+                            break;
+
                         case PipelineFieldKinds.TablePicker:
                             @* Depends on the dataset field, so it clears when that changes. *@
                             @if (string.IsNullOrWhiteSpace(Str(field.DependsOn ?? "dataset")))

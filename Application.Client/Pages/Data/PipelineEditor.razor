@@ -927,6 +927,12 @@ else
 
     private async Task LoadTablesFor(PipelineNodeDef node)
     {
+        if (node.Type == PipelineNodeTypes.SourceDatabase)
+        {
+            await LoadConnectionTablesFor(node);
+            return;
+        }
+
         var datasetField = node.Config?["dataset"]?.ToString();
         if (string.IsNullOrWhiteSpace(datasetField)) { _tables = new(); return; }
 
@@ -950,6 +956,34 @@ else
             _tables = new();
             _tablesLoadedFor = datasetId;
         }
+    }
+
+    /// <summary>
+    /// Table (or MongoDB collection) names for a database step's suggestions. Discovery is a live round trip
+    /// to the customer's server, so it runs once per connection, not on every selection. The cache key is
+    /// prefixed so it can never collide with a dataset id.
+    /// </summary>
+    private async Task LoadConnectionTablesFor(PipelineNodeDef node)
+    {
+        var connection = node.Config?["connection"]?.ToString();
+        if (string.IsNullOrWhiteSpace(connection)) { _tables = new(); return; }
+
+        var key = "connection:" + connection;
+        if (key == _tablesLoadedFor) return;
+        _tablesLoadedFor = key;
+
+        try
+        {
+            var tables = await _httpClient.GetFromJsonAsync<List<string>>(
+                $"api/pipelines/connection-tables?connection={Uri.EscapeDataString(connection!)}");
+            _tables = tables ?? new();
+        }
+        catch
+        {
+            _tables = new();
+        }
+
+        StateHasChanged();
     }
 
     private void MarkDirty() => Recompute(false);

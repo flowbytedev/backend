@@ -186,6 +186,23 @@ public class DatasetsController : ControllerBase
         return Ok(dataset);
     }
 
+    private const string MongoDatasetRefusal =
+        "A MongoDB connection cannot back a dataset: datasets are read with SQL. Read it with a pipeline database step and write the result into a dataset.";
+
+    /// <summary>
+    /// True when an External dataset would sit on a MongoDB connection. Every dataset read path (viewer, pivot,
+    /// public SQL API, RLS) builds SQL, so such a dataset would fail everywhere it is opened.
+    /// </summary>
+    private async Task<bool> IsMongoSourceAsync(Dataset dataset, string companyId, CancellationToken ct)
+    {
+        if (dataset.SourceType != Application.Shared.Enums.DatasetSourceType.External
+            || string.IsNullOrWhiteSpace(dataset.SourceEntityId))
+            return false;
+
+        var connection = await _databaseTableService.GetConnectionAsync(dataset.SourceEntityId!, companyId, ct);
+        return connection?.DatabaseType == Application.Shared.Enums.DataSourceType.MongoDB;
+    }
+
     // POST: api/Datasets
     [HttpPost]
     public async Task<ActionResult<Dataset>> CreateDataset(Dataset dataset)
@@ -197,6 +214,9 @@ public class DatasetsController : ControllerBase
         var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
         if (!User.HasCompanyRole(companyId, "EDIT_DATA"))
             return Forbid();
+
+        if (await IsMongoSourceAsync(dataset, companyId, HttpContext.RequestAborted))
+            return BadRequest(MongoDatasetRefusal);
 
         try
         {
@@ -231,6 +251,9 @@ public class DatasetsController : ControllerBase
         var companyId = Request.Headers["X-Company-ID"].FirstOrDefault() ?? "";
         if (!User.HasCompanyRole(companyId, "EDIT_DATA"))
             return Forbid();
+
+        if (await IsMongoSourceAsync(dataset, companyId, HttpContext.RequestAborted))
+            return BadRequest(MongoDatasetRefusal);
 
         try
         {

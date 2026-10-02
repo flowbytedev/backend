@@ -38,7 +38,12 @@ public interface IDatabaseAdminService
 
     /// <summary>What the given engine supports. DuckDB has no user accounts, so only the size check applies.</summary>
     static DatabaseAdminCapabilities CapabilitiesFor(DataSourceType type) =>
-        type == DataSourceType.DuckDB
+        type == DataSourceType.MongoDB
+            ? new DatabaseAdminCapabilities
+            {
+                UnsupportedReason = "MongoDB connections are read-only pipeline sources. Manage its users in MongoDB itself (Atlas or mongosh)."
+            }
+        : type == DataSourceType.DuckDB
             ? new DatabaseAdminCapabilities
             {
                 CanCheckSize = true,

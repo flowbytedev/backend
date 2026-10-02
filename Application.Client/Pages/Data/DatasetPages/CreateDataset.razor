@@ -330,7 +330,10 @@ else
         {
             var response = await _httpClient.GetAsync("api/datasets/source-databases");
             if (response.IsSuccessStatusCode)
-                sourceDatabases = await response.Content.ReadFromJsonAsync<List<DatabaseEntityOptionDto>>() ?? new();
+                // MongoDB cannot back a dataset: every dataset read path is SQL. It is a pipeline source only.
+                sourceDatabases = (await response.Content.ReadFromJsonAsync<List<DatabaseEntityOptionDto>>() ?? new())
+                    .Where(d => d.DatabaseType != Application.Shared.Enums.DataSourceType.MongoDB)
+                    .ToList();
         }
         catch { /* leave empty; the form shows a hint when none are available */ }
     }
